@@ -269,7 +269,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
-	err = bbdd_d_loop(dplane_sa);
+	err = bfddp_start(dplane_sa);
+	if (false)
+		err = bbdd_d_loop(dplane_sa);
 
 	closelog();
 
@@ -316,10 +318,5 @@ incomplete_command:
 	if (err)
 		return -1;
 
-	if (false)
-		return bbdd_d_do_start(&dplane_sa);
-
-	bfddp_start(&dplane_sa);
-	// NOTREACHED
-	return 0;
+	return bbdd_d_do_start(&dplane_sa);
 }
