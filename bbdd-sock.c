@@ -45,68 +45,55 @@ static uint16_t bbdd_sock_parse_port(const char *str)
 
 int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 {
-	char *sptr;
-	size_t slen;
-	char type[64];
+	const char *colon;
+	size_t type_len;
 	char addr[64];
 
-	/* Basic parsing: find ':' to figure out type part and address part. */
-	sptr = strchr(arg, ':');
-	if (sptr == NULL) {
+	colon = strchr(arg, ':');
+	if (colon == NULL) {
 		fprintf(stderr, "Invalid address format: %s\n", arg);
 		return -1;
 	}
 
-	/* Calculate type string size. */
-	slen = (size_t)(sptr - arg);
+	type_len = (size_t)(colon - arg);
 
-	/* Copy type string. */
-	sptr++;
-
-	/* Check if type is strangely long. */
-	if (slen >= sizeof(type)) {
-		fprintf(stderr, "Type `%s' is too long\n", type);
+	if (strlen(colon + 1) >= sizeof(addr)) {
+		fprintf(stderr, "Addr `%s' is too long\n", colon + 1);
 		return -1;
 	}
+	strcpy(addr, colon + 1); /// xxx test me
 
-	memcpy(type, arg, slen);
-	type[slen] = 0;
-
-	/* Copy address part. */
-	snprintf(addr, sizeof(addr), "%s", sptr);
-
-	/* Reset SA values. */
 	memset(bsa, 0, sizeof(*bsa));
-
-	/* Fill the address information. */
-	if (strcmp(type, "unix") == 0) {
+	if (strncmp(arg, "unix", type_len) == 0) {
 		struct sockaddr_un *sun = &bsa->sun;
 
 		bsa->len = sizeof(*sun);
 		sun->sun_family = AF_UNIX;
 		snprintf(sun->sun_path, sizeof(sun->sun_path), "%s", addr);
 
-	} else if (strcmp(type, "ipv4") == 0) {
+	} else if (strncmp(arg, "ipv4", type_len) == 0) {
 		struct sockaddr_in *sin = &bsa->sin;
+		char *port;
 
 		sin->sin_family = AF_INET;
 		bsa->len = sizeof(*sin);
 
 		/* Parse port if any. */
-		sptr = strchr(sptr, ':');
-		if (sptr == NULL) {
+		port = strchr(addr, ':');
+		if (port == NULL) {
 			sin->sin_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
 		} else {
-			*sptr = '\0';
-			sin->sin_port = htons(bbdd_sock_parse_port(sptr + 1));
+			*port++ = '\0';
+			sin->sin_port = htons(bbdd_sock_parse_port(port));
 		}
 
 		inet_pton(AF_INET, addr, &sin->sin_addr);
 		// xxx error check
 
-	} else if (strcmp(type, "ipv6") == 0) {
+	} else if (strncmp(arg, "ipv6", type_len) == 0) {
 		struct sockaddr_in6 *sin6 = &bsa->sin6;
-		char *saux;
+		char *saux, *sptr;
+		size_t slen;
 
 		sin6->sin6_family = AF_INET6;
 		bsa->len = sizeof(*sin6);
@@ -145,14 +132,13 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 		// xxx error check
 
 	} else {
-		fprintf(stderr, "invalid BFD data plane socket type: %s\n",
-			type);
+		fprintf(stderr, "invalid BFD data plane socket type in `%s'\n",
+			arg);
 		return -1;
 	}
 
 	return 0;
 }
-
 
 static int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
 			      struct bbdd_sockaddr *bsa)
