@@ -19,37 +19,6 @@
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
-static bool should_quit;
-
-static void bbdd_d_quit(void)
-{
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "Quitting\n");
-	should_quit = true;
-}
-
-static void bbdd_d_handle_signal(int)
-{
-	bbdd_d_quit();
-}
-
-static int bbdd_d_setup_signals(void)
-{
-	if (signal(SIGINT, bbdd_d_handle_signal) == SIG_ERR) {
-		fprintf(stderr, "Failed to set up SIGINT handling: %m\n");
-		return -1;
-	}
-	if (signal(SIGQUIT, bbdd_d_handle_signal) == SIG_ERR) {
-		fprintf(stderr, "Failed to set up SIGQUIT handling: %m\n");
-		return -1;
-	}
-	if (signal(SIGTERM, bbdd_d_handle_signal) == SIG_ERR) {
-		fprintf(stderr, "Failed to set up SIGTERM handling: %m\n");
-		return -1;
-	}
-	return 0;
-}
-
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
 	if (obj != NULL) {
@@ -118,7 +87,7 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 		return;
 	}
 
-	bbdd_d_quit();
+	bfdd_request_terminate();
 
 	obj = bbdd_jrpc_new_object(id);
 	if (obj == NULL)
@@ -192,69 +161,6 @@ free_req:
 	return 0;
 }
 
-static int bbdd_d_loop_sock(struct bbdd_sock *ctl)
-{
-	int err = 0;
-	enum {
-		pollfd_ctl,
-	};
-	struct pollfd pollfds[] = {
-		[pollfd_ctl] = {
-			.fd = ctl->fd,
-			.events = POLLIN,
-		},
-	};
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "Listening on %s\n", ctl->sa.sun.sun_path);
-
-	while (!should_quit) {
-		int nfds;
-
-		nfds = poll(pollfds, ARRAY_SIZE(pollfds), -1);
-		if (nfds < 0 && errno != EINTR) {
-			fprintf(stderr, "Failed to poll: %m\n");
-			err = nfds;
-			goto out;
-		}
-		if (nfds == 0)
-			continue;
-		for (size_t i = 0; i < ARRAY_SIZE(pollfds); i++) {
-			struct pollfd *pollfd = &pollfds[i];
-
-			if (pollfd->revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				fprintf(stderr,
-					"Problem on pollfd %zd: %m\n", i);
-				err = -1;
-				goto out;
-			}
-			if (pollfd->revents & POLLIN) {
-				switch (i) {
-				case pollfd_ctl:
-					err = bbdd_d_ctl_activity(ctl);
-					break;
-				}
-				if (err != 0)
-					goto out;
-			}
-		}
-	}
-
-out:
-	return err;
-}
-
-static int bbdd_d_loop(struct bbdd_sockaddr */*dplane_sa*/)
-{
-	int err;
-
-	err = bbdd_d_setup_signals();
-	if (err < 0)
-		return -1;
-
-	return bbdd_d_loop_sock(NULL);
-}
-
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
 	struct bbdd_sock ctl;
@@ -272,8 +178,6 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 closelog:
 	closelog();
 	return err;
-
-	err = bbdd_d_loop(dplane_sa); // xxx drop me
 }
 
 static void bbdd_d_start_help(void)
