@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include "bbdd-d.h"
+
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -10,7 +12,6 @@
 #include <arpa/inet.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
-#include <systemd/sd-daemon.h>
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
@@ -151,7 +152,7 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static int bbdd_d_ctl_activity(struct bbdd_sock *ctl)
+int bbdd_d_ctl_activity(struct bbdd_sock *ctl)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -245,37 +246,34 @@ out:
 
 static int bbdd_d_loop(struct bbdd_sockaddr */*dplane_sa*/)
 {
-	struct bbdd_sock ctl;
 	int err;
 
 	err = bbdd_d_setup_signals();
 	if (err < 0)
 		return -1;
 
-	err = bbdd_sock_open_d(&ctl, bbdd_env.sockdir);
-	if (err)
-		return err;
-
-	sd_notify(0, "READY=1");
-
-	err = bbdd_d_loop_sock(&ctl);
-	bbdd_sock_close_d(&ctl);
-	return err;
+	return bbdd_d_loop_sock(NULL);
 }
 
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
+	struct bbdd_sock ctl;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
-	err = bfddp_start(dplane_sa);
-	if (false)
-		err = bbdd_d_loop(dplane_sa);
+	err = bbdd_sock_open_d(&ctl, bbdd_env.sockdir);
+	if (err)
+		goto closelog;
 
+	err = bfddp_start(dplane_sa, &ctl);
+
+	bbdd_sock_close_d(&ctl);
+closelog:
 	closelog();
-
 	return err;
+
+	err = bbdd_d_loop(dplane_sa); // xxx drop me
 }
 
 static void bbdd_d_start_help(void)

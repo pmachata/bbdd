@@ -22,9 +22,6 @@ struct bbdd_sock {
 
 int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa);
 
-int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
-		       struct sockaddr_un *sa);
-
 int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir);
 void bbdd_sock_close_d(struct bbdd_sock *ctl);
 

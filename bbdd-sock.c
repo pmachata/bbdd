@@ -43,7 +43,7 @@ static uint16_t bbdd_sock_parse_port(const char *str)
 	return (uint16_t)rv;
 }
 
-int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa)
+int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 {
 	char *sptr;
 	size_t slen;
@@ -76,21 +76,21 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa)
 	snprintf(addr, sizeof(addr), "%s", sptr);
 
 	/* Reset SA values. */
-	memset(sa, 0, sizeof(*sa));
+	memset(bsa, 0, sizeof(*bsa));
 
 	/* Fill the address information. */
 	if (strcmp(type, "unix") == 0) {
-		struct sockaddr_un *sun = &sa->sun;
+		struct sockaddr_un *sun = &bsa->sun;
 
-		sa->len = sizeof(*sun);
+		bsa->len = sizeof(*sun);
 		sun->sun_family = AF_UNIX;
 		snprintf(sun->sun_path, sizeof(sun->sun_path), "%s", addr);
 
 	} else if (strcmp(type, "ipv4") == 0) {
-		struct sockaddr_in *sin = &sa->sin;
+		struct sockaddr_in *sin = &bsa->sin;
 
 		sin->sin_family = AF_INET;
-		sa->len = sizeof(*sin);
+		bsa->len = sizeof(*sin);
 
 		/* Parse port if any. */
 		sptr = strchr(sptr, ':');
@@ -105,11 +105,11 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa)
 		// xxx error check
 
 	} else if (strcmp(type, "ipv6") == 0) {
-		struct sockaddr_in6 *sin6 = &sa->sin6;
+		struct sockaddr_in6 *sin6 = &bsa->sin6;
 		char *saux;
 
 		sin6->sin6_family = AF_INET6;
-		sa->len = sizeof(*sin6);
+		bsa->len = sizeof(*sin6);
 
 		/* Check for IPv6 enclosures '[]' */
 		sptr = &addr[0];
@@ -154,8 +154,8 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa)
 }
 
 
-int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
-		       struct sockaddr_un *sa)
+static int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
+			      struct bbdd_sockaddr *bsa)
 {
 	const char *maybe_slash = "/";
 	int len;
@@ -163,23 +163,26 @@ int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
 	if (sockdir[strlen(sockdir) - 1] == '/' || sockname[0] == '\0')
 		maybe_slash++;
 
-	sa->sun_family = AF_LOCAL;
-	len = snprintf(sa->sun_path, sizeof(sa->sun_path), "%s%s%s",
-		       sockdir, maybe_slash, sockname);
+	bsa->sun.sun_family = AF_LOCAL;
+	bsa->len = sizeof bsa->sun;
+	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
+		       "%s%s%s", sockdir, maybe_slash, sockname);
 	if (len < 0)
 		return len;
-	if ((unsigned) len >= sizeof(sa->sun_path))
+	if ((unsigned) len >= sizeof(bsa->sun.sun_path))
 		return -ENOBUFS;
 
 	return 0;
 }
 
-static int bbdd_ctl_sockaddr(const char *sockdir, struct sockaddr_un *ctl_sa)
+static int bbdd_ctl_sockaddr(const char *sockdir,
+			     struct bbdd_sockaddr *ctl_bsa)
 {
-	return bbdd_sock_sockaddr(sockdir, "bbdd.ctl", ctl_sa);
+	return bbdd_sock_sockaddr(sockdir, "bbdd.ctl", ctl_bsa);
 }
 
-static int bbdd_cli_sockaddr(const char *sockdir, struct sockaddr_un *cli_sa)
+static int bbdd_cli_sockaddr(const char *sockdir,
+			     struct bbdd_sockaddr *cli_bsa)
 {
 	char *sockname;
 	int rc;
@@ -188,30 +191,27 @@ static int bbdd_cli_sockaddr(const char *sockdir, struct sockaddr_un *cli_sa)
 	if (rc < 0)
 		return rc;
 
-	rc = bbdd_sock_sockaddr(sockdir, sockname, cli_sa);
+	rc = bbdd_sock_sockaddr(sockdir, sockname, cli_bsa);
 	free(sockname);
 	return rc;
 }
 
-static int bbdd_sock_open_sa_nobind(struct sockaddr_un sa, int type,
-				    struct bbdd_sock *sock)
+static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
+				    int type, struct bbdd_sock *sock)
 {
 	int fd;
 
 	*sock = (struct bbdd_sock) { .fd = -1 };
 
-	fd = socket(AF_LOCAL, type, 0);
+	fd = socket(bsa->sa.sa_family, type, 0);
 	if (fd < 0) {
-		fprintf(stderr, "Failed to create socket: %m\n");
+		fprintf(stderr, "Failed to open socket: %m\n");
 		return -1;
 	}
 
 	*sock = (struct bbdd_sock) {
 		.fd = fd,
-		.sa = {
-			.sun = sa,
-			.len = sizeof(sa),
-		},
+		.sa = *bsa,
 	};
 
 	return 0;
@@ -223,21 +223,24 @@ static void bbdd_sock_close(struct bbdd_sock *sock)
 	unlink(sock->sa.sun.sun_path);
 }
 
-static int bbdd_sock_open_sa(struct sockaddr_un sa, int type,
+static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 			     struct bbdd_sock *sock)
 {
 	int rc;
 
-	unlink(sa.sun_path);
+	if (bsa->sa.sa_family != AF_LOCAL)
+		return -1;
 
-	rc = bbdd_sock_open_sa_nobind(sa, type, sock);
-	if (rc < 0)
+	unlink(bsa->sun.sun_path);
+
+	rc = bbdd_sock_open_sa_nobind(bsa, type, sock);
+	if (rc != 0)
 		return rc;
 
-	rc = bind(sock->fd, (struct sockaddr *) &sa, sizeof(sa));
+	rc = bind(sock->fd, &bsa->sa, bsa->len);
 	if (rc < 0) {
 		fprintf(stderr, "Failed to bind socket `%s': %m\n",
-			sa.sun_path);
+			bsa->sun.sun_path);
 		goto close_sock;
 	}
 
@@ -250,14 +253,14 @@ close_sock:
 
 int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir)
 {
-	struct sockaddr_un sa;
+	struct bbdd_sockaddr bsa;
 	int rc;
 
-	rc = bbdd_ctl_sockaddr(sockdir, &sa);
+	rc = bbdd_ctl_sockaddr(sockdir, &bsa);
 	if (rc != 0)
 		return rc;
 
-	return bbdd_sock_open_sa(sa, SOCK_DGRAM, ctl);
+	return bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl);
 }
 
 void bbdd_sock_close_d(struct bbdd_sock *ctl)
@@ -269,30 +272,27 @@ int bbdd_sock_open_c(struct bbdd_sock *cli,
 		     struct bbdd_sock *peer,
 		     const char *sockdir)
 {
-	struct sockaddr_un ctl_sa;
-	struct sockaddr_un cli_sa;
+	struct bbdd_sockaddr ctl_bsa;
+	struct bbdd_sockaddr cli_bsa;
 	int rc;
 
-	rc = bbdd_ctl_sockaddr(sockdir, &ctl_sa);
+	rc = bbdd_ctl_sockaddr(sockdir, &ctl_bsa);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_cli_sockaddr(sockdir, &cli_sa);
+	rc = bbdd_cli_sockaddr(sockdir, &cli_bsa);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_sock_open_sa(cli_sa, SOCK_DGRAM, cli);
+	rc = bbdd_sock_open_sa(&cli_bsa, SOCK_DGRAM, cli);
 	if (rc != 0)
 		return rc;
 
 	*peer = (struct bbdd_sock) {
 		.fd = cli->fd,
-		.sa = {
-			.sun = ctl_sa,
-			.len = sizeof(peer->sa),
-		},
+		.sa = ctl_bsa,
 	};
-	rc = connect(cli->fd, (struct sockaddr *) &peer->sa, peer->sa.len);
+	rc = connect(peer->fd, &peer->sa.sa, peer->sa.len);
 	if (rc != 0) {
 		fprintf(stderr, "Failed to connect to socket `%s': %m\n",
 			peer->sa.sun.sun_path);
@@ -313,7 +313,7 @@ void bbdd_sock_close_c(struct bbdd_sock *cli)
 }
 
 int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
-		     char **bufp)
+		   char **bufp)
 {
 	ssize_t msgsz;
 	char *buf;
