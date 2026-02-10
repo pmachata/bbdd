@@ -3,6 +3,7 @@
 
 #include "bbdd-sock.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@
 
 #include "bfddp_packet.h"
 
-static uint16_t bbdd_sock_parse_port(const char *str)
+static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
 {
 	char *nulbyte;
 	long rv;
@@ -24,30 +25,121 @@ static uint16_t bbdd_sock_parse_port(const char *str)
 	rv = strtol(str, &nulbyte, 10);
 	/* No conversion performed. */
 	if (rv == 0 && errno == EINVAL) {
-		fprintf(stderr, "invalid BFD HAL address port: %s\n", str);
-		exit(1);
+	invalid:
+		fprintf(stderr, "Invalid port number `%s'. Expected integral [0,63353].\n",
+			str);
+		return -1;
 	}
 	/* Invalid number range. */
-	if ((rv <= 0 || rv >= 65535) || errno == ERANGE) {
-		fprintf(stderr, "invalid BFD HAL address port range: %s\n",
-			str);
-		exit(1);
-	}
+	if (rv <= 0 || rv >= 65535 || errno == ERANGE)
+		goto invalid;
+
 	/* There was garbage at the end of the string. */
 	if (*nulbyte != 0) {
-		fprintf(stderr, "invalid BFD HAL address port string: %s\n",
-			str);
-		exit(1);
+		fprintf(stderr, "Invalid port number: value `%ld' followed by garbage.\n",
+			rv);
+		return -1;
 	}
 
-	return (uint16_t)rv;
+	*ret_port = (uint16_t)rv;
+	return 0;
+}
+
+static int bbdd_sock_parse_addr_unix(const char *addr,
+				     struct bbdd_sockaddr *bsa)
+{
+	if (strlen(addr) >= sizeof(bsa->sun.sun_path))
+		return -ENOBUFS;
+
+	bsa->len = sizeof(bsa->sun);
+	bsa->sun.sun_family = AF_UNIX;
+	snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path), "%s", addr);
+	return 0;
+}
+
+static int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst)
+{
+	int rc;
+
+	rc = inet_pton(af, addr, dst);
+	if (rc == 1)
+		return 0;
+
+	assert(rc != -1); /* AF ought to be valid! */
+	fprintf(stderr, "Invalid address: `%s'.\n", addr);
+	return -1;
+}
+
+static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
+				     struct bbdd_sockaddr *bsa)
+{
+	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
+	char *addr;
+	char *port;
+	int err;
+
+	addr = strdupa(addr_in);
+
+	port = strchr(addr, ':');
+	if (port != NULL) {
+		*port++ = '\0';
+		err = bbdd_sock_parse_port(port, &port_num);
+		if (err != 0)
+			return err;
+	}
+
+	bsa->len = sizeof(bsa->sin);
+	bsa->sin.sin_family = AF_INET;
+	bsa->sin.sin_port = htons(port_num);
+	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr);
+}
+
+static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
+				     struct bbdd_sockaddr *bsa)
+{
+	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
+	char *addr;
+	char *saux;
+	int err;
+
+	/* Check & skip '['. */
+	if (*addr_in++ != '[') {
+	no_brackets:
+		fprintf(stderr, "IPv6 address needs to be []-enclosed.\n");
+		return -1;
+	}
+
+	addr = strdupa(addr_in);
+
+	/* Check ']' and ... */
+	saux = strrchr(addr, ']');
+	if (saux == NULL)
+		goto no_brackets;
+	*saux++ = '\0'; /* ... terminate the address string. */
+
+	/* Check & skip ':', parse port if any. */
+	if (*saux == ':') {
+		saux++;
+		err = bbdd_sock_parse_port(saux, &port_num);
+		if (err != 0)
+			return err;
+	} else if (*saux != '\0') {
+		fprintf(stderr, "Invalid address `%s': Garbage after closing bracket.\n",
+			addr_in);
+		return -1;
+	}
+
+	bsa->len = sizeof(bsa->sin6);
+	bsa->sin6.sin6_family = AF_INET6;
+	bsa->sin6.sin6_port = htons(port_num);
+	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr);
 }
 
 int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 {
 	const char *colon;
+	const char *addr;
 	size_t type_len;
-	char addr[64];
 
 	colon = strchr(arg, ':');
 	if (colon == NULL) {
@@ -56,88 +148,21 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 	}
 
 	type_len = (size_t)(colon - arg);
-
-	if (strlen(colon + 1) >= sizeof(addr)) {
-		fprintf(stderr, "Addr `%s' is too long\n", colon + 1);
-		return -1;
-	}
-	strcpy(addr, colon + 1); /// xxx test me
+	addr = colon + 1;
 
 	memset(bsa, 0, sizeof(*bsa));
-	if (strncmp(arg, "unix", type_len) == 0) {
-		struct sockaddr_un *sun = &bsa->sun;
 
-		bsa->len = sizeof(*sun);
-		sun->sun_family = AF_UNIX;
-		snprintf(sun->sun_path, sizeof(sun->sun_path), "%s", addr);
+	if (strncmp(arg, "unix", type_len) == 0)
+		return bbdd_sock_parse_addr_unix(addr, bsa);
 
-	} else if (strncmp(arg, "ipv4", type_len) == 0) {
-		struct sockaddr_in *sin = &bsa->sin;
-		char *port;
+	else if (strncmp(arg, "ipv4", type_len) == 0)
+		return bbdd_sock_parse_addr_ipv4(addr, bsa);
 
-		sin->sin_family = AF_INET;
-		bsa->len = sizeof(*sin);
+	else if (strncmp(arg, "ipv6", type_len) == 0)
+		return bbdd_sock_parse_addr_ipv6(addr, bsa);
 
-		/* Parse port if any. */
-		port = strchr(addr, ':');
-		if (port == NULL) {
-			sin->sin_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
-		} else {
-			*port++ = '\0';
-			sin->sin_port = htons(bbdd_sock_parse_port(port));
-		}
-
-		inet_pton(AF_INET, addr, &sin->sin_addr);
-		// xxx error check
-
-	} else if (strncmp(arg, "ipv6", type_len) == 0) {
-		struct sockaddr_in6 *sin6 = &bsa->sin6;
-		char *saux, *sptr;
-		size_t slen;
-
-		sin6->sin6_family = AF_INET6;
-		bsa->len = sizeof(*sin6);
-
-		/* Check for IPv6 enclosures '[]' */
-		sptr = &addr[0];
-		if (*sptr != '[') {
-			fprintf(stderr, "Invalid IPv6 address: `%s' (try [::1])\n",
-				addr);
-			return -1;
-		}
-
-		saux = strrchr(addr, ']');
-		if (saux == NULL) {
-			fprintf(stderr, "Invalid IPv6 address: `%s' (try [::1])",
-				addr);
-			return -1;
-		}
-
-		/* Consume the '[]:' part. */
-		slen = (size_t)(saux - sptr);
-		memmove(addr, addr + 1, slen);
-		addr[slen - 1] = 0;
-
-		/* Parse port if any. */
-		saux++;
-		sptr = strrchr(saux, ':');
-		if (sptr == NULL) {
-			sin6->sin6_port = htons(BFD_DATA_PLANE_DEFAULT_PORT);
-		} else {
-			*sptr = '\0';
-			sin6->sin6_port = htons(bbdd_sock_parse_port(sptr + 1));
-		}
-
-		inet_pton(AF_INET6, addr, &sin6->sin6_addr);
-		// xxx error check
-
-	} else {
-		fprintf(stderr, "invalid BFD data plane socket type in `%s'\n",
-			arg);
-		return -1;
-	}
-
-	return 0;
+	fprintf(stderr, "invalid BFD data plane socket type in `%s'\n", arg);
+	return -1;
 }
 
 static int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
