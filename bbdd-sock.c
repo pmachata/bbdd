@@ -45,15 +45,25 @@ static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
 	return 0;
 }
 
-static int bbdd_sock_parse_addr_unix(const char *addr,
+static int bbdd_sock_parse_addr_unix(const char *sockdir,
+				     const char *addr,
 				     struct bbdd_sockaddr *bsa)
 {
-	if (strlen(addr) >= sizeof(bsa->sun.sun_path))
-		return -ENOBUFS;
+	const char *maybe_slash = "/";
+	int len;
+
+	if (sockdir[0] == '0' || sockdir[strlen(sockdir) - 1] == '/')
+		maybe_slash++;
 
 	bsa->len = sizeof(bsa->sun);
 	bsa->sun.sun_family = AF_UNIX;
-	snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path), "%s", addr);
+	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
+		       "%s%s%s", sockdir, maybe_slash, addr);
+	if (len < 0)
+		return len;
+	if ((unsigned) len >= sizeof(bsa->sun.sun_path))
+		return -ENOBUFS;
+
 	return 0;
 }
 
@@ -153,7 +163,7 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 	memset(bsa, 0, sizeof(*bsa));
 
 	if (strncmp(arg, "unix", type_len) == 0)
-		return bbdd_sock_parse_addr_unix(addr, bsa);
+		return bbdd_sock_parse_addr_unix("", addr, bsa);
 
 	else if (strncmp(arg, "ipv4", type_len) == 0)
 		return bbdd_sock_parse_addr_ipv4(addr, bsa);
@@ -165,31 +175,10 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 	return -1;
 }
 
-static int bbdd_sock_sockaddr(const char *sockdir, const char *sockname,
-			      struct bbdd_sockaddr *bsa)
-{
-	const char *maybe_slash = "/";
-	int len;
-
-	if (sockdir[strlen(sockdir) - 1] == '/' || sockname[0] == '\0')
-		maybe_slash++;
-
-	bsa->sun.sun_family = AF_LOCAL;
-	bsa->len = sizeof bsa->sun;
-	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
-		       "%s%s%s", sockdir, maybe_slash, sockname);
-	if (len < 0)
-		return len;
-	if ((unsigned) len >= sizeof(bsa->sun.sun_path))
-		return -ENOBUFS;
-
-	return 0;
-}
-
 static int bbdd_ctl_sockaddr(const char *sockdir,
 			     struct bbdd_sockaddr *ctl_bsa)
 {
-	return bbdd_sock_sockaddr(sockdir, "bbdd.ctl", ctl_bsa);
+	return bbdd_sock_parse_addr_unix(sockdir, "bbdd.ctl", ctl_bsa);
 }
 
 static int bbdd_cli_sockaddr(const char *sockdir,
@@ -202,7 +191,7 @@ static int bbdd_cli_sockaddr(const char *sockdir,
 	if (rc < 0)
 		return rc;
 
-	rc = bbdd_sock_sockaddr(sockdir, sockname, cli_bsa);
+	rc = bbdd_sock_parse_addr_unix(sockdir, sockname, cli_bsa);
 	free(sockname);
 	return rc;
 }
