@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
-#include "bbdd-d.h"
-
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -121,7 +119,7 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-int bbdd_d_ctl_activity(struct bbdd_sock *ctl)
+static void bbdd_d_ctl_activity(struct bbdd_sock *ctl)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -134,7 +132,7 @@ int bbdd_d_ctl_activity(struct bbdd_sock *ctl)
 
 	err = bbdd_sock_recv(ctl, &peer, &request);
 	if (err < 0)
-		return err;
+		return;
 
 	request_obj = json_tokener_parse(request);
 	if (request_obj == NULL) {
@@ -158,23 +156,47 @@ put_req_obj:
 	json_object_put(request_obj);
 free_req:
 	free(request);
-	return 0;
+}
+
+static void bbdd_d_ctl_recv(struct events_ctx *ec,
+			    __attribute__((unused)) int sock,
+			    short revents, void *arg)
+{
+	struct bbdd_sock *ctl = arg;
+
+	if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		bfddp_errx(1, "poll returned bad value");
+
+	bbdd_d_ctl_activity(ctl);
+
+	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
 
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
+	struct events_ctx *ec;
 	struct bbdd_sock ctl;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
+	ec = events_ctx_new(64);
+	if (ec == NULL) {
+		fprintf(stderr, "Failed to create event context: %m\n");
+		goto closelog;
+	}
+
 	err = bbdd_sock_open_d(&ctl, bbdd_env.sockdir);
 	if (err)
-		goto closelog;
+		goto ctx_free;
 
-	err = bfddp_start(dplane_sa, &ctl);
+	events_ctx_add_fd(ec, ctl.fd, POLLIN, bbdd_d_ctl_recv, &ctl);
+
+	err = bfddp_start(ec, dplane_sa);
 
 	bbdd_sock_close_d(&ctl);
+ctx_free:
+	events_ctx_free(&ec);
 closelog:
 	closelog();
 	return err;
