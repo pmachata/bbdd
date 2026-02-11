@@ -108,13 +108,21 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 				 struct json_object *params_obj,
 				 struct json_object *id)
 {
-	if (strcmp(method, "stop") == 0) {
-		bbdd_d_handle_stop(peer, params_obj, id);
-		return;
-	} else if (strcmp(method, "ping") == 0) {
-		bbdd_d_handle_ping(peer, params_obj, id);
-		return;
-	}
+	struct bbdd_d_method_handler {
+		const char *method;
+		void (*handler)(struct bbdd_sock *peer,
+				struct json_object *params_obj,
+				struct json_object *id);
+	};
+	static struct bbdd_d_method_handler handlers[] = {
+		{"stop", bbdd_d_handle_stop},
+		{"ping", bbdd_d_handle_ping},
+	};
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(handlers); i++)
+		if (strcmp(method, handlers[i].method) == 0)
+			return handlers[i].handler(peer, params_obj, id);
 
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
