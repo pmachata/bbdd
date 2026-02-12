@@ -70,22 +70,9 @@ put_obj:
 	bbdd_d_respond_memerr(peer, id);
 }
 
-static void bbdd_d_handle_stop(struct bbdd_sock *peer,
-			       struct json_object *params_obj,
-			       struct json_object *id)
+static void bbdd_d_respond_empty(struct bbdd_sock *peer, struct json_object *id)
 {
 	struct json_object *obj;
-	char *error;
-	int rc;
-
-	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
-
-	bfdd_request_terminate();
 
 	obj = bbdd_jrpc_new_object(id);
 	if (obj == NULL)
@@ -101,6 +88,24 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 put_obj:
 	json_object_put(obj);
 	bbdd_d_respond_memerr(peer, id);
+}
+
+static void bbdd_d_handle_stop(struct bbdd_sock *peer,
+			       struct json_object *params_obj,
+			       struct json_object *id)
+{
+	char *error;
+	int rc;
+
+	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return;
+	}
+
+	bfdd_request_terminate();
+	bbdd_d_respond_empty(peer, id);
 }
 
 static void bbdd_d_handle_method(struct bbdd_sock *peer,
