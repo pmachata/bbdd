@@ -45,7 +45,9 @@ static void bbdd_d_respond_memerr(struct bbdd_sock *peer,
 	bbdd_d_respond_interr(peer, id, "Memory allocation issue");
 }
 
-static void bbdd_d_handle_ping(struct bbdd_sock *peer,
+static void bbdd_d_handle_ping(__attribute__((unused)) struct events_ctx *ec,
+			       __attribute__((unused)) struct bfddp_ctx *bctx,
+			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
 			       struct json_object *id)
 {
@@ -90,7 +92,9 @@ put_obj:
 	bbdd_d_respond_memerr(peer, id);
 }
 
-static void bbdd_d_handle_stop(struct bbdd_sock *peer,
+static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
+			       __attribute__((unused)) struct bfddp_ctx *bctx,
+			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
 			       struct json_object *id)
 {
@@ -109,30 +113,39 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 }
 
 static void bbdd_d_handle_method(struct bbdd_sock *peer,
+static void bbdd_d_handle_method(struct events_ctx *ec,
+				 struct bfddp_ctx *bctx,
+				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
 				 struct json_object *id)
 {
 	struct bbdd_d_method_handler {
 		const char *method;
-		void (*handler)(struct bbdd_sock *peer,
+		void (*handler)(struct events_ctx *ec,
+				struct bfddp_ctx *bctx,
+				struct bbdd_sock *peer,
 				struct json_object *params_obj,
 				struct json_object *id);
 	};
 	static struct bbdd_d_method_handler handlers[] = {
 		{"stop", bbdd_d_handle_stop},
 		{"ping", bbdd_d_handle_ping},
+		{"session-add", bbdd_d_handle_session_add},
 	};
 	size_t i;
 
 	for (i = 0; i < ARRAY_SIZE(handlers); i++)
 		if (strcmp(method, handlers[i].method) == 0)
-			return handlers[i].handler(peer, params_obj, id);
+			return handlers[i].handler(ec, bctx, peer,
+						   params_obj, id);
 
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static void bbdd_d_ctl_activity(struct bbdd_sock *ctl)
+static void bbdd_d_ctl_activity(struct events_ctx *ec,
+				struct bfddp_ctx *bctx,
+				struct bbdd_sock *ctl)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -163,7 +176,7 @@ static void bbdd_d_ctl_activity(struct bbdd_sock *ctl)
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(&peer, method, params, id);
+	bbdd_d_handle_method(ec, bctx, &peer, method, params, id);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -171,45 +184,60 @@ free_req:
 	free(request);
 }
 
+struct bbdd_context {
+	struct bfddp_ctx *bctx;
+	struct bbdd_sock ctl;
+};
+
 static void bbdd_d_ctl_recv(struct events_ctx *ec,
 			    __attribute__((unused)) int sock,
 			    short revents, void *arg)
 {
-	struct bbdd_sock *ctl = arg;
+	struct bbdd_context *bbdd = arg;
+	struct bfddp_ctx *bctx = bbdd->bctx;
+	struct bbdd_sock *ctl = &bbdd->ctl;
 
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(ctl);
+	bbdd_d_ctl_activity(ec, bctx, ctl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
 
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
+	struct bbdd_context bbdd;
 	struct events_ctx *ec;
-	struct bbdd_sock ctl;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
-	ec = events_ctx_new(64);
-	if (ec == NULL) {
-		fprintf(stderr, "Failed to create event context: %m\n");
+	bbdd.bctx = bfddp_new(0, 0);
+	if (bbdd.bctx == NULL) {
+		fprintf(stderr, "Failed to create BFDdp context: %m\n");
 		goto closelog;
 	}
 
-	err = bbdd_sock_open_d(&ctl, bbdd_env.sockdir);
+	ec = events_ctx_new(64);
+	if (ec == NULL) {
+		fprintf(stderr, "Failed to create event context: %m\n");
+		goto bfddp_free;
+	}
+
+	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
 	if (err)
 		goto ctx_free;
 
-	events_ctx_add_fd(ec, ctl.fd, POLLIN, bbdd_d_ctl_recv, &ctl);
+	events_ctx_add_fd(ec, bbdd.ctl.fd, POLLIN, bbdd_d_ctl_recv, &bbdd);
 
-	err = bfddp_start(ec, dplane_sa);
+	err = bfddp_start(bbdd.bctx, ec, dplane_sa);
 
-	bbdd_sock_close_d(&ctl);
+	bbdd_sock_close_d(&bbdd.ctl);
 ctx_free:
 	events_ctx_free(&ec);
+bfddp_free:
+	bfddp_free(bbdd.bctx);
 closelog:
 	closelog();
 	return err;
