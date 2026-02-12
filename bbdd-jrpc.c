@@ -4,6 +4,7 @@
 #include "bbdd-jrpc.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -433,10 +434,61 @@ int bbdd_jrpc_dissect_error(struct json_object *obj,
 	return 0;
 }
 
-int bbdd_jrpc_dissect_params_empty(struct json_object *obj,
-				   char **error)
+int bbdd_jrpc_dissect_params_empty(struct json_object *obj, char **error)
 {
 	if (obj == NULL)
 		return 0;
 	return bbdd_jrpc_dissect(obj, NULL, NULL, NULL, 0, error);
+}
+
+static int bbdd_jrpc_get_uint(struct json_object *obj, uint32_t *ret,
+			      uint32_t max, char **error)
+{
+	int64_t v;
+
+	errno = 0;
+	v = json_object_get_int64(obj);
+	if (errno) {
+		bbdd_jrpc_fmterr(error, "Value expected to be an integer: %m");
+		return -1;
+	}
+
+	if (v < 0 || v > (int64_t) max) {
+		bbdd_jrpc_fmterr(error, "Expected uint with maximum value `%ud', got %" PRIi64,
+				 max, v);
+		return -1;
+	}
+
+	*ret = (uint32_t) v;
+	return 0;
+}
+
+int bbdd_jrpc_get_uint32(struct json_object *obj, uint32_t *ret, char **error)
+{
+	return bbdd_jrpc_get_uint(obj, ret, UINT32_MAX, error);
+}
+
+int bbdd_jrpc_get_uint32_non0(struct json_object *obj, uint32_t *ret,
+			      char **error)
+{
+	if (bbdd_jrpc_get_uint32(obj, ret, error) < 0)
+		return -1;
+	if (*ret == 0) {
+		bbdd_jrpc_fmterr(error, "Expected non-zero uint32, got 0");
+		return -1;
+	}
+	return 0;
+}
+
+int bbdd_jrpc_get_uint8(struct json_object *obj, uint8_t *ret, char **error)
+{
+	uint32_t value;
+	int rc;
+
+	rc = bbdd_jrpc_get_uint(obj, &value, UINT8_MAX, error);
+	if (rc != 0)
+		return rc;
+
+	*ret = (uint8_t) value;
+	return 0;
 }
