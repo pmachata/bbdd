@@ -20,6 +20,8 @@ struct bbdd_sock {
 	struct bbdd_sockaddr sa;
 };
 
+int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
+		   char **error);
 int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *sa);
 
 int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir);

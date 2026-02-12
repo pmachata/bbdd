@@ -67,7 +67,8 @@ static int bbdd_sock_parse_addr_unix(const char *sockdir,
 	return 0;
 }
 
-static int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst)
+int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
+		   char **error)
 {
 	int rc;
 
@@ -75,9 +76,31 @@ static int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst)
 	if (rc == 1)
 		return 0;
 
-	assert(rc != -1); /* AF ought to be valid! */
-	fprintf(stderr, "Invalid address: `%s'.\n", addr);
+	if (rc == -1) {
+		if (asprintf(error, "Invalid address family `%d'", af) < 0)
+			*error = NULL;
+		return -1;
+	}
+
+	if (asprintf(error, "Invalid address: `%s'", addr) < 0)
+		*error = NULL;
 	return -1;
+}
+
+static int __bbdd_inet_pton(int af, const char *restrict addr,
+			    void *restrict dst)
+{
+	char *error;
+	int rc;
+
+	rc = bbdd_inet_pton(af, addr, dst, &error);
+	if (rc != 0) {
+		fprintf(stderr, "%s.\n",
+			error ?: "Couldn't parse address");
+		free(error);
+	}
+
+	return rc;
 }
 
 static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
@@ -86,22 +109,22 @@ static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
 	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
 	char *addr;
 	char *port;
-	int err;
+	int rc;
 
 	addr = strdupa(addr_in);
 
 	port = strchr(addr, ':');
 	if (port != NULL) {
 		*port++ = '\0';
-		err = bbdd_sock_parse_port(port, &port_num);
-		if (err != 0)
-			return err;
+		rc = bbdd_sock_parse_port(port, &port_num);
+		if (rc != 0)
+			return rc;
 	}
 
 	bsa->len = sizeof(bsa->sin);
 	bsa->sin.sin_family = AF_INET;
 	bsa->sin.sin_port = htons(port_num);
-	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr);
+	return __bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr);
 }
 
 static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
@@ -110,7 +133,7 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
 	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
 	char *addr;
 	char *saux;
-	int err;
+	int rc;
 
 	/* Check & skip '['. */
 	if (*addr_in++ != '[') {
@@ -130,9 +153,9 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
 	/* Check & skip ':', parse port if any. */
 	if (*saux == ':') {
 		saux++;
-		err = bbdd_sock_parse_port(saux, &port_num);
-		if (err != 0)
-			return err;
+		rc = bbdd_sock_parse_port(saux, &port_num);
+		if (rc != 0)
+			return rc;
 	} else if (*saux != '\0') {
 		fprintf(stderr, "Invalid address `%s': Garbage after closing bracket.\n",
 			addr_in);
@@ -142,7 +165,7 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
 	bsa->len = sizeof(bsa->sin6);
 	bsa->sin6.sin6_family = AF_INET6;
 	bsa->sin6.sin6_port = htons(port_num);
-	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr);
+	return __bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr);
 }
 
 int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
