@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include <assert.h>
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -10,6 +11,7 @@
 #include <arpa/inet.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
+#include <json-c/json_util.h>
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
@@ -112,7 +114,202 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 	bbdd_d_respond_empty(peer, id);
 }
 
-static void bbdd_d_handle_method(struct bbdd_sock *peer,
+static int bbdd_d_jrpc_dissect_session_flags(struct json_object *flag_array,
+					     uint32_t *pflags,
+					     char **error)
+{
+	static struct {
+		const char *name;
+		uint32_t value;
+	} flag_strs[] = {
+		{"multihop", SESSION_MULTIHOP},
+		{"demand",   SESSION_DEMAND},
+		{"cbit",     SESSION_CBIT},
+		{"echo",     SESSION_ECHO},
+		{"ipv6",     SESSION_IPV6},
+		{"passive",  SESSION_PASSIVE},
+		{"shutdown", SESSION_SHUTDOWN},
+	};
+	size_t flag_array_len;
+
+	assert(json_object_get_type(flag_array) == json_type_array);
+	flag_array_len = json_object_array_length(flag_array);
+
+	*pflags = 0;
+	for (size_t i = 0; i < flag_array_len; i++) {
+		struct json_object *flag_obj =
+			json_object_array_get_idx(flag_array, i);
+		enum json_type type = json_object_get_type(flag_obj);
+		const char *str;
+
+		if (type != json_type_string) {
+			bbdd_jrpc_fmterr(error, "Session flag array element expected to be string, got %s",
+					 json_type_to_name(type));
+			return -1;
+		}
+
+		str = json_object_get_string(flag_obj);
+		for (size_t j = 0; j < ARRAY_SIZE(flag_strs); j++)
+			if (strcmp(flag_strs[j].name, str) == 0) {
+				*pflags |= flag_strs[j].value;
+				goto next;
+			}
+		bbdd_jrpc_fmterr(error, "Unknown session flag `%s'", str);
+		return -1;
+	next:
+	}
+
+	return 0;
+}
+
+static int bbdd_d_jrpc_dissect_address(struct json_object *addr_obj,
+				       uint32_t flags,
+				       struct in6_addr *ret_addr,
+				       char **error)
+{
+	int af = flags & SESSION_IPV6 ? AF_INET6 : AF_INET;
+	const char *addr_str;
+
+	assert(json_object_get_type(addr_obj) == json_type_string);
+	addr_str = json_object_get_string(addr_obj);
+	return bbdd_inet_pton(af, addr_str, ret_addr, error);
+}
+
+static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
+					      struct bfddp_session *sess,
+					      char **error)
+{
+	enum {
+		pol_lid,
+		pol_flags,
+
+		pol_src,
+		pol_dst,
+
+		pol_min_tx,
+		pol_min_rx,
+		pol_min_echo_tx,
+		pol_min_echo_rx,
+
+		pol_hold_time,
+		pol_ttl,
+		pol_detect_mult,
+
+		pol_ifindex,
+		pol_ifname,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_lid] =  { .key = "lid", .type = json_type_int,
+			       .required = true },
+		[pol_flags] = { .key = "flags", .type = json_type_array,
+				.required = true },
+
+		[pol_src] = { .key = "src", .type = json_type_string,
+			      .required = true },
+		[pol_dst] = { .key = "dst", .type = json_type_string,
+			      .required = true },
+
+		[pol_min_tx] = { .key = "min_tx", .type = json_type_int,
+			         .required = true },
+		[pol_min_rx] = { .key = "min_rx", .type = json_type_int,
+				 .required = true },
+		[pol_min_echo_tx] = { .key = "min_echo_tx",
+				      .type = json_type_int,
+				      .required = false },
+		[pol_min_echo_rx] = { .key = "min_echo_rx",
+				      .type = json_type_int,
+				      .required = false },
+
+		[pol_hold_time] = { .key = "hold_time", .type = json_type_int,
+				    .required = false },
+		[pol_ttl] = { .key = "ttl", .type = json_type_int,
+			      .required = false },
+		[pol_detect_mult] = { .key = "detect_mult",
+				      .type = json_type_int,
+				      .required = false },
+
+		[pol_ifindex] = { .key = "ifindex", .type = json_type_int,
+				  .required = false },
+		[pol_ifname] = { .key = "ifname", .type = json_type_string,
+				 .required = false },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
+
+	memset(sess, 0, sizeof(*sess));
+
+	if (bbdd_jrpc_get_uint32_non0(values[pol_lid],
+				      &sess->lid, error) < 0 ||
+	    bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
+					      &sess->flags, error) < 0 ||
+	    bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
+					&sess->src, error) < 0 ||
+	    bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
+					&sess->dst, error) < 0 ||
+	    bbdd_jrpc_get_uint32_non0(values[pol_min_tx],
+				      &sess->min_tx, error) < 0 ||
+	    bbdd_jrpc_get_uint32_non0(values[pol_min_rx],
+				      &sess->min_rx, error) < 0 ||
+	    (seen[pol_min_echo_tx] &&
+	     bbdd_jrpc_get_uint32(values[pol_min_echo_tx],
+				  &sess->min_echo_tx, error) < 0) ||
+	    (seen[pol_min_echo_rx] &&
+	     bbdd_jrpc_get_uint32(values[pol_min_echo_rx],
+				  &sess->min_echo_rx, error) < 0) ||
+	    bbdd_jrpc_get_uint32(values[pol_hold_time], &sess->hold_time,
+				 error) < 0 ||
+	    bbdd_jrpc_get_uint8(values[pol_ttl], &sess->ttl, error) < 0 ||
+	    bbdd_jrpc_get_uint8(values[pol_ttl], &sess->detect_mult,
+				error) < 0 ||
+	    (seen[pol_ifindex] &&
+	     bbdd_jrpc_get_uint32_non0(values[pol_ifindex], &sess->ifindex,
+				       error) < 0) ||
+	    (seen[pol_ifname] &&
+	     bbdd_jrpc_strcpy(values[pol_ifname],
+			      sess->ifname, sizeof sess->ifname, error) < 0))
+		return -1;
+
+#define HTONL_FIELD(FIELD) FIELD = htonl(FIELD)
+	HTONL_FIELD(sess->lid);
+	HTONL_FIELD(sess->flags);
+	HTONL_FIELD(sess->min_tx);
+	HTONL_FIELD(sess->min_rx);
+	HTONL_FIELD(sess->min_echo_rx);
+	HTONL_FIELD(sess->min_echo_tx);
+	HTONL_FIELD(sess->hold_time);
+	HTONL_FIELD(sess->ifindex);
+#undef HTONL_FIELD
+
+	return 0;
+}
+
+static void bbdd_d_handle_session_add(struct events_ctx *ec,
+				      struct bfddp_ctx *bctx,
+				      struct bbdd_sock *peer,
+				      struct json_object *params_obj,
+				      struct json_object *id)
+{
+	struct bfddp_session sess;
+	char *error;
+	int rc;
+
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, &sess, &error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return;
+	}
+
+	bfddp_process_edit_session(ec, bctx, &sess);
+	bbdd_d_respond_empty(peer, id);
+}
+
 static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bfddp_ctx *bctx,
 				 struct bbdd_sock *peer,

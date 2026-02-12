@@ -492,3 +492,20 @@ int bbdd_jrpc_get_uint8(struct json_object *obj, uint8_t *ret, char **error)
 	*ret = (uint8_t) value;
 	return 0;
 }
+
+int bbdd_jrpc_strcpy(size_t buf_len;
+		     struct json_object *obj, char buf[buf_len], size_t buf_len,
+		     char **error)
+{
+	const char *str;
+
+	str = json_object_get_string(obj);
+	if (strlen(str) >= buf_len) {
+		bbdd_jrpc_fmterr(error, "String `%s' too long: %zd >= %zd",
+				 str, strlen(str), buf_len);
+		return -1;
+	}
+
+	strcpy(buf, str);
+	return 0;
+}

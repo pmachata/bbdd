@@ -83,5 +83,8 @@ int bbdd_jrpc_get_uint32(struct json_object *obj, uint32_t *ret, char **error);
 int bbdd_jrpc_get_uint32_non0(struct json_object *obj, uint32_t *ret,
 			      char **error);
 int bbdd_jrpc_get_uint8(struct json_object *obj, uint8_t *ret, char **error);
+int bbdd_jrpc_strcpy(size_t buf_len;
+		     struct json_object *obj, char buf[buf_len], size_t buf_len,
+		     char **error);
 
 int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
