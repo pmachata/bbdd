@@ -509,3 +509,35 @@ int bbdd_jrpc_strcpy(size_t buf_len;
 	strcpy(buf, str);
 	return 0;
 }
+
+static int bbdd_jrpc_append_obj(struct json_object *params_obj,
+				const char *name,
+				struct json_object *param_obj)
+{
+	if (param_obj == NULL)
+		goto out;
+
+	if (json_object_object_add(params_obj, name, param_obj))
+		goto put_param_obj;
+
+	return 0;
+
+put_param_obj:
+	json_object_put(param_obj);
+out:
+	return -ENOMEM;
+}
+
+int bbdd_jrpc_append_str(struct json_object *params_obj,
+			       const char *name, const char *value)
+{
+	return bbdd_jrpc_append_obj(params_obj, name,
+				    json_object_new_string(value));
+}
+
+int bbdd_jrpc_append_int(struct json_object *params_obj,
+			       const char *name, int64_t value)
+{
+	return bbdd_jrpc_append_obj(params_obj, name,
+				    json_object_new_int64(value));
+}

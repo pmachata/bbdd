@@ -16,14 +16,16 @@ struct bbdd_env bbdd_env = {
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";
 
+#define HELP_BLURB								\
+
 static int bbdd_help(void)
 {
 	puts("bbdd, the BPF-based BFD dataplane daemon.\n"
 	     "\n"
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
-	     "			  -V | --version | --sockdir <DIR> | --json ]\n"
-	     "	     COMMAND := { start | stop | ping }\n"
+	     "                    -V | --version | --sockdir <DIR> | --json ]\n"
+	     "	     COMMAND := { start | stop | ping | session }\n"
 	     );
 	return 0;
 }
@@ -41,6 +43,9 @@ static int bbdd_cmd(int argc, char **argv)
 	} else if (strcmp(*argv, "ping") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_ping(argc, argv);
+	} else if (strcmp(*argv, "session") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_session(argc, argv);
 	}
 
 	fprintf(stderr, "Unknown command \"%s\"\n", *argv);

@@ -16,32 +16,73 @@
 
 #include "bfddp_packet.h"
 
-static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
+static int bbdd_sock_parse_range(const char *str, long long *ret,
+				 long long min, long long max,
+				 const char *what)
 {
 	char *nulbyte;
-	long rv;
+	long long rv;
 
 	errno = 0;
-	rv = strtol(str, &nulbyte, 10);
+	rv = strtoll(str, &nulbyte, 10);
 	/* No conversion performed. */
 	if (rv == 0 && errno == EINVAL) {
 	invalid:
-		fprintf(stderr, "Invalid port number `%s'. Expected integral [0,63353].\n",
-			str);
+		fprintf(stderr, "Invalid %s `%s'. Expected integral [%lld,%lld].\n",
+			what, str, min, max);
 		return -1;
 	}
 	/* Invalid number range. */
-	if (rv <= 0 || rv >= 65535 || errno == ERANGE)
+	if (rv <= min || rv >= max || errno == ERANGE)
 		goto invalid;
 
 	/* There was garbage at the end of the string. */
 	if (*nulbyte != 0) {
-		fprintf(stderr, "Invalid port number: value `%ld' followed by garbage.\n",
-			rv);
+		fprintf(stderr, "Invalid %s: value `%lld' followed by garbage.\n",
+			what, rv);
 		return -1;
 	}
 
-	*ret_port = (uint16_t)rv;
+	*ret = rv;
+	return 0;
+}
+
+int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what)
+{
+	long long v;
+	int err;
+
+	err = bbdd_sock_parse_range(str, &v, 0, UINT8_MAX, what);
+	if (err)
+		return err;
+
+	*ret = (uint8_t) v;
+	return 0;
+}
+
+int bbdd_sock_parse_u32(const char *str, uint32_t *ret, const char *what)
+{
+	long long v;
+	int err;
+
+	err = bbdd_sock_parse_range(str, &v, 0, UINT32_MAX, what);
+	if (err)
+		return err;
+
+	*ret = (uint32_t) v;
+	return 0;
+}
+
+static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
+{
+	long long v;
+	int err;
+
+	err = bbdd_sock_parse_range(str, &v, 1, 65534, "port number");
+	if (err)
+		return err;
+
+	*ret_port = (uint16_t) v;
 	return 0;
 }
 

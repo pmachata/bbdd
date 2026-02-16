@@ -25,6 +25,7 @@ int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
 
 int bbdd_c_stop(int argc, char **argv);
 int bbdd_c_ping(int argc, char **argv);
+int bbdd_c_session(int argc, char **argv);
 
 /* d.c */
 
