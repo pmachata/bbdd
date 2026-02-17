@@ -47,8 +47,8 @@ static void bbdd_d_respond_memerr(struct bbdd_sock *peer,
 	bbdd_d_respond_interr(peer, id, "Memory allocation issue");
 }
 
-static void bbdd_d_handle_ping(__attribute__((unused)) struct events_ctx *ec,
-			       __attribute__((unused)) struct bfddp_ctx *bctx,
+static void bbdd_d_handle_ping(struct events_ctx *,
+			       struct bfddp_ctx *,
 			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
 			       struct json_object *id)
@@ -175,9 +175,9 @@ static int bbdd_d_jrpc_dissect_address(struct json_object *addr_obj,
 	return bbdd_inet_pton(af, addr_str, ret_addr, error);
 }
 
-static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
-					      struct bfddp_session *sess,
-					      char **error)
+int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
+				       struct bfddp_session *sess,
+				       char **error)
 {
 	enum {
 		pol_lid,
@@ -199,39 +199,26 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 		pol_ifname,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_lid] =  { .key = "lid", .type = json_type_int,
-			       .required = true },
-		[pol_flags] = { .key = "flags", .type = json_type_array,
-				.required = true },
+		[pol_lid] =  { .key = "lid", .type = json_type_int },
+		[pol_flags] = { .key = "flags", .type = json_type_array },
 
-		[pol_src] = { .key = "src", .type = json_type_string,
-			      .required = true },
-		[pol_dst] = { .key = "dst", .type = json_type_string,
-			      .required = true },
+		[pol_src] = { .key = "src", .type = json_type_string },
+		[pol_dst] = { .key = "dst", .type = json_type_string },
 
-		[pol_min_tx] = { .key = "min_tx", .type = json_type_int,
-			         .required = true },
-		[pol_min_rx] = { .key = "min_rx", .type = json_type_int,
-				 .required = true },
+		[pol_min_tx] = { .key = "min_tx", .type = json_type_int },
+		[pol_min_rx] = { .key = "min_rx", .type = json_type_int },
 		[pol_min_echo_tx] = { .key = "min_echo_tx",
-				      .type = json_type_int,
-				      .required = false },
+				      .type = json_type_int },
 		[pol_min_echo_rx] = { .key = "min_echo_rx",
-				      .type = json_type_int,
-				      .required = false },
+				      .type = json_type_int },
 
-		[pol_hold_time] = { .key = "hold_time", .type = json_type_int,
-				    .required = false },
-		[pol_ttl] = { .key = "ttl", .type = json_type_int,
-			      .required = false },
+		[pol_hold_time] = { .key = "hold_time", .type = json_type_int },
+		[pol_ttl] = { .key = "ttl", .type = json_type_int },
 		[pol_detect_mult] = { .key = "detect_mult",
-				      .type = json_type_int,
-				      .required = false },
+				      .type = json_type_int },
 
-		[pol_ifindex] = { .key = "ifindex", .type = json_type_int,
-				  .required = false },
-		[pol_ifname] = { .key = "ifname", .type = json_type_string,
-				 .required = false },
+		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
+		[pol_ifname] = { .key = "ifname", .type = json_type_string },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
@@ -244,29 +231,38 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 
 	memset(sess, 0, sizeof(*sess));
 
-	if (bbdd_jrpc_get_uint32_non0(values[pol_lid],
-				      &sess->lid, error) < 0 ||
-	    bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
-					      &sess->flags, error) < 0 ||
-	    bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
-					&sess->src, error) < 0 ||
-	    bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
-					&sess->dst, error) < 0 ||
-	    bbdd_jrpc_get_uint32_non0(values[pol_min_tx],
-				      &sess->min_tx, error) < 0 ||
-	    bbdd_jrpc_get_uint32_non0(values[pol_min_rx],
-				      &sess->min_rx, error) < 0 ||
+	if ((seen[pol_lid] &&
+	     bbdd_jrpc_get_uint32_non0(values[pol_lid],
+				       &sess->lid, error) < 0) ||
+	    (seen[pol_flags] &&
+	     bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
+					       &sess->flags, error) < 0) ||
+	    (seen[pol_src] &&
+	     bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
+					 &sess->src, error) < 0) ||
+	    (seen[pol_dst] &&
+	     bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
+					 &sess->dst, error) < 0) ||
+	    (seen[pol_min_tx] &&
+	     bbdd_jrpc_get_uint32_non0(values[pol_min_tx],
+				       &sess->min_tx, error) < 0) ||
+	    (seen[pol_min_rx] &&
+	     bbdd_jrpc_get_uint32_non0(values[pol_min_rx],
+				       &sess->min_rx, error) < 0) ||
 	    (seen[pol_min_echo_tx] &&
 	     bbdd_jrpc_get_uint32(values[pol_min_echo_tx],
 				  &sess->min_echo_tx, error) < 0) ||
 	    (seen[pol_min_echo_rx] &&
 	     bbdd_jrpc_get_uint32(values[pol_min_echo_rx],
 				  &sess->min_echo_rx, error) < 0) ||
-	    bbdd_jrpc_get_uint32(values[pol_hold_time], &sess->hold_time,
-				 error) < 0 ||
-	    bbdd_jrpc_get_uint8(values[pol_ttl], &sess->ttl, error) < 0 ||
-	    bbdd_jrpc_get_uint8(values[pol_ttl], &sess->detect_mult,
-				error) < 0 ||
+	    (seen[pol_hold_time] &&
+	     bbdd_jrpc_get_uint32(values[pol_hold_time], &sess->hold_time,
+				  error) < 0) ||
+	    (seen[pol_ttl] &&
+	     bbdd_jrpc_get_uint8(values[pol_ttl], &sess->ttl, error) < 0) ||
+	    (seen[pol_detect_mult] &&
+	     bbdd_jrpc_get_uint8(values[pol_detect_mult], &sess->detect_mult,
+				 error) < 0) ||
 	    (seen[pol_ifindex] &&
 	     bbdd_jrpc_get_uint32_non0(values[pol_ifindex], &sess->ifindex,
 				       error) < 0) ||
@@ -287,6 +283,95 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 #undef HTONL_FIELD
 
 	return 0;
+}
+
+static void bbdd_d_handle_session_list(struct events_ctx *,
+				       struct bfddp_ctx *,
+				       struct bbdd_sock *peer,
+				       struct json_object *params_obj,
+				       struct json_object *id)
+{
+	struct json_object *obj;
+	struct json_object *result_obj;
+	struct bfd_session *bs = NULL;
+	struct json_object *array;
+	struct json_object *sess_obj;
+	char *error;
+	int rc;
+
+	/* The response is as follows:
+	 *
+	 * {
+	 *     "id": ...,
+	 *     "result": {
+	 *         "sessions": [ SESS, ... ]
+	 *     }
+	 * }
+	 *
+	 * Where individual SESS objects are formatted the same as session
+	 * request objects, see bbdd_d_jrpc_dissect_params_session().
+	 */
+
+	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return;
+	}
+
+	obj = bbdd_jrpc_new_object(id);
+	if (obj == NULL)
+		return;
+
+	result_obj = json_object_new_object();
+	if (result_obj == NULL)
+		goto put_obj;
+
+	rc = json_object_object_add(obj, "result", params_obj);
+	if (rc != 0)
+		goto put_obj;
+	json_object_get(params_obj);
+
+	array = json_object_new_array();
+	if (array == NULL)
+		goto put_result_obj;
+
+	while ((bs = bfd_sessions_walk(bs))) {
+		struct bbdd_c_session sess = {
+			.lid = bs->bs_lid,
+			.lid_seen = true,
+		};
+
+		sess_obj = bbdd_c_jrpc_session_obj(&sess);
+		if (sess_obj == NULL)
+			goto put_array;
+
+		if (json_object_array_add(array, sess_obj) != 0)
+			goto put_sess_obj;
+		sess_obj = NULL;
+	}
+
+	rc = json_object_object_add(result_obj, "sessions", array);
+	if (rc != 0)
+		goto put_array;
+	array = NULL;
+
+	if (json_object_object_add(obj, "result", result_obj))
+		goto put_result_obj;
+
+	bbdd_jrpc_send(peer, obj);
+	json_object_put(obj);
+	return;
+
+put_sess_obj:
+	json_object_put(sess_obj);
+put_array:
+	json_object_put(array);
+put_result_obj:
+	json_object_put(result_obj);
+put_obj:
+	json_object_put(obj);
+	bbdd_d_respond_memerr(peer, id);
 }
 
 static void bbdd_d_handle_session_add(struct events_ctx *ec,
@@ -328,6 +413,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 	static struct bbdd_d_method_handler handlers[] = {
 		{"stop", bbdd_d_handle_stop},
 		{"ping", bbdd_d_handle_ping},
+		{"session-list", bbdd_d_handle_session_list},
 		{"session-add", bbdd_d_handle_session_add},
 	};
 	size_t i;

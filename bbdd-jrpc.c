@@ -441,6 +441,34 @@ int bbdd_jrpc_dissect_params_empty(struct json_object *obj, char **error)
 	return bbdd_jrpc_dissect(obj, NULL, NULL, NULL, 0, error);
 }
 
+int bbdd_jrpc_validate_array(struct json_object *obj, enum json_type elm_type,
+			     char **error)
+{
+	{
+		enum json_type type = json_object_get_type(obj);
+
+		if (type != json_type_array) {
+			bbdd_jrpc_fmterr(error, "Value expected to be an array, but is %s",
+					 json_type_to_name(type));
+			return -1;
+		}
+	}
+
+	for (size_t i = 0, len = json_object_array_length(obj); i < len; i++) {
+		struct json_object *elm = json_object_array_get_idx(obj, i);
+		enum json_type type = json_object_get_type(elm);
+
+		if (type != elm_type) {
+			bbdd_jrpc_fmterr(error, "Array element %zd is expected to be a %s, but is %s",
+					 i, json_type_to_name(elm_type),
+					 json_type_to_name(type));
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 static int bbdd_jrpc_get_uint(struct json_object *obj, uint32_t *ret,
 			      uint32_t max, char **error)
 {

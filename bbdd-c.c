@@ -99,7 +99,7 @@ static bool __bbdd_c_result_show_json(struct json_object *result)
 
 static bool bbdd_c_result_show_json(struct json_object *result)
 {
-    bool ret = __bbdd_c_result_show_json(result);
+	bool ret = __bbdd_c_result_show_json(result);
 
 	if (ret)
 		putchar('\n');
@@ -317,10 +317,12 @@ enum bbdd_c_session_command {
 	bbdd_c_session_command_add,
 };
 
-static int bbdd_c_session_help(void)
+static void bbdd_c_session_help(void)
 {
 	fprintf(stderr,
 		"Usage:	bbdd session { add } PARAMS\n"
+		"	bbdd session list\n"
+		"\n"
 		"where	PARAMS := PARAM [ PARAMS ]\n"
 		"	PARAM := { KEY VALUE | FLAG }\n"
 		"	KEY := { lid | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
@@ -354,7 +356,6 @@ static int bbdd_c_session_help(void)
 		"	passive		-- passive mode\n"
 		"	shutdown	-- session is admin down\n"
 	);
-	return 0;
 }
 
 static int
@@ -477,56 +478,13 @@ static int bbdd_c_parse_kw_flag(int *up_argc, char ***up_argv,
 	return rc;
 }
 
-struct bbdd_c_session {
-	/* Flags. */
-	bool multihop;
-	bool demand;
-	bool cbit;
-	bool echo;
-	bool ipv6;
-	bool passive;
-	bool shutdown;
-	/* Other fields. */
-	const char *src;		int src_af;
-	const char *dst;		int dst_af;
-	uint32_t lid;			int lid_seen;
-	uint32_t min_tx;		int min_tx_seen;
-	uint32_t min_rx;		int min_rx_seen;
-	uint32_t min_echo_tx;		int min_echo_tx_seen;
-	uint32_t min_echo_rx;		int min_echo_rx_seen;
-	uint32_t hold_time;		int hold_time_seen;
-	uint8_t ttl;			int ttl_seen;
-	uint8_t detect_mult;		int detect_mult_seen;
-	uint32_t ifindex;		int ifindex_seen;
-	const char *ifname;		int ifname_seen;
-};
-
-static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
-			       struct bbdd_c_session *sess)
+struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess)
 {
 	struct json_object *params_obj;
-	struct json_object *response;
-	struct json_object *request;
-	struct json_object *result;
-	const char *method;
-	const int id = 1;
-	int err;
-
-	switch (scmd) {
-	case bbdd_c_session_command_add:
-		method = "session-add";
-		break;
-	}
-
-	request = bbdd_jrpc_new_request(id, method);
-	if (request == NULL)
-		return -1;
 
 	params_obj = json_object_new_object();
-	if (params_obj == NULL) {
-		err = -ENOMEM;
-		goto put_request;
-	}
+	if (params_obj == NULL)
+		return NULL;
 
 	if ((sess->src_af &&
 	     bbdd_jrpc_append_str(params_obj, "src", sess->src)) ||
@@ -558,6 +516,40 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
 		goto put_params_obj;
 
 	// xxx flags
+
+	return params_obj;
+
+put_params_obj:
+	json_object_put(params_obj);
+	return NULL;
+}
+
+static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
+			       struct bbdd_c_session *sess)
+{
+	struct json_object *params_obj;
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *result;
+	const char *method;
+	const int id = 1;
+	int err;
+
+	switch (scmd) {
+	case bbdd_c_session_command_add:
+		method = "session-add";
+		break;
+	}
+
+	request = bbdd_jrpc_new_request(id, method);
+	if (request == NULL)
+		return -1;
+
+	params_obj = bbdd_c_jrpc_session_obj(sess);
+	if (params_obj == NULL) {
+		err = -ENOMEM;
+		goto put_request;
+	}
 
 	if (json_object_object_add(request, "params", params_obj)) {
 		err = -ENOMEM;
@@ -660,8 +652,10 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 			return rc;
 		}
 
-		if (strcmp(*argv, "help") == 0)
-			return bbdd_c_session_help();
+		if (strcmp(*argv, "help") == 0) {
+			bbdd_c_session_help();
+			return 0;
+		}
 
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
 		return -1;
@@ -687,10 +681,211 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 	return bbdd_c_session_jrpc(scmd, &sess);
 }
 
+static int
+bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
+					  struct bfddp_session **psessions,
+					  size_t *pnum_sessions,
+					  char **error)
+{
+	size_t sess_array_len = json_object_array_length(sess_array);
+	struct bfddp_session *sessions;
+
+	if (bbdd_jrpc_validate_array(sess_array, json_type_object,
+				     error) != 0)
+		return -1;
+
+	sessions = calloc(sess_array_len, sizeof(*sessions));
+	if (sessions == NULL) {
+		bbdd_jrpc_fmterr(error, "Couldn't allocate sessions: %m");
+		return -1;
+	}
+
+	for (size_t i = 0; i < sess_array_len; i++) {
+		struct json_object *sess_obj =
+			json_object_array_get_idx(sess_array, i);
+		struct bfddp_session *session = &sessions[i];
+		int err;
+
+		err = bbdd_d_jrpc_dissect_params_session(sess_obj, session,
+							 error);
+		if (err != 0)
+			goto free_sessions;
+	}
+
+	*psessions = sessions;
+	*pnum_sessions = sess_array_len;
+	return 0;
+
+free_sessions:
+	free(sessions);
+	return -1;
+}
+
+static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
+					    struct bfddp_session **sessions,
+					    size_t *num_sessions,
+					    char **error)
+{
+	/* Result for query with "get_tables" method is supposed to look
+	 * like:
+	 *
+	 * { "sessions": [ SESS, ... ] }
+	 *
+	 * With each SESS a session object.
+	 */
+	enum {
+		pol_sessions,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_sessions] = { .key = "sessions", .type = json_type_array,
+				   .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int err;
+
+	err = bbdd_jrpc_dissect(obj, policy, seen, values,
+				ARRAY_SIZE(policy), error);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_session_list_jrpc_dissect_sessions(values[pol_sessions],
+							 sessions, num_sessions,
+							 error);
+}
+
+static bool bbdd_c_addr_empty(struct in6_addr *addr)
+{
+	struct in6_addr empty_ipv6 = {};
+	return memcmp(addr, &empty_ipv6, sizeof(empty_ipv6)) == 0;
+}
+
+static void bbdd_c_session_list_show_one(struct bfddp_session *a_session)
+{
+	struct bfddp_session sess = *a_session;
+	char buf[INET6_ADDRSTRLEN];
+
+	// xxx this illustrates why it's a silly idea to use bfddp_session as a
+	// neutral session capture. Instead, use struct bbdd_c_session for the
+	// JRPC interface, and translate from that to struct bfddp_session when
+	// talking to the soft daemon.
+#define NTOHL_FIELD(FIELD) FIELD = htonl(FIELD)
+	NTOHL_FIELD(sess.lid);
+	NTOHL_FIELD(sess.flags);
+	NTOHL_FIELD(sess.min_tx);
+	NTOHL_FIELD(sess.min_rx);
+	NTOHL_FIELD(sess.min_echo_rx);
+	NTOHL_FIELD(sess.min_echo_tx);
+	NTOHL_FIELD(sess.hold_time);
+	NTOHL_FIELD(sess.ifindex);
+#undef NTOHL_FIELD
+
+	printf("session ");
+	if (sess.lid != 0)
+		printf("lid %d ", sess.lid);
+	if (!bbdd_c_addr_empty(&sess.src)) {
+		inet_ntop(sess.flags & SESSION_IPV6 ? AF_INET6 : AF_INET,
+			  &sess.src, buf, sizeof(buf));
+		printf("src %s ", buf);
+	}
+	if (!bbdd_c_addr_empty(&sess.dst)) {
+		inet_ntop(sess.flags & SESSION_IPV6 ? AF_INET6 : AF_INET,
+			  &sess.dst, buf, sizeof(buf));
+		printf("dst %s ", buf);
+	}
+	if (sess.min_tx != 0)
+		printf("min_tx %d ", sess.min_tx);
+	if (sess.min_rx != 0)
+		printf("min_rx %d ", sess.min_rx);
+	if (sess.min_echo_tx != 0)
+		printf("min_echo_tx %d ", sess.min_echo_tx);
+	if (sess.min_echo_rx != 0)
+		printf("min_echo_rx %d ", sess.min_echo_rx);
+	if (sess.hold_time != 0)
+		printf("hold_time %d ", sess.hold_time);
+	if (sess.ttl != 0)
+		printf("ttl %d ", sess.ttl);
+	if (sess.detect_mult != 0)
+		printf("detect-mult %d ", sess.detect_mult);
+	if (sess.ifindex != 0)
+		printf("ifindex %d ", sess.ifindex);
+	if (sess.ifname[0] != '\0')
+		printf("ifname %s ", sess.ifname);
+	printf("\n");
+}
+
+static int bbdd_c_session_list_jrpc(void)
+{
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *result;
+	struct bfddp_session *sessions;
+	size_t num_sessions;
+	const int id = 1;
+	char *error;
+	int err;
+
+	request = bbdd_jrpc_new_request(id, "session-list");
+	if (request == NULL)
+		return -1;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL) {
+		err = -1;
+		goto put_request;
+	}
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+					    &result)) {
+		err = -1;
+		goto put_response;
+	}
+
+	if (bbdd_c_result_show_json(result)) {
+		err = 0;
+		goto put_result;
+	}
+
+	err = bbdd_c_session_list_jrpc_dissect(result, &sessions, &num_sessions,
+					       &error);
+	if (err != 0) {
+		fprintf(stderr, "Invalid tables object: %s\n", error);
+		free(error);
+		goto put_result;
+	}
+
+	for (size_t i = 0; i < num_sessions; i++)
+		bbdd_c_session_list_show_one(&sessions[i]);
+	free(sessions);
+
+put_result:
+	json_object_put(result);
+put_response:
+	json_object_put(response);
+put_request:
+	json_object_put(request);
+	return err;
+}
+
+static int bbdd_c_session_list(int argc, char **argv)
+{
+	int err;
+
+	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_session_help);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_session_list_jrpc();
+}
+
 int bbdd_c_session(int argc, char **argv)
 {
 	if (!argc || strcmp(*argv, "help") == 0) {
-		return bbdd_c_session_help();
+		bbdd_c_session_help();
+		return 0;
+	} else if (strcmp(*argv, "list") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_session_list(argc, argv);
 	} else if (strcmp(*argv, "add") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_session_command(bbdd_c_session_command_add,

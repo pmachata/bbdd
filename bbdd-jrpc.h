@@ -78,6 +78,8 @@ int bbdd_jrpc_dissect_error(struct json_object *obj,
 			    char **error);
 int bbdd_jrpc_dissect_params_empty(struct json_object *obj,
 				   char **error);
+int bbdd_jrpc_validate_array(struct json_object *obj, enum json_type elm_type,
+			     char **error);
 
 int bbdd_jrpc_get_uint32(struct json_object *obj, uint32_t *ret, char **error);
 int bbdd_jrpc_get_uint32_non0(struct json_object *obj, uint32_t *ret,
