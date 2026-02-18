@@ -411,22 +411,38 @@ static int bbdd_c_parse_u32(const char *str, void *ret, const char *what)
 	return bbdd_sock_parse_u32(str, u32_ret, what);
 }
 
-static int bbdd_c_parse_str(const char *str, void *ret, const char *)
+static int __bbdd_c_parse_ifname(const char *str, char ret_str[IFNAMSIZ],
+				 const char *what)
 {
-	const char **ret_str = ret;
-	*ret_str = str;
+	if (strlen(str) >= IFNAMSIZ) {
+		fprintf(stderr, "Can't parse %s `%s': too long.\n",
+			what, str);
+		return -1;
+	}
+	strcpy(ret_str, str);
 	return 0;
 }
 
-static int bbdd_c_parse_addr(const char *str, void *ret, const char *what)
+static int bbdd_c_parse_ifname(const char *str, void *ret, const char *what)
 {
-	const char **ret_str = ret;
+	return __bbdd_c_parse_ifname(str, ret, what);
+}
+
+static int __bbdd_c_parse_addr(const char *str, char ret_str[INET6_ADDRSTRLEN],
+			       const char *what)
+{
 	union {
 		uint32_t ipv4;
 		struct in6_addr ipv6;
 	} u;
 
-	*ret_str = str;
+	if (strlen(str) >= INET6_ADDRSTRLEN) {
+		fprintf(stderr, "Can't parse %s `%s': address too long.\n",
+			what, str);
+		return -1;
+	}
+	strcpy(ret_str, str);
+
 	if (inet_pton(AF_INET, str, &u.ipv4) == 1)
 		return AF_INET;
 	else if (inet_pton(AF_INET6, str, &u.ipv6) == 1)
@@ -435,6 +451,11 @@ static int bbdd_c_parse_addr(const char *str, void *ret, const char *what)
 	fprintf(stderr, "Can't parse %s `%s' as either IPv4 or IPv6 address.\n",
 		what, str);
 	return -1;
+}
+
+static int bbdd_c_parse_addr(const char *str, void *ret, const char *what)
+{
+	return __bbdd_c_parse_addr(str, ret, what);
 }
 
 static int bbdd_c_parse_kw_u8(int *up_argc, char ***up_argv, const char *kw,
@@ -451,15 +472,15 @@ static int bbdd_c_parse_kw_u32(int *up_argc, char ***up_argv, const char *kw,
 			       bbdd_c_parse_u32);
 }
 
-static int bbdd_c_parse_kw_str(int *up_argc, char ***up_argv, const char *kw,
-			       const char **ret, int *ret_seen)
+static int bbdd_c_parse_kw_ifname(int *up_argc, char ***up_argv, const char *kw,
+				  char ret[IFNAMSIZ], int *ret_seen)
 {
 	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_seen,
-			       bbdd_c_parse_str);
+			       bbdd_c_parse_ifname);
 }
 
 static int bbdd_c_parse_kw_addr(int *up_argc, char ***up_argv, const char *kw,
-				const char **ret, int *ret_af)
+				char ret[INET6_ADDRSTRLEN], int *ret_af)
 {
 	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_af,
 			       bbdd_c_parse_addr);
@@ -523,6 +544,19 @@ put_params_obj:
 	json_object_put(params_obj);
 	return NULL;
 }
+
+/* xxx
+static int bbdd_c_jrpc_dissect_address(int af, struct json_object *addr_obj,
+				       struct in6_addr *ret_addr,
+				       char **error)
+{
+	const char *addr_str;
+
+	assert(json_object_get_type(addr_obj) == json_type_string);
+	addr_str = json_object_get_string(addr_obj);
+	return bbdd_inet_pton(af, addr_str, ret_addr, error);
+}
+*/
 
 static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
 			       struct bbdd_c_session *sess)
@@ -597,25 +631,25 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 
 	while (argc > 0) {
 		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
-					       &sess.multihop)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_MULTIHOP])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "demand",
-					       &sess.demand)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_DEMAND])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
-					       &sess.cbit)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_CBIT])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "echo",
-					       &sess.echo)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_ECHO])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",
-					       &sess.ipv6)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_IPV6])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
-					       &sess.passive)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_PASSIVE])) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
-					       &sess.shutdown)) ||
+					       &sess.flags[BBDD_C_SESSION_FLAG_SHUTDOWN])) ||
 
 		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "src",
-					       &sess.src,
+					       sess.src,
 					       &sess.src_af)) ||
 		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
-					       &sess.dst,
+					       sess.dst,
 					       &sess.dst_af)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "lid",
 					      &sess.lid,
@@ -644,9 +678,9 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "ifindex",
 					      &sess.ifindex,
 					      &sess.ifindex_seen)) ||
-		    (rc = bbdd_c_parse_kw_str(&argc, &argv, "ifname",
-					      &sess.ifname,
-					      &sess.ifname_seen))) {
+		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
+						 sess.ifname,
+						 &sess.ifname_seen))) {
 			if (rc > 0)
 				continue;
 			return rc;
@@ -668,12 +702,13 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 			sess.dst, sess.dst_af == AF_INET ? "IPv4" : "IPv6");
 		return -1;
 	}
-	if ((sess.src_af == AF_INET || sess.dst_af == AF_INET) && sess.ipv6) {
+	if ((sess.src_af == AF_INET || sess.dst_af == AF_INET) &&
+	    sess.flags[BBDD_C_SESSION_FLAG_IPV6]) {
 		fprintf(stderr, "src or dst given as IPv4, but `ipv6' flag given as well.\n");
 		return -1;
 	}
 	if (sess.src_af == AF_INET6 || sess.dst_af == AF_INET6)
-		sess.ipv6 = true;
+		sess.flags[BBDD_C_SESSION_FLAG_IPV6] = true;
 
 	// xxx check ifindex vs. ifname if both given. If one is given, deduce
 	// one from the other.
@@ -683,12 +718,12 @@ static int bbdd_c_session_command(enum bbdd_c_session_command scmd,
 
 static int
 bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
-					  struct bfddp_session **psessions,
+					  struct bbdd_c_session **psessions,
 					  size_t *pnum_sessions,
 					  char **error)
 {
 	size_t sess_array_len = json_object_array_length(sess_array);
-	struct bfddp_session *sessions;
+	struct bbdd_c_session *sessions;
 
 	if (bbdd_jrpc_validate_array(sess_array, json_type_object,
 				     error) != 0)
@@ -703,7 +738,7 @@ bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
 	for (size_t i = 0; i < sess_array_len; i++) {
 		struct json_object *sess_obj =
 			json_object_array_get_idx(sess_array, i);
-		struct bfddp_session *session = &sessions[i];
+		struct bbdd_c_session *session = &sessions[i];
 		int err;
 
 		err = bbdd_d_jrpc_dissect_params_session(sess_obj, session,
@@ -722,7 +757,7 @@ free_sessions:
 }
 
 static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
-					    struct bfddp_session **sessions,
+					    struct bbdd_c_session **sessions,
 					    size_t *num_sessions,
 					    char **error)
 {
@@ -754,64 +789,63 @@ static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
 							 error);
 }
 
-static bool bbdd_c_addr_empty(struct in6_addr *addr)
+static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess)
 {
-	struct in6_addr empty_ipv6 = {};
-	return memcmp(addr, &empty_ipv6, sizeof(empty_ipv6)) == 0;
-}
-
-static void bbdd_c_session_list_show_one(struct bfddp_session *a_session)
-{
-	struct bfddp_session sess = *a_session;
-	char buf[INET6_ADDRSTRLEN];
-
-	// xxx this illustrates why it's a silly idea to use bfddp_session as a
-	// neutral session capture. Instead, use struct bbdd_c_session for the
-	// JRPC interface, and translate from that to struct bfddp_session when
-	// talking to the soft daemon.
-#define NTOHL_FIELD(FIELD) FIELD = htonl(FIELD)
-	NTOHL_FIELD(sess.lid);
-	NTOHL_FIELD(sess.flags);
-	NTOHL_FIELD(sess.min_tx);
-	NTOHL_FIELD(sess.min_rx);
-	NTOHL_FIELD(sess.min_echo_rx);
-	NTOHL_FIELD(sess.min_echo_tx);
-	NTOHL_FIELD(sess.hold_time);
-	NTOHL_FIELD(sess.ifindex);
-#undef NTOHL_FIELD
-
-	printf("session ");
-	if (sess.lid != 0)
-		printf("lid %d ", sess.lid);
-	if (!bbdd_c_addr_empty(&sess.src)) {
-		inet_ntop(sess.flags & SESSION_IPV6 ? AF_INET6 : AF_INET,
-			  &sess.src, buf, sizeof(buf));
-		printf("src %s ", buf);
+	bool seen = false;
+	if (sess->lid_seen) {
+		printf("lid %d ", sess->lid);
+		seen = true;
 	}
-	if (!bbdd_c_addr_empty(&sess.dst)) {
-		inet_ntop(sess.flags & SESSION_IPV6 ? AF_INET6 : AF_INET,
-			  &sess.dst, buf, sizeof(buf));
-		printf("dst %s ", buf);
+	if (sess->src_af) {
+		printf("src %s ", sess->src);
+		seen = true;
 	}
-	if (sess.min_tx != 0)
-		printf("min_tx %d ", sess.min_tx);
-	if (sess.min_rx != 0)
-		printf("min_rx %d ", sess.min_rx);
-	if (sess.min_echo_tx != 0)
-		printf("min_echo_tx %d ", sess.min_echo_tx);
-	if (sess.min_echo_rx != 0)
-		printf("min_echo_rx %d ", sess.min_echo_rx);
-	if (sess.hold_time != 0)
-		printf("hold_time %d ", sess.hold_time);
-	if (sess.ttl != 0)
-		printf("ttl %d ", sess.ttl);
-	if (sess.detect_mult != 0)
-		printf("detect-mult %d ", sess.detect_mult);
-	if (sess.ifindex != 0)
-		printf("ifindex %d ", sess.ifindex);
-	if (sess.ifname[0] != '\0')
-		printf("ifname %s ", sess.ifname);
-	printf("\n");
+	if (sess->dst_af) {
+		printf("dst %s ", sess->dst);
+		seen = true;
+	}
+	if (sess->min_tx_seen) {
+		printf("min_tx %d ", sess->min_tx);
+		seen = true;
+	}
+	if (sess->min_rx_seen) {
+		printf("min_rx %d ", sess->min_rx);
+		seen = true;
+	}
+	if (sess->min_echo_tx_seen) {
+		printf("min_echo_tx %d ", sess->min_echo_tx_seen);
+		seen = true;
+	}
+	if (sess->min_echo_rx_seen) {
+		printf("min_echo_rx %d ", sess->min_echo_rx);
+		seen = true;
+	}
+	if (sess->hold_time_seen) {
+		printf("hold_time %d ", sess->hold_time);
+		seen = true;
+	}
+	if (sess->ttl_seen) {
+		printf("ttl %d ", sess->ttl);
+		seen = true;
+	}
+	if (sess->detect_mult_seen) {
+		printf("detect-mult %d ", sess->detect_mult);
+		seen = true;
+	}
+	if (sess->ifindex_seen) {
+		printf("ifindex %d ", sess->ifindex);
+		seen = true;
+	}
+	if (sess->ifname_seen) {
+		printf("ifname %s ", sess->ifname);
+		seen = true;
+	}
+
+	if (!seen) {
+		printf("(session without data)\n");
+	} else {
+		printf("\n");
+	}
 }
 
 static int bbdd_c_session_list_jrpc(void)
@@ -819,7 +853,7 @@ static int bbdd_c_session_list_jrpc(void)
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
-	struct bfddp_session *sessions;
+	struct bbdd_c_session *sessions;
 	size_t num_sessions;
 	const int id = 1;
 	char *error;

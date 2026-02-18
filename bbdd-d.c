@@ -114,69 +114,58 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 	bbdd_d_respond_empty(peer, id);
 }
 
+static int bbdd_d_jrpc_dissect_session_flag(struct json_object *flag_obj,
+					    struct bbdd_c_session *sess,
+					    char **error)
+{
+	enum json_type type = json_object_get_type(flag_obj);
+	const char *str;
+
+	if (type != json_type_string) {
+		bbdd_jrpc_fmterr(error, "Session flag array element expected to be string, got %s",
+				 json_type_to_name(type));
+		return -1;
+	}
+
+	str = json_object_get_string(flag_obj);
+
+#define EXPAND_MATCH(NAME, name, ...)					\
+		if (strcmp(#name, str) == 0) {				\
+			sess->flags[BBDD_C_SESSION_FLAG_ ## NAME] = true; \
+			return 0;					\
+		}
+	BBDD_C_SESSION_FLAGS(EXPAND_MATCH)
+#undef EXPAND_MATCH
+
+	bbdd_jrpc_fmterr(error, "Unknown session flag `%s'", str);
+	return -1;
+}
+
 static int bbdd_d_jrpc_dissect_session_flags(struct json_object *flag_array,
-					     uint32_t *pflags,
+					     struct bbdd_c_session *sess,
 					     char **error)
 {
-	static struct {
-		const char *name;
-		uint32_t value;
-	} flag_strs[] = {
-		{"multihop", SESSION_MULTIHOP},
-		{"demand",   SESSION_DEMAND},
-		{"cbit",     SESSION_CBIT},
-		{"echo",     SESSION_ECHO},
-		{"ipv6",     SESSION_IPV6},
-		{"passive",  SESSION_PASSIVE},
-		{"shutdown", SESSION_SHUTDOWN},
-	};
 	size_t flag_array_len;
+	int err;
 
 	assert(json_object_get_type(flag_array) == json_type_array);
 	flag_array_len = json_object_array_length(flag_array);
 
-	*pflags = 0;
+	memset(sess->flags, 0, sizeof(sess->flags));
 	for (size_t i = 0; i < flag_array_len; i++) {
 		struct json_object *flag_obj =
 			json_object_array_get_idx(flag_array, i);
-		enum json_type type = json_object_get_type(flag_obj);
-		const char *str;
 
-		if (type != json_type_string) {
-			bbdd_jrpc_fmterr(error, "Session flag array element expected to be string, got %s",
-					 json_type_to_name(type));
-			return -1;
-		}
-
-		str = json_object_get_string(flag_obj);
-		for (size_t j = 0; j < ARRAY_SIZE(flag_strs); j++)
-			if (strcmp(flag_strs[j].name, str) == 0) {
-				*pflags |= flag_strs[j].value;
-				goto next;
-			}
-		bbdd_jrpc_fmterr(error, "Unknown session flag `%s'", str);
-		return -1;
-	next:
+		err = bbdd_d_jrpc_dissect_session_flag(flag_obj, sess, error);
+		if (err)
+			return err;
 	}
 
 	return 0;
 }
 
-static int bbdd_d_jrpc_dissect_address(struct json_object *addr_obj,
-				       uint32_t flags,
-				       struct in6_addr *ret_addr,
-				       char **error)
-{
-	int af = flags & SESSION_IPV6 ? AF_INET6 : AF_INET;
-	const char *addr_str;
-
-	assert(json_object_get_type(addr_obj) == json_type_string);
-	addr_str = json_object_get_string(addr_obj);
-	return bbdd_inet_pton(af, addr_str, ret_addr, error);
-}
-
 int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
-				       struct bfddp_session *sess,
+				       struct bbdd_c_session *sess,
 				       char **error)
 {
 	enum {
@@ -222,6 +211,7 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
+	int af;
 	int rc;
 
 	rc = bbdd_jrpc_dissect(obj, policy, seen, values,
@@ -231,58 +221,173 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 
 	memset(sess, 0, sizeof(*sess));
 
-	if ((seen[pol_lid] &&
-	     bbdd_jrpc_get_uint32_non0(values[pol_lid],
-				       &sess->lid, error) < 0) ||
-	    (seen[pol_flags] &&
-	     bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
-					       &sess->flags, error) < 0) ||
-	    (seen[pol_src] &&
-	     bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
-					 &sess->src, error) < 0) ||
-	    (seen[pol_dst] &&
-	     bbdd_d_jrpc_dissect_address(values[pol_src], sess->flags,
-					 &sess->dst, error) < 0) ||
-	    (seen[pol_min_tx] &&
-	     bbdd_jrpc_get_uint32_non0(values[pol_min_tx],
-				       &sess->min_tx, error) < 0) ||
-	    (seen[pol_min_rx] &&
-	     bbdd_jrpc_get_uint32_non0(values[pol_min_rx],
-				       &sess->min_rx, error) < 0) ||
-	    (seen[pol_min_echo_tx] &&
-	     bbdd_jrpc_get_uint32(values[pol_min_echo_tx],
-				  &sess->min_echo_tx, error) < 0) ||
-	    (seen[pol_min_echo_rx] &&
-	     bbdd_jrpc_get_uint32(values[pol_min_echo_rx],
-				  &sess->min_echo_rx, error) < 0) ||
-	    (seen[pol_hold_time] &&
-	     bbdd_jrpc_get_uint32(values[pol_hold_time], &sess->hold_time,
-				  error) < 0) ||
-	    (seen[pol_ttl] &&
-	     bbdd_jrpc_get_uint8(values[pol_ttl], &sess->ttl, error) < 0) ||
-	    (seen[pol_detect_mult] &&
-	     bbdd_jrpc_get_uint8(values[pol_detect_mult], &sess->detect_mult,
-				 error) < 0) ||
-	    (seen[pol_ifindex] &&
-	     bbdd_jrpc_get_uint32_non0(values[pol_ifindex], &sess->ifindex,
-				       error) < 0) ||
-	    (seen[pol_ifname] &&
-	     bbdd_jrpc_strcpy(values[pol_ifname],
-			      sess->ifname, sizeof sess->ifname, error) < 0))
-		return -1;
+	if (seen[pol_flags] &&
+	    bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
+					      sess, error) < 0)
+		goto fail;
 
-#define HTONL_FIELD(FIELD) FIELD = htonl(FIELD)
-	HTONL_FIELD(sess->lid);
-	HTONL_FIELD(sess->flags);
-	HTONL_FIELD(sess->min_tx);
-	HTONL_FIELD(sess->min_rx);
-	HTONL_FIELD(sess->min_echo_rx);
-	HTONL_FIELD(sess->min_echo_tx);
-	HTONL_FIELD(sess->hold_time);
-	HTONL_FIELD(sess->ifindex);
-#undef HTONL_FIELD
+	af = sess->flags[BBDD_C_SESSION_FLAG_IPV6] ? AF_INET6 : AF_INET;
+
+	if (seen[pol_src]) {
+		if (bbdd_jrpc_strcpy(values[pol_src],
+				     sess->src, sizeof(sess->src), error) < 0)
+			goto fail;
+		sess->src_af = af;
+	}
+	if (seen[pol_dst]) {
+		if (bbdd_jrpc_strcpy(values[pol_dst],
+				     sess->dst, sizeof(sess->dst), error) < 0)
+			goto fail;
+		sess->dst_af = af;
+	}
+
+	if (seen[pol_ifname]) {
+		if (bbdd_jrpc_strcpy(values[pol_ifname],
+				     sess->ifname, sizeof(sess->ifname), error) < 0)
+		    goto fail;
+		sess->ifname_seen = 1;
+	}
+
+#define __DISSECT(NAME, CB) do {					\
+		if (seen[pol_ ## NAME]) {				\
+			if (CB(values[pol_ ## NAME], &sess->NAME, error) < 0) \
+				goto fail;				\
+			sess->NAME ## _seen = 1;			\
+		}							\
+	} while (0)
+
+#define DISSECT_U32_NON0(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32_non0)
+#define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
+#define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
+
+	DISSECT_U32_NON0(lid);
+	DISSECT_U32_NON0(min_tx);
+	DISSECT_U32_NON0(min_rx);
+	DISSECT_U32_NON0(min_echo_tx);
+	DISSECT_U32_NON0(min_echo_rx);
+	DISSECT_U32(hold_time);
+	DISSECT_U8(ttl);
+	DISSECT_U8(detect_mult);
+	DISSECT_U32_NON0(ifindex);
+
+#undef DISSECT_U8
+#undef DISSECT_U32
+#undef DISSECT_U32_NON0
+#undef __DISSECT
 
 	return 0;
+
+fail:
+	return -1;
+}
+
+static bool bbdd_d_addr_in4_zero(const struct sockaddr_in *sin)
+{
+	return sin->sin_addr.s_addr == 0;
+}
+
+static bool bbdd_d_addr_in6_zero(const struct sockaddr_in6 *sin6)
+{
+	struct in6_addr empty = {};
+
+	return memcmp(&sin6->sin6_addr, &empty, sizeof(empty)) == 0;
+}
+
+static bool bbdd_d_addr_zero(const struct sockaddr *sa)
+{
+	switch (sa->sa_family) {
+	case AF_INET:
+		return bbdd_d_addr_in4_zero((struct sockaddr_in *) sa);
+	case AF_INET6:
+		return bbdd_d_addr_in6_zero((struct sockaddr_in6 *) sa);
+	}
+
+	fprintf(stderr, "warning: invalid address family `%d'\n",
+		sa->sa_family);
+	return false;
+}
+
+static void bbdd_d_sockaddr_in4_ntop(socklen_t size;
+				     const struct sockaddr_in *sin,
+				     char dst[size], socklen_t size)
+{
+	inet_ntop(sin->sin_family, &sin->sin_addr, dst, size);
+}
+
+static void bbdd_d_sockaddr_in6_ntop(socklen_t size;
+				     const struct sockaddr_in6 *sin6,
+				     char dst[size], socklen_t size)
+{
+	inet_ntop(sin6->sin6_family, &sin6->sin6_addr, dst, size);
+}
+
+static void bbdd_d_sockaddr_ntop(socklen_t size;
+				 const struct sockaddr *sa,
+				 char dst[size], socklen_t size)
+{
+	switch (sa->sa_family) {
+	case AF_INET:
+		return bbdd_d_sockaddr_in4_ntop((struct sockaddr_in *) sa,
+						dst, size);
+	case AF_INET6:
+		return bbdd_d_sockaddr_in6_ntop((struct sockaddr_in6 *) sa,
+						dst, size);
+	}
+
+	snprintf(dst, size, "[af %d?]", sa->sa_family);
+}
+
+static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
+				     const struct bfd_session *bs)
+{
+	*sess = (struct bbdd_c_session){};
+
+	sess->flags[BBDD_C_SESSION_FLAG_MULTIHOP] = bs->bs_multihop;
+	sess->flags[BBDD_C_SESSION_FLAG_DEMAND] = bs->bs_demand;
+	sess->flags[BBDD_C_SESSION_FLAG_CBIT] = bs->bs_cbit;
+	sess->flags[BBDD_C_SESSION_FLAG_ECHO] = bs->bs_echo;
+	sess->flags[BBDD_C_SESSION_FLAG_IPV6] = !bs->bs_ipv4;
+	sess->flags[BBDD_C_SESSION_FLAG_PASSIVE] = bs->bs_passive;
+	sess->flags[BBDD_C_SESSION_FLAG_SHUTDOWN] = bs->bs_admin_shutdown;
+
+	if (!bbdd_d_addr_zero(&bs->bs_src.bs_src_sa)) {
+		bbdd_d_sockaddr_ntop(&bs->bs_src.bs_src_sa,
+				     sess->src, sizeof(sess->src));
+		sess->src_af = bs->bs_src.bs_src_sa.sa_family;
+	}
+	if (!bbdd_d_addr_zero(&bs->bs_dst.bs_dst_sa)) {
+		bbdd_d_sockaddr_ntop(&bs->bs_dst.bs_dst_sa,
+				     sess->dst, sizeof(sess->dst));
+		sess->dst_af = bs->bs_dst.bs_dst_sa.sa_family;
+	}
+
+	if (bs->bs_ifname[0] != '\0') {
+		strncpy(sess->ifname, bs->bs_ifname, sizeof(sess->ifname));
+		sess->ifname_seen = 1;
+	}
+
+#define ASSIGN(TO, FROM) do {			\
+		TO = FROM;			\
+		TO ## _seen = 1;		\
+	} while (0)
+
+#define ASSIGN_NON0(TO, FROM) do {		\
+		if (FROM)			\
+			ASSIGN(TO, FROM);	\
+	} while (0)
+
+	ASSIGN(sess->lid, bs->bs_lid);
+	ASSIGN_NON0(sess->min_tx, bs->bs_cur_tx); // xxx what's with the cur/non-cur field duality?
+	ASSIGN_NON0(sess->min_rx, bs->bs_cur_rx);
+	ASSIGN_NON0(sess->min_echo_rx, bs->bs_etx);
+	ASSIGN_NON0(sess->min_echo_rx, bs->bs_cur_erx);
+	ASSIGN_NON0(sess->hold_time, bs->bs_hold);
+	ASSIGN_NON0(sess->ttl, bs->bs_minttl);
+	ASSIGN_NON0(sess->detect_mult, bs->bs_dmultiplier);
+	ASSIGN_NON0(sess->ifindex, bs->bs_ifindex);
+
+#undef ASSIGN_NON0
+#undef ASSIGN
 }
 
 static void bbdd_d_handle_session_list(struct events_ctx *,
@@ -337,10 +442,9 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 		goto put_result_obj;
 
 	while ((bs = bfd_sessions_walk(bs))) {
-		struct bbdd_c_session sess = {
-			.lid = bs->bs_lid,
-			.lid_seen = true,
-		};
+		struct bbdd_c_session sess;
+
+		bbdd_d_session_from_soft(&sess, bs);
 
 		sess_obj = bbdd_c_jrpc_session_obj(&sess);
 		if (sess_obj == NULL)
@@ -374,13 +478,67 @@ put_obj:
 	bbdd_d_respond_memerr(peer, id);
 }
 
+static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
+				 struct bfddp_session *bds,
+				 char **error)
+{
+	int err;
+
+	*bds = (struct bfddp_session){};
+
+#define EXPAND_FLAG(NAME, name, ...)		\
+		[BBDD_C_SESSION_FLAG_ ## NAME] = SESSION_ ## NAME,
+
+	uint32_t bfddp_flags[BBDD_C_SESSION_NFLAGS] = {
+		BBDD_C_SESSION_FLAGS(EXPAND_FLAG)
+	};
+
+#undef EXPAND_FLAG
+
+	for (int i = 0; i < BBDD_C_SESSION_NFLAGS; i++)
+		if (sess->flags[i])
+			bds->flags |= bfddp_flags[i];
+
+	if (sess->src_af) {
+		err = bbdd_inet_pton(sess->src_af, sess->src, &bds->src, error);
+		if (err)
+			return err;
+	}
+	if (sess->dst_af) {
+		err = bbdd_inet_pton(sess->dst_af, sess->dst, &bds->dst, error);
+		if (err)
+			return err;
+	}
+	if (sess->ifname_seen)
+		strncpy(bds->ifname, sess->ifname, sizeof(bds->ifname));
+
+#define ASSIGN(FIELD)					\
+		if (sess->FIELD ## _seen)		\
+			bds->FIELD = sess->FIELD;
+
+	ASSIGN(lid);
+	ASSIGN(min_tx);
+	ASSIGN(min_rx);
+	ASSIGN(min_echo_rx);
+	ASSIGN(min_echo_rx);
+	ASSIGN(hold_time);
+	ASSIGN(ttl);
+	ASSIGN(detect_mult);
+	ASSIGN(ifindex);
+
+#undef ASSIGN
+
+	return 0;
+}
+
 static void bbdd_d_handle_session_add(struct events_ctx *ec,
 				      struct bfddp_ctx *bctx,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
-	struct bfddp_session sess;
+	struct bbdd_c_session sess;
+	struct bfddp_session bds;
 	char *error;
 	int rc;
 
@@ -391,7 +549,14 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 		return;
 	}
 
-	bfddp_process_edit_session(ec, bctx, &sess);
+	rc = bbdd_d_session_to_frr(&sess, &bds, &error);
+	if (rc != 0)  {
+		bbdd_d_respond_interr(peer, id, error);
+		free(error);
+		return;
+	}
+
+	bfddp_process_edit_session(ec, bctx, &bds);
 	bbdd_d_respond_empty(peer, id);
 }
 
