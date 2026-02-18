@@ -33,7 +33,7 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 		return -1;
 	}
 	/* Invalid number range. */
-	if (rv <= min || rv >= max || errno == ERANGE)
+	if (rv < min || rv > max || errno == ERANGE)
 		goto invalid;
 
 	/* There was garbage at the end of the string. */

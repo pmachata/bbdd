@@ -260,11 +260,11 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 #define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
 #define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
 
-	DISSECT_U32_NON0(lid);
-	DISSECT_U32_NON0(min_tx);
-	DISSECT_U32_NON0(min_rx);
-	DISSECT_U32_NON0(min_echo_tx);
-	DISSECT_U32_NON0(min_echo_rx);
+	DISSECT_U32(lid);
+	DISSECT_U32(min_tx);
+	DISSECT_U32(min_rx);
+	DISSECT_U32(min_echo_tx);
+	DISSECT_U32(min_echo_rx);
 	DISSECT_U32(hold_time);
 	DISSECT_U8(ttl);
 	DISSECT_U8(detect_mult);
@@ -560,6 +560,140 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 	bbdd_d_respond_empty(peer, id);
 }
 
+/* Returns < 0 for errors, 0 for not a match, 1 for match. */
+static int bbdd_d_session_addr_matches(int a_af, const char a[INET6_ADDRSTRLEN],
+				       int b_af, const char b[INET6_ADDRSTRLEN],
+				       char **error)
+{
+	struct in6_addr a_addr = {};
+	struct in6_addr b_addr = {};
+	int rc;
+
+	if (a_af != b_af)
+		return 0;
+
+	rc = bbdd_inet_pton(a_af, a, &a_addr, error);
+	if (rc < 0)
+		return rc;
+
+	rc = bbdd_inet_pton(b_af, b, &b_addr, error);
+	if (rc < 0)
+		return rc;
+
+	if (memcmp(&a_addr, &b_addr, sizeof(a_addr)) != 0)
+		return 0;
+
+	return 1;
+}
+
+/* Returns < 0 for errors, 0 for not a match, 1 for match. */
+static int bbdd_d_session_matches(const struct bbdd_c_session *q,
+				  const struct bfd_session *bs,
+				  char **error)
+{
+	struct bbdd_c_session sess;
+	int rc;
+
+	bbdd_d_session_from_soft(&sess, bs);
+
+	for (int i = 0; i < BBDD_C_SESSION_NFLAGS; i++)
+		if (q->flags[i] && !sess.flags[i])
+			return false;
+
+	if (q->src_af) {
+		rc = bbdd_d_session_addr_matches(q->src_af, q->src,
+						 sess.src_af, sess.src,
+						 error);
+		if (rc <= 0)
+			return rc;
+	}
+
+	if (q->dst_af) {
+		rc = bbdd_d_session_addr_matches(q->dst_af, q->dst,
+						 sess.dst_af, sess.dst,
+						 error);
+		if (rc <= 0)
+			return rc;
+	}
+
+	if (q->ifname_seen && (!sess.ifname_seen ||
+			       strcmp(q->ifname, sess.ifname) != 0))
+		return 0;
+
+#define FIELD(NAME)						\
+	if (q->NAME ## _seen && (!sess.NAME ## _seen ||		\
+				 q->NAME != sess.NAME))		\
+		return 0
+
+	FIELD(lid);
+	FIELD(min_tx);
+	FIELD(min_rx);
+	FIELD(min_echo_tx);
+	FIELD(min_echo_rx);
+	FIELD(hold_time);
+	FIELD(ttl);
+	FIELD(detect_mult);
+	FIELD(ifindex);
+#undef FIELD
+
+	return 1;
+}
+
+static void bbdd_d_handle_session_del(struct events_ctx *,
+				      struct bfddp_ctx *,
+				      struct bbdd_sock *peer,
+				      struct json_object *params_obj,
+				      struct json_object *id)
+{
+	struct bfd_session *bs = NULL;
+	struct bbdd_c_session sess;
+	uint32_t lid;
+	bool seen;
+	char *error;
+	int rc;
+
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, &sess, &error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return;
+	}
+
+	seen = false;
+	while ((bs = bfd_sessions_walk(bs))) {
+		rc = bbdd_d_session_matches(&sess, bs, &error);
+		if (rc < 0) {
+			bbdd_d_respond_interr(peer, id, error);
+			free(error);
+			return;
+		}
+		if (rc == 1) {
+			if (seen) {
+				bbdd_d_respond_invalid_params(peer, id,
+							      "The deletion request matches more than one session");
+				return;
+			}
+			lid = bs->bs_lid;
+			seen = true;
+		}
+	}
+	if (!seen) {
+		bbdd_d_respond_invalid_params(peer, id,
+					      "The deletion request matches no session");
+		return;
+	}
+
+	bs = bfd_session_lookup(lid);
+	if (bs == NULL) {
+		bbdd_d_respond_invalid_params(peer, id,
+					      "The deletion request matched an already-deleted session");
+		return;
+	}
+
+	bfddp_session_free(&bs, NULL);
+	bbdd_d_respond_empty(peer, id);
+}
+
 static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bfddp_ctx *bctx,
 				 struct bbdd_sock *peer,
@@ -580,6 +714,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 		{"ping", bbdd_d_handle_ping},
 		{"session-list", bbdd_d_handle_session_list},
 		{"session-add", bbdd_d_handle_session_add},
+		{"session-del", bbdd_d_handle_session_del},
 	};
 	size_t i;
 

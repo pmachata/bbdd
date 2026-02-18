@@ -315,12 +315,13 @@ int bbdd_c_stop(int argc, char **argv)
 
 enum bbdd_c_session_command {
 	bbdd_c_session_command_add,
+	bbdd_c_session_command_del,
 };
 
 static void bbdd_c_session_help(void)
 {
 	fprintf(stderr,
-		"Usage:	bbdd session { add } PARAMS\n"
+		"Usage:	bbdd session { add | del } PARAMS\n"
 		"	bbdd session list\n"
 		"\n"
 		"where	PARAMS := PARAM [ PARAMS ]\n"
@@ -545,19 +546,6 @@ put_params_obj:
 	return NULL;
 }
 
-/* xxx
-static int bbdd_c_jrpc_dissect_address(int af, struct json_object *addr_obj,
-				       struct in6_addr *ret_addr,
-				       char **error)
-{
-	const char *addr_str;
-
-	assert(json_object_get_type(addr_obj) == json_type_string);
-	addr_str = json_object_get_string(addr_obj);
-	return bbdd_inet_pton(af, addr_str, ret_addr, error);
-}
-*/
-
 static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
 			       struct bbdd_c_session *sess)
 {
@@ -572,6 +560,9 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
 	switch (scmd) {
 	case bbdd_c_session_command_add:
 		method = "session-add";
+		break;
+	case bbdd_c_session_command_del:
+		method = "session-del";
 		break;
 	}
 
@@ -609,7 +600,7 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command scmd,
 	}
 
 	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "xxx sent session-add & got response\n");
+		fprintf(stderr, "xxx sent %s & got response\n", method);
 	err = 0;
 
 put_result:
@@ -883,7 +874,7 @@ static int bbdd_c_session_list_jrpc(void)
 	err = bbdd_c_session_list_jrpc_dissect(result, &sessions, &num_sessions,
 					       &error);
 	if (err != 0) {
-		fprintf(stderr, "Invalid tables object: %s\n", error);
+		fprintf(stderr, "Invalid session object: %s\n", error);
 		free(error);
 		goto put_result;
 	}
@@ -923,6 +914,10 @@ int bbdd_c_session(int argc, char **argv)
 	} else if (strcmp(*argv, "add") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_session_command(bbdd_c_session_command_add,
+					      argc, argv);
+	} else if (strcmp(*argv, "del") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_session_command(bbdd_c_session_command_del,
 					      argc, argv);
 	}
 

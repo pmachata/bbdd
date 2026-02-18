@@ -73,10 +73,6 @@ struct bbdd_c_session {
 
 struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess);
 
-struct bfd_session;
-void bbdd_c_session_decode(const struct bfd_session *bs,
-			   struct bbdd_c_session *sess);
-
 /* bbdd-d.c */
 
 int bbdd_d_start(int argc, char **argv);
