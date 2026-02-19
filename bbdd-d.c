@@ -131,7 +131,7 @@ static int bbdd_d_jrpc_dissect_session_flag(struct json_object *flag_obj,
 
 #define EXPAND_MATCH(NAME, name, ...)					\
 		if (strcmp(#name, str) == 0) {				\
-			sess->flags[BBDD_C_SESSION_FLAG_ ## NAME] = true; \
+			sess->flags[bbdd_c_session_flag_ ## name] = true; \
 			return 0;					\
 		}
 	BBDD_C_SESSION_FLAGS(EXPAND_MATCH)
@@ -164,9 +164,10 @@ static int bbdd_d_jrpc_dissect_session_flags(struct json_object *flag_array,
 	return 0;
 }
 
-int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
-				       struct bbdd_c_session *sess,
-				       char **error)
+int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
+					   struct bbdd_c_session *sess,
+					   bool allow_bulk,
+					   char **error)
 {
 	enum {
 		pol_lid,
@@ -186,6 +187,8 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 
 		pol_ifindex,
 		pol_ifname,
+
+		pol_bulk, /* Only valid when allow_bulk set. */
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		[pol_lid] =  { .key = "lid", .type = json_type_int },
@@ -208,14 +211,20 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 
 		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
 		[pol_ifname] = { .key = "ifname", .type = json_type_string },
+
+		[pol_bulk] = { .key = "bulk", .type = json_type_boolean },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
+	size_t polsize;
 	int af;
 	int rc;
 
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values,
-			       ARRAY_SIZE(policy), error);
+	polsize = ARRAY_SIZE(policy);
+	if (! allow_bulk)
+		polsize--;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, polsize, error);
 	if (rc != 0)
 		return rc;
 
@@ -226,7 +235,7 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      sess, error) < 0)
 		goto fail;
 
-	af = sess->flags[BBDD_C_SESSION_FLAG_IPV6] ? AF_INET6 : AF_INET;
+	af = sess->flags[bbdd_c_session_flag_ipv6] ? AF_INET6 : AF_INET;
 
 	if (seen[pol_src]) {
 		if (bbdd_jrpc_strcpy(values[pol_src],
@@ -247,6 +256,9 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 		    goto fail;
 		sess->ifname_seen = 1;
 	}
+
+	if (seen[pol_bulk])
+		sess->bulk = json_object_get_boolean(values[pol_bulk]);
 
 #define __DISSECT(NAME, CB) do {					\
 		if (seen[pol_ ## NAME]) {				\
@@ -274,6 +286,54 @@ int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 #undef DISSECT_U32
 #undef DISSECT_U32_NON0
 #undef __DISSECT
+
+	return 0;
+
+fail:
+	return -1;
+}
+
+static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
+					      struct bbdd_c_session *select,
+					      struct bbdd_c_session *change,
+					      char **error)
+{
+	enum {
+		pol_select,
+		pol_change,
+		// xxx maybe bulk should be here
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_select] = { .key = "select", .type = json_type_object },
+		[pol_change] = { .key = "change", .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	if (seen[pol_select] && select == NULL) {
+		bbdd_jrpc_fmterr(error, "RPC method doesn't allow session select");
+		return -1;
+	}
+	if (seen[pol_change] && change == NULL) {
+		bbdd_jrpc_fmterr(error, "RPC method doesn't allow session change");
+		return -1;
+	}
+
+	if (seen[pol_select] &&
+	    bbdd_d_jrpc_dissect_params_session_one(values[pol_select], select,
+						   true, error))
+		goto fail;
+
+	if (seen[pol_change] &&
+	    bbdd_d_jrpc_dissect_params_session_one(values[pol_change], change,
+						   false, error))
+		goto fail;
 
 	return 0;
 
@@ -342,13 +402,13 @@ static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
 {
 	*sess = (struct bbdd_c_session){};
 
-	sess->flags[BBDD_C_SESSION_FLAG_MULTIHOP] = bs->bs_multihop;
-	sess->flags[BBDD_C_SESSION_FLAG_DEMAND] = bs->bs_demand;
-	sess->flags[BBDD_C_SESSION_FLAG_CBIT] = bs->bs_cbit;
-	sess->flags[BBDD_C_SESSION_FLAG_ECHO] = bs->bs_echo;
-	sess->flags[BBDD_C_SESSION_FLAG_IPV6] = !bs->bs_ipv4;
-	sess->flags[BBDD_C_SESSION_FLAG_PASSIVE] = bs->bs_passive;
-	sess->flags[BBDD_C_SESSION_FLAG_SHUTDOWN] = bs->bs_admin_shutdown;
+	sess->flags[bbdd_c_session_flag_multihop] = bs->bs_multihop;
+	sess->flags[bbdd_c_session_flag_demand] = bs->bs_demand;
+	sess->flags[bbdd_c_session_flag_cbit] = bs->bs_cbit;
+	sess->flags[bbdd_c_session_flag_echo] = bs->bs_echo;
+	sess->flags[bbdd_c_session_flag_ipv6] = !bs->bs_ipv4;
+	sess->flags[bbdd_c_session_flag_passive] = bs->bs_passive;
+	sess->flags[bbdd_c_session_flag_shutdown] = bs->bs_admin_shutdown;
 
 	if (!bbdd_d_addr_zero(&bs->bs_src.bs_src_sa)) {
 		bbdd_d_sockaddr_ntop(&bs->bs_src.bs_src_sa,
@@ -414,7 +474,7 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 	 * }
 	 *
 	 * Where individual SESS objects are formatted the same as session
-	 * request objects, see bbdd_d_jrpc_dissect_params_session().
+	 * request objects, see bbdd_d_jrpc_dissect_params_session_one().
 	 */
 
 	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
@@ -487,15 +547,15 @@ static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
 	*bds = (struct bfddp_session){};
 
 #define EXPAND_FLAG(NAME, name, ...)		\
-		[BBDD_C_SESSION_FLAG_ ## NAME] = SESSION_ ## NAME,
+		[bbdd_c_session_flag_ ## name] = SESSION_ ## NAME,
 
-	uint32_t bfddp_flags[BBDD_C_SESSION_NFLAGS] = {
+	uint32_t bfddp_flags[bbdd_c_session_nflags] = {
 		BBDD_C_SESSION_FLAGS(EXPAND_FLAG)
 	};
 
 #undef EXPAND_FLAG
 
-	for (int i = 0; i < BBDD_C_SESSION_NFLAGS; i++)
+	for (int i = 0; i < bbdd_c_session_nflags; i++)
 		if (sess->flags[i])
 			bds->flags |= bfddp_flags[i];
 
@@ -512,9 +572,15 @@ static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
 	if (sess->ifname_seen)
 		strncpy(bds->ifname, sess->ifname, sizeof(bds->ifname));
 
+	if (sess->ttl_seen)
+		bds->ttl = sess->ttl;
+
+	if (sess->detect_mult_seen)
+		bds->detect_mult = sess->detect_mult;
+
 #define ASSIGN(FIELD)					\
 		if (sess->FIELD ## _seen)		\
-			bds->FIELD = sess->FIELD;
+			bds->FIELD = htonl(sess->FIELD);
 
 	ASSIGN(lid);
 	ASSIGN(min_tx);
@@ -522,42 +588,11 @@ static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
 	ASSIGN(min_echo_rx);
 	ASSIGN(min_echo_rx);
 	ASSIGN(hold_time);
-	ASSIGN(ttl);
-	ASSIGN(detect_mult);
 	ASSIGN(ifindex);
 
 #undef ASSIGN
 
 	return 0;
-}
-
-static void bbdd_d_handle_session_add(struct events_ctx *ec,
-				      struct bfddp_ctx *bctx,
-				      struct bbdd_sock *peer,
-				      struct json_object *params_obj,
-				      struct json_object *id)
-{
-	struct bbdd_c_session sess;
-	struct bfddp_session bds;
-	char *error;
-	int rc;
-
-	rc = bbdd_d_jrpc_dissect_params_session(params_obj, &sess, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
-
-	rc = bbdd_d_session_to_frr(&sess, &bds, &error);
-	if (rc != 0)  {
-		bbdd_d_respond_interr(peer, id, error);
-		free(error);
-		return;
-	}
-
-	bfddp_process_edit_session(ec, bctx, &bds);
-	bbdd_d_respond_empty(peer, id);
 }
 
 /* Returns < 0 for errors, 0 for not a match, 1 for match. */
@@ -596,7 +631,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *q,
 
 	bbdd_d_session_from_soft(&sess, bs);
 
-	for (int i = 0; i < BBDD_C_SESSION_NFLAGS; i++)
+	for (int i = 0; i < bbdd_c_session_nflags; i++)
 		if (q->flags[i] && !sess.flags[i])
 			return false;
 
@@ -639,58 +674,205 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *q,
 	return 1;
 }
 
-static void bbdd_d_handle_session_del(struct events_ctx *,
-				      struct bfddp_ctx *,
+static int bbdd_d_select_sessions(const struct bbdd_c_session *sess,
+				  uint32_t **p_lids,
+				  size_t *p_nlids,
+				  char **error)
+{
+	struct bfd_session *bs = NULL;
+	uint32_t *lids = NULL;
+	size_t nlids = 0;
+	size_t cap = 0;
+	int rc;
+
+	while ((bs = bfd_sessions_walk(bs))) {
+		rc = bbdd_d_session_matches(sess, bs, error);
+		if (rc < 0)
+			return -1;
+		if (rc == 0)
+			continue;
+
+		if (nlids >= cap) {
+			uint32_t *new_lids;
+
+			cap = (cap == 0) ? 8 : cap * 2;
+			new_lids = realloc(lids, cap * sizeof(*lids));
+			if (new_lids == NULL)
+				goto oom;
+			lids = new_lids;
+		}
+		lids[nlids++] = bs->bs_lid;
+	}
+	*p_lids = lids;
+	*p_nlids = nlids;
+	return 0;
+
+oom:
+	errno = -ENOMEM;
+	bbdd_jrpc_fmterr(error, "%m");
+	free(lids);
+	return -1;
+}
+
+static void bbdd_d_handle_session_add(struct events_ctx *ec,
+				      struct bfddp_ctx *bctx,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
-	struct bfd_session *bs = NULL;
 	struct bbdd_c_session sess;
-	uint32_t lid;
-	bool seen;
+	struct bfddp_session bds;
 	char *error;
 	int rc;
 
-	rc = bbdd_d_jrpc_dissect_params_session(params_obj, &sess, &error);
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &sess,
+						&error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, error);
 		free(error);
 		return;
 	}
 
-	seen = false;
-	while ((bs = bfd_sessions_walk(bs))) {
-		rc = bbdd_d_session_matches(&sess, bs, &error);
-		if (rc < 0) {
+	if (!sess.lid_seen) {
+		sess.lid = bfd_session_gen_discriminator();
+		sess.lid_seen = true;
+	} else if (bfd_session_lookup(sess.lid) != NULL) {
+		bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
+		return;
+	}
+
+	rc = bbdd_d_session_to_frr(&sess, &bds, &error);
+	if (rc != 0)  {
+		bbdd_d_respond_interr(peer, id, error);
+		free(error);
+		return;
+	}
+
+	bfddp_session_new(bctx, ec, &bds);
+	bbdd_d_respond_empty(peer, id);
+}
+
+static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
+					struct json_object *params_obj,
+					struct json_object *id,
+					struct bbdd_c_session *select,
+					struct bbdd_c_session *change,
+					uint32_t **lids,
+					size_t *nlids)
+{
+	char *error;
+	int rc;
+
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, select, change,
+						&error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return -1;
+	}
+
+	rc = bbdd_d_select_sessions(select, lids, nlids, &error);
+	if (rc) {
+		bbdd_d_respond_interr(peer, id, error);
+		free(error);
+		return -1;
+	}
+	if (*nlids == 0) {
+		bbdd_d_respond_invalid_params(peer, id,
+					      "The set request matches no session");
+		return -1;
+	}
+	if (*nlids > 1 && !select->bulk) {
+		bbdd_d_respond_invalid_params(peer, id,
+					      "Non-bulk set request matches more than one session");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void bbdd_d_handle_session_set(struct events_ctx *,
+				      struct bfddp_ctx *,
+				      struct bbdd_sock *peer,
+				      struct json_object *params_obj,
+				      struct json_object *id)
+{
+	struct bbdd_c_session select;
+	struct bbdd_c_session change;
+	struct bfddp_session bds;
+	bool set = false;
+	uint32_t *lids;
+	size_t nlids;
+	char *error;
+	int rc;
+
+	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+					  &select, &change, &lids, &nlids);
+	if (rc < 0)
+		return;
+
+	for (size_t i = 0; i < nlids; i++) {
+		struct bfd_session *bs;
+
+		bs = bfd_session_lookup(lids[i]);
+		if (!bs)
+			continue;
+
+		rc = bbdd_d_session_to_frr(&change, &bds, &error);
+		if (rc != 0)  {
 			bbdd_d_respond_interr(peer, id, error);
 			free(error);
 			return;
 		}
-		if (rc == 1) {
-			if (seen) {
-				bbdd_d_respond_invalid_params(peer, id,
-							      "The deletion request matches more than one session");
-				return;
-			}
-			lid = bs->bs_lid;
-			seen = true;
+
+		bfddp_session_update(bs, NULL, &bds);
+		set = true;
+	}
+
+	if (!set) {
+		/* Not sure this can actually happen. */
+		bbdd_d_respond_invalid_params(peer, id,
+					      "All matching sessions went away mid request");
+		return;
+	}
+
+	bbdd_d_respond_empty(peer, id);
+}
+
+static void bbdd_d_handle_session_del(struct events_ctx *,
+				      struct bfddp_ctx *,
+				      struct bbdd_sock *peer,
+				      struct json_object *params_obj,
+				      struct json_object *id)
+{
+	struct bbdd_c_session sess;
+	bool deleted = false;
+	uint32_t *lids;
+	size_t nlids;
+	int rc;
+
+	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+					  &sess, NULL, &lids, &nlids);
+	if (rc < 0)
+		return;
+
+	for (size_t i = 0; i < nlids; i++) {
+		struct bfd_session *bs;
+
+		bs = bfd_session_lookup(lids[i]);
+		if (bs) {
+			bfddp_session_free(&bs, NULL);
+			deleted = true;
 		}
 	}
-	if (!seen) {
+
+	if (!deleted) {
+		/* Not sure this can actually happen. */
 		bbdd_d_respond_invalid_params(peer, id,
-					      "The deletion request matches no session");
+					      "All matching sessions went away mid request");
 		return;
 	}
 
-	bs = bfd_session_lookup(lid);
-	if (bs == NULL) {
-		bbdd_d_respond_invalid_params(peer, id,
-					      "The deletion request matched an already-deleted session");
-		return;
-	}
-
-	bfddp_session_free(&bs, NULL);
 	bbdd_d_respond_empty(peer, id);
 }
 
@@ -714,6 +896,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 		{"ping", bbdd_d_handle_ping},
 		{"session-list", bbdd_d_handle_session_list},
 		{"session-add", bbdd_d_handle_session_add},
+		{"session-set", bbdd_d_handle_session_set},
 		{"session-del", bbdd_d_handle_session_del},
 	};
 	size_t i;

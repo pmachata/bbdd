@@ -40,7 +40,7 @@ int bbdd_c_session(int argc, char **argv);
 	/**/
 
 #define BBDD_C_SESSION_EXPAND_ENUM(NAME, name, ...)	\
-	BBDD_C_SESSION_FLAG_ ## NAME,
+	bbdd_c_session_flag_ ## name,
 #define BBDD_C_SESSION_EXPAND_PLUS1(...) + 1
 
 enum bbdd_c_session_flag {
@@ -48,7 +48,7 @@ enum bbdd_c_session_flag {
 };
 
 enum {
-	BBDD_C_SESSION_NFLAGS =
+	bbdd_c_session_nflags =
 		BBDD_C_SESSION_FLAGS(BBDD_C_SESSION_EXPAND_PLUS1)
 };
 
@@ -56,7 +56,8 @@ enum {
 #undef BBDD_C_SESSION_EXPAND_ENUM
 
 struct bbdd_c_session {
-	bool flags[BBDD_C_SESSION_NFLAGS];
+	bool flags[bbdd_c_session_nflags];
+	bool bulk;
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
 	uint32_t lid;			int lid_seen;
@@ -77,6 +78,7 @@ struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess);
 
 int bbdd_d_start(int argc, char **argv);
 
-int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
-				       struct bbdd_c_session *sess,
-				       char **error);
+int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
+					   struct bbdd_c_session *sess,
+					   bool allow_bulk,
+					   char **error);

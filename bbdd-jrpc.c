@@ -569,3 +569,10 @@ int bbdd_jrpc_append_int(struct json_object *params_obj,
 	return bbdd_jrpc_append_obj(params_obj, name,
 				    json_object_new_int64(value));
 }
+
+int bbdd_jrpc_append_bool(struct json_object *params_obj,
+			  const char *name, bool value)
+{
+	return bbdd_jrpc_append_obj(params_obj, name,
+				    json_object_new_boolean(value));
+}
