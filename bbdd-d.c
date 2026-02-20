@@ -368,6 +368,7 @@ static void bbdd_d_sockaddr_ntop(socklen_t size;
 }
 
 static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
+				     struct bbdd_c_session_state *state,
 				     const struct bfd_session *bs)
 {
 	*sess = (struct bbdd_c_session){};
@@ -422,6 +423,115 @@ static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
 
 #undef ASSIGN_NON0
 #undef ASSIGN
+
+	*state = (struct bbdd_c_session_state) {
+		.local = {
+			.state = bs->bs_state,
+			.diag = bs->bs_diag,
+		},
+		.remote = {
+			.state = bs->bs_rstate,
+			.diag = bs->bs_rdiag,
+		},
+	};
+}
+
+static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
+						  enum bfd_state_value sv)
+{
+	static const char *str[] = {
+		[STATE_ADMINDOWN] = "admindown",
+		[STATE_DOWN] = "down",
+		[STATE_INIT] = "init",
+		[STATE_UP] = "up",
+	};
+
+	if (sv > ARRAY_SIZE(str))
+		return -EINVAL;
+
+	return bbdd_jrpc_append_str(obj, "state", str[sv]);
+}
+
+static int bbdd_d_jrpc_session_state_attach_diag(struct json_object *obj,
+						 enum bfd_diagnostic_value dv)
+{
+	static const char *str[] = {
+		[DIAG_NOTHING] = "nothing",
+		[DIAG_CONTROL_EXPIRED] = "control_expired",
+		[DIAG_ECHO_FAILED] = "echo_failed",
+		[DIAG_DOWN] = "down",
+		[DIAG_FP_RESET] = "fp_reset",
+		[DIAG_PATH_DOWN] = "path_down",
+		[DIAG_CONCAT_PATH_DOWN] = "concat_path_down",
+		[DIAG_ADMIN_DOWN] = "admin_down",
+		[DIAG_REV_CONCAT_PATH_DOWN] = "rev_concat_path_down",
+	};
+
+	if (dv > ARRAY_SIZE(str))
+		return -EINVAL;
+
+	return bbdd_jrpc_append_str(obj, "diag", str[dv]);
+}
+
+static struct json_object *
+bbdd_d_jrpc_session_state_end(struct bbdd_c_session_state_end *state)
+{
+	struct json_object *entry_obj;
+
+	entry_obj = json_object_new_object();
+	if (entry_obj == NULL)
+		return NULL;
+
+	if (bbdd_d_jrpc_session_state_attach_state(entry_obj, state->state) ||
+	    bbdd_d_jrpc_session_state_attach_diag(entry_obj, state->diag))
+		goto put_entry_obj;
+
+	return entry_obj;
+
+put_entry_obj:
+	json_object_put(entry_obj);
+	return NULL;
+}
+
+static struct json_object *
+bbdd_d_jrpc_session_state_obj(struct bbdd_c_session_state *state)
+{
+	struct json_object *entry_obj;
+	struct json_object *local_obj;
+	struct json_object *remote_obj;
+	int rc;
+
+	entry_obj = json_object_new_object();
+	if (entry_obj == NULL)
+		return NULL;
+
+	local_obj = bbdd_d_jrpc_session_state_end(&state->local);
+	if (local_obj == NULL)
+		goto put_entry_obj;
+
+	remote_obj = bbdd_d_jrpc_session_state_end(&state->remote);
+	if (remote_obj == NULL)
+		goto put_local_obj;
+
+	rc = json_object_object_add(entry_obj, "remote", remote_obj);
+	if (rc != 0)
+		goto put_remote_obj;
+	remote_obj = NULL;
+
+	rc = json_object_object_add(entry_obj, "local", local_obj);
+	if (rc != 0)
+		goto put_local_obj;
+	local_obj = NULL;
+
+	return entry_obj;
+
+put_remote_obj:
+	json_object_put(remote_obj);
+put_local_obj:
+	json_object_put(local_obj);
+put_entry_obj:
+	json_object_put(entry_obj);
+	return NULL;
 }
 
 static void bbdd_d_handle_session_list(struct events_ctx *,
@@ -434,7 +544,9 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 	struct json_object *result_obj;
 	struct bfd_session *bs = NULL;
 	struct json_object *array;
+	struct json_object *entry_obj;
 	struct json_object *sess_obj;
+	struct json_object *state_obj;
 	char *error;
 	int rc;
 
@@ -447,8 +559,18 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 	 *     }
 	 * }
 	 *
-	 * Where individual SESS objects are formatted the same as session
-	 * request objects, see bbdd_d_jrpc_dissect_params_session_one().
+	 * Where individual SESS objects are formatted as follows:
+	 *
+	 * SESS ::= {
+	 *     "data": DATA,
+	 *     "state": STATE,
+	 * }
+	 *
+	 * For details of the DATA objects, see
+	 * bbdd_d_jrpc_dissect_params_session_one().
+	 *
+	 * For details of the STATE objects, see
+	 * bbdd_d_jrpc_session_state_obj().
 	 */
 
 	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
@@ -477,16 +599,35 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 
 	while ((bs = bfd_sessions_walk(bs))) {
 		struct bbdd_c_session sess;
+		struct bbdd_c_session_state state;
 
-		bbdd_d_session_from_soft(&sess, bs);
+		bbdd_d_session_from_soft(&sess, &state, bs);
+
+		entry_obj = json_object_new_object();
+		if (entry_obj == NULL)
+			goto put_array;
+
+		state_obj = bbdd_d_jrpc_session_state_obj(&state);
+		if (state_obj == NULL)
+			goto put_entry_obj;
 
 		sess_obj = bbdd_c_jrpc_session_obj(&sess);
 		if (sess_obj == NULL)
-			goto put_array;
+			goto put_state_obj;
 
-		if (json_object_array_add(array, sess_obj) != 0)
+		rc = json_object_object_add(obj, "data", sess_obj);
+		if (rc != 0)
 			goto put_sess_obj;
 		sess_obj = NULL;
+
+		rc = json_object_object_add(obj, "state", state_obj);
+		if (rc != 0)
+			goto put_state_obj;
+		state_obj = NULL;
+
+		if (json_object_array_add(array, entry_obj) != 0)
+			goto put_state_obj;
+		entry_obj = NULL;
 	}
 
 	rc = json_object_object_add(result_obj, "sessions", array);
@@ -503,6 +644,10 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 
 put_sess_obj:
 	json_object_put(sess_obj);
+put_state_obj:
+	json_object_put(state_obj);
+put_entry_obj:
+	json_object_put(entry_obj);
 put_array:
 	json_object_put(array);
 put_result_obj:
@@ -619,9 +764,10 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *q,
 				  char **error)
 {
 	struct bbdd_c_session sess;
+	struct bbdd_c_session_state state;
 	int rc;
 
-	bbdd_d_session_from_soft(&sess, bs);
+	bbdd_d_session_from_soft(&sess, &state, bs);
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++)
 		if (q->flags.flags[i].seen &&

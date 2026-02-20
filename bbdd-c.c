@@ -879,13 +879,50 @@ static int bbdd_c_session_asd(int argc, char **argv)
 }
 
 static int
+bbdd_c_jrpc_dissect_params_session_list(struct json_object *obj,
+					struct bbdd_c_session *sess,
+					struct bbdd_c_session_state *state,
+					char **error)
+{
+	enum {
+		pol_data,
+		pol_state,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_data] =  { .key = "data", .type = json_type_object,
+				.required = true},
+		[pol_state] =  { .key = "state", .type = json_type_object,
+				 .required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_d_jrpc_dissect_params_session_one(values[pol_data], sess,
+						    false, error);
+	if (rc != 0)
+		return rc;
+
+	// xxx parse state
+	*state = (struct bbdd_c_session_state){};
+	return 0;
+}
+
+static int
 bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
 					  struct bbdd_c_session **psessions,
+					  struct bbdd_c_session_state **pstates,
 					  size_t *pnum_sessions,
 					  char **error)
 {
 	size_t sess_array_len = json_object_array_length(sess_array);
 	struct bbdd_c_session *sessions;
+	struct bbdd_c_session_state *states;
 
 	if (bbdd_jrpc_validate_array(sess_array, json_type_object,
 				     error) != 0)
@@ -897,19 +934,27 @@ bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
 		return -1;
 	}
 
+	states = calloc(sess_array_len, sizeof(*states));
+	if (states == NULL) {
+		bbdd_jrpc_fmterr(error, "Couldn't allocate session states: %m");
+		goto free_sessions;
+	}
+
 	for (size_t i = 0; i < sess_array_len; i++) {
 		struct json_object *sess_obj =
 			json_object_array_get_idx(sess_array, i);
 		struct bbdd_c_session *session = &sessions[i];
+		struct bbdd_c_session_state *state = &states[i];
 		int err;
 
-		err = bbdd_d_jrpc_dissect_params_session_one(sess_obj, session,
-							     false, error);
+		err = bbdd_c_jrpc_dissect_params_session_list(sess_obj, session,
+							      state, error);
 		if (err != 0)
 			goto free_sessions;
 	}
 
 	*psessions = sessions;
+	*pstates = states;
 	*pnum_sessions = sess_array_len;
 	return 0;
 
@@ -920,6 +965,7 @@ free_sessions:
 
 static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
 					    struct bbdd_c_session **sessions,
+					    struct bbdd_c_session_state **states,
 					    size_t *num_sessions,
 					    char **error)
 {
@@ -947,11 +993,12 @@ static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
 		return err;
 
 	return bbdd_c_session_list_jrpc_dissect_sessions(values[pol_sessions],
-							 sessions, num_sessions,
-							 error);
+							 sessions, states,
+							 num_sessions, error);
 }
 
-static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess)
+static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess,
+					 struct bbdd_c_session_state *)
 {
 	bool seen = false;
 	if (sess->lid_seen) {
@@ -1003,6 +1050,8 @@ static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess)
 		seen = true;
 	}
 
+	// xxx show state
+
 	if (!seen) {
 		printf("(session without data)\n");
 	} else {
@@ -1016,6 +1065,7 @@ static int bbdd_c_session_list_jrpc(void)
 	struct json_object *request;
 	struct json_object *result;
 	struct bbdd_c_session *sessions;
+	struct bbdd_c_session_state *states;
 	size_t num_sessions;
 	const int id = 1;
 	char *error;
@@ -1042,8 +1092,8 @@ static int bbdd_c_session_list_jrpc(void)
 		goto put_result;
 	}
 
-	err = bbdd_c_session_list_jrpc_dissect(result, &sessions, &num_sessions,
-					       &error);
+	err = bbdd_c_session_list_jrpc_dissect(result, &sessions, &states,
+					       &num_sessions, &error);
 	if (err != 0) {
 		fprintf(stderr, "Invalid session object: %s\n", error);
 		free(error);
@@ -1051,7 +1101,7 @@ static int bbdd_c_session_list_jrpc(void)
 	}
 
 	for (size_t i = 0; i < num_sessions; i++)
-		bbdd_c_session_list_show_one(&sessions[i]);
+		bbdd_c_session_list_show_one(&sessions[i], &states[i]);
 	if (num_sessions == 0 && bbdd_env.verbosity > 0)
 		printf("(no sessions)\n");
 	free(sessions);

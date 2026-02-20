@@ -7,6 +7,7 @@
 #include <json-c/json_object.h>
 
 #include "bbdd-sock.h"
+#include "bfddp_packet.h"
 
 #define NEXT_ARG() do { argv++; if (--argc <= 0) goto incomplete_command; } while (0)
 #define NEXT_ARG_OK() (argc - 1 > 0)
@@ -96,6 +97,13 @@ struct bbdd_c_session {
 	uint8_t detect_mult;		int detect_mult_seen;
 	uint32_t ifindex;		int ifindex_seen;
 	char ifname[IFNAMSIZ];		int ifname_seen;
+};
+
+struct bbdd_c_session_state {
+	struct bbdd_c_session_state_end {
+		enum bfd_state_value state;
+		enum bfd_diagnostic_value diag;
+	} local, remote;
 };
 
 struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess);
