@@ -114,64 +114,19 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 	bbdd_d_respond_empty(peer, id);
 }
 
-static int bbdd_d_jrpc_dissect_session_flag(struct json_object *flag_obj,
-					    struct bbdd_c_session *sess,
-					    char **error)
-{
-	enum json_type type = json_object_get_type(flag_obj);
-	const char *str;
-
-	if (type != json_type_string) {
-		bbdd_jrpc_fmterr(error, "Session flag array element expected to be string, got %s",
-				 json_type_to_name(type));
-		return -1;
-	}
-
-	str = json_object_get_string(flag_obj);
-
-#define EXPAND_MATCH(NAME, name, ...)					\
-		if (strcmp(#name, str) == 0) {				\
-			sess->flags[bbdd_c_session_flag_ ## name] = true; \
-			return 0;					\
-		}
-	BBDD_C_SESSION_FLAGS(EXPAND_MATCH)
-#undef EXPAND_MATCH
-
-	bbdd_jrpc_fmterr(error, "Unknown session flag `%s'", str);
-	return -1;
-}
-
-static int bbdd_d_jrpc_dissect_session_flags(struct json_object *flag_array,
-					     struct bbdd_c_session *sess,
-					     char **error)
-{
-	size_t flag_array_len;
-	int err;
-
-	assert(json_object_get_type(flag_array) == json_type_array);
-	flag_array_len = json_object_array_length(flag_array);
-
-	memset(sess->flags, 0, sizeof(sess->flags));
-	for (size_t i = 0; i < flag_array_len; i++) {
-		struct json_object *flag_obj =
-			json_object_array_get_idx(flag_array, i);
-
-		err = bbdd_d_jrpc_dissect_session_flag(flag_obj, sess, error);
-		if (err)
-			return err;
-	}
-
-	return 0;
-}
-
 int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
 					   struct bbdd_c_session *sess,
 					   bool allow_bulk,
 					   char **error)
 {
+#define BBDD_D_SESSION_EXPAND_POL_IX(NAME, name, ...) pol_ ## name,
+#define BBDD_D_SESSION_EXPAND_POLICY(NAME, name, ...) \
+		[pol_ ## name] =  { .key = #name, .type = json_type_boolean },
+
 	enum {
+		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POL_IX)
+
 		pol_lid,
-		pol_flags,
 
 		pol_src,
 		pol_dst,
@@ -191,8 +146,9 @@ int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
 		pol_bulk, /* Only valid when allow_bulk set. */
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
+
 		[pol_lid] =  { .key = "lid", .type = json_type_int },
-		[pol_flags] = { .key = "flags", .type = json_type_array },
 
 		[pol_src] = { .key = "src", .type = json_type_string },
 		[pol_dst] = { .key = "dst", .type = json_type_string },
@@ -214,6 +170,10 @@ int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
 
 		[pol_bulk] = { .key = "bulk", .type = json_type_boolean },
 	};
+
+#undef BBDD_D_SESSION_EXPAND_POLICY
+#undef BBDD_D_SESSION_EXPAND_POL_IX
+
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
 	size_t polsize;
@@ -230,12 +190,22 @@ int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
 
 	memset(sess, 0, sizeof(*sess));
 
-	if (seen[pol_flags] &&
-	    bbdd_d_jrpc_dissect_session_flags(values[pol_flags],
-					      sess, error) < 0)
-		goto fail;
+#define BBDD_D_SESSION_EXPAND_DISSECT(NAME, name, ...)			\
+		if (seen[pol_ ## name]) {				\
+			sess->flags.name.seen = true;			\
+			sess->flags.name.value =			\
+				json_object_get_boolean(values[pol_ ## name]); \
+		}
 
-	af = sess->flags[bbdd_c_session_flag_ipv6] ? AF_INET6 : AF_INET;
+	BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_DISSECT);
+
+#undef BBDD_D_SESSION_EXPAND_DISSECT
+
+	af = bbdd_c_session_flag_isset(sess->flags.ipv6) ? AF_INET6 : AF_INET;
+	// xxx figure out how to handle change in protocol without giving an
+	// address. Maybe it needs to be forbidden. But then src address is a
+	// non-mandatory argument, so can't just force the user to provide it.
+	// xxx also scope ID is necessary for link-local addresses
 
 	if (seen[pol_src]) {
 		if (bbdd_jrpc_strcpy(values[pol_src],
@@ -402,13 +372,17 @@ static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
 {
 	*sess = (struct bbdd_c_session){};
 
-	sess->flags[bbdd_c_session_flag_multihop] = bs->bs_multihop;
-	sess->flags[bbdd_c_session_flag_demand] = bs->bs_demand;
-	sess->flags[bbdd_c_session_flag_cbit] = bs->bs_cbit;
-	sess->flags[bbdd_c_session_flag_echo] = bs->bs_echo;
-	sess->flags[bbdd_c_session_flag_ipv6] = !bs->bs_ipv4;
-	sess->flags[bbdd_c_session_flag_passive] = bs->bs_passive;
-	sess->flags[bbdd_c_session_flag_shutdown] = bs->bs_admin_shutdown;
+	/* Only mark as seen set flags. */
+#define ASSIGN_FLAG(NAME, FROM)					\
+		(sess->flags.NAME.value = sess->flags.NAME.seen = FROM)
+
+	ASSIGN_FLAG(multihop, bs->bs_multihop);
+	ASSIGN_FLAG(demand, bs->bs_demand);
+	ASSIGN_FLAG(cbit, bs->bs_cbit);
+	ASSIGN_FLAG(echo, bs->bs_echo);
+	ASSIGN_FLAG(ipv6, ! bs->bs_ipv4);
+	ASSIGN_FLAG(passive, bs->bs_passive);
+	ASSIGN_FLAG(shutdown, bs->bs_admin_shutdown);
 
 	if (!bbdd_d_addr_zero(&bs->bs_src.bs_src_sa)) {
 		bbdd_d_sockaddr_ntop(&bs->bs_src.bs_src_sa,
@@ -540,14 +514,16 @@ put_obj:
 
 static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
 				 struct bfddp_session *bds,
+				 struct bfddp_session *mask,
 				 char **error)
 {
 	int err;
 
 	*bds = (struct bfddp_session){};
+	*mask = (struct bfddp_session){};
 
 #define EXPAND_FLAG(NAME, name, ...)		\
-		[bbdd_c_session_flag_ ## name] = SESSION_ ## NAME,
+		[bbdd_c_session_flag_ ## name] = htonl(SESSION_ ## NAME),
 
 	uint32_t bfddp_flags[bbdd_c_session_nflags] = {
 		BBDD_C_SESSION_FLAGS(EXPAND_FLAG)
@@ -555,32 +531,48 @@ static int bbdd_d_session_to_frr(const struct bbdd_c_session *sess,
 
 #undef EXPAND_FLAG
 
-	for (int i = 0; i < bbdd_c_session_nflags; i++)
-		if (sess->flags[i])
-			bds->flags |= bfddp_flags[i];
+	for (int i = 0; i < bbdd_c_session_nflags; i++) {
+		struct bbdd_c_session_flag flag = sess->flags.flags[i];
+		if (flag.seen) {
+			mask->flags |= bfddp_flags[i];
+			if (flag.value)
+				bds->flags |= bfddp_flags[i];
+		}
+	}
 
 	if (sess->src_af) {
+		memset(&mask->src, 0xff, sizeof(mask->src));
 		err = bbdd_inet_pton(sess->src_af, sess->src, &bds->src, error);
 		if (err)
 			return err;
 	}
 	if (sess->dst_af) {
+		memset(&mask->dst, 0xff, sizeof(mask->dst));
 		err = bbdd_inet_pton(sess->dst_af, sess->dst, &bds->dst, error);
 		if (err)
 			return err;
 	}
-	if (sess->ifname_seen)
+	if (sess->ifname_seen) {
+		memset(mask->ifname, 0xff, sizeof(mask->ifname));
 		strncpy(bds->ifname, sess->ifname, sizeof(bds->ifname));
+	}
 
-	if (sess->ttl_seen)
+	if (sess->ttl_seen) {
+		mask->ttl = 0xff;
 		bds->ttl = sess->ttl;
+	}
 
-	if (sess->detect_mult_seen)
+	if (sess->detect_mult_seen) {
+		mask->ttl = 0xff;
 		bds->detect_mult = sess->detect_mult;
+	}
 
-#define ASSIGN(FIELD)					\
-		if (sess->FIELD ## _seen)		\
-			bds->FIELD = htonl(sess->FIELD);
+#define ASSIGN(FIELD) do {						\
+		if (sess->FIELD ## _seen) {				\
+			bds->FIELD = htonl(sess->FIELD);		\
+			memset(&mask->FIELD, 0xff, sizeof(mask->FIELD)); \
+		}							\
+	} while (0)
 
 	ASSIGN(lid);
 	ASSIGN(min_tx);
@@ -632,7 +624,8 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *q,
 	bbdd_d_session_from_soft(&sess, bs);
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++)
-		if (q->flags[i] && !sess.flags[i])
+		if (q->flags.flags[i].seen &&
+		    q->flags.flags[i].value != sess.flags.flags[i].value)
 			return false;
 
 	if (q->src_af) {
@@ -722,6 +715,7 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 {
 	struct bbdd_c_session sess;
 	struct bfddp_session bds;
+	struct bfddp_session mask;
 	char *error;
 	int rc;
 
@@ -741,7 +735,7 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 		return;
 	}
 
-	rc = bbdd_d_session_to_frr(&sess, &bds, &error);
+	rc = bbdd_d_session_to_frr(&sess, &bds, &mask, &error);
 	if (rc != 0)  {
 		bbdd_d_respond_interr(peer, id, error);
 		free(error);
@@ -799,7 +793,6 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 {
 	struct bbdd_c_session select;
 	struct bbdd_c_session change;
-	struct bfddp_session bds;
 	bool set = false;
 	uint32_t *lids;
 	size_t nlids;
@@ -812,20 +805,22 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 		return;
 
 	for (size_t i = 0; i < nlids; i++) {
+		struct bfddp_session bds;
+		struct bfddp_session mask;
 		struct bfd_session *bs;
 
 		bs = bfd_session_lookup(lids[i]);
 		if (!bs)
 			continue;
 
-		rc = bbdd_d_session_to_frr(&change, &bds, &error);
+		rc = bbdd_d_session_to_frr(&change, &bds, &mask, &error);
 		if (rc != 0)  {
 			bbdd_d_respond_interr(peer, id, error);
 			free(error);
 			return;
 		}
 
-		bfddp_session_update(bs, NULL, &bds);
+		bfddp_session_update_masked(bs, NULL, &bds, &mask);
 		set = true;
 	}
 

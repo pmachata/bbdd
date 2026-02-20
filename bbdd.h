@@ -43,7 +43,7 @@ int bbdd_c_session(int argc, char **argv);
 	bbdd_c_session_flag_ ## name,
 #define BBDD_C_SESSION_EXPAND_PLUS1(...) + 1
 
-enum bbdd_c_session_flag {
+enum bbdd_c_session_flag_ix {
 	BBDD_C_SESSION_FLAGS(BBDD_C_SESSION_EXPAND_ENUM)
 };
 
@@ -55,8 +55,34 @@ enum {
 #undef BBDD_C_SESSION_EXPAND_PLUS1
 #undef BBDD_C_SESSION_EXPAND_ENUM
 
+struct bbdd_c_session_flag {
+	bool value;
+	bool seen;
+};
+
+#define BBDD_C_SESSION_EXPAND_FIELD(NAME, name, ...)	\
+	struct bbdd_c_session_flag name;
+
+struct bbdd_c_session_flags {
+	union {
+		struct bbdd_c_session_flag flags[bbdd_c_session_nflags];
+		struct {
+			BBDD_C_SESSION_FLAGS(BBDD_C_SESSION_EXPAND_FIELD)
+		};
+	};
+};
+
+#undef BBDD_C_SESSION_EXPAND_FIELD
+
+static inline bool bbdd_c_session_flag_isset(struct bbdd_c_session_flag flag)
+{
+	return flag.seen && flag.value;
+}
+
+const char *bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag);
+
 struct bbdd_c_session {
-	bool flags[bbdd_c_session_nflags];
+	struct bbdd_c_session_flags flags;
 	bool bulk;
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
