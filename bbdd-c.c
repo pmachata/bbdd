@@ -879,10 +879,92 @@ static int bbdd_c_session_asd(int argc, char **argv)
 }
 
 static int
-bbdd_c_jrpc_dissect_params_session_list(struct json_object *obj,
-					struct bbdd_c_session *sess,
-					struct bbdd_c_session_state *state,
-					char **error)
+bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
+				      struct bbdd_c_session_state_end *state_end,
+				      char **error)
+{
+	enum {
+		pol_state,
+		pol_diag,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_state] = { .key = "state", .type = json_type_string,
+				.required = true},
+		[pol_diag] = { .key = "diag", .type = json_type_string,
+			       .required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	const char *state_str;
+	const char *diag_str;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	state_str = json_object_get_string(values[pol_state]);
+	rc = bbdd_d_bfd_state_from_str(state_str, &state_end->state);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Invalid session state `%s'",
+				 state_str);
+		return rc;
+	}
+
+	diag_str = json_object_get_string(values[pol_diag]);
+	rc = bbdd_d_bfd_diag_from_str(diag_str, &state_end->diag);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Invalid session diag `%s'",
+				 diag_str);
+		return rc;
+	}
+
+	return 0;
+}
+
+static int
+bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
+				  struct bbdd_c_session_state *state,
+				  char **error)
+{
+	enum {
+		pol_local,
+		pol_remote,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_local] = { .key = "local", .type = json_type_object,
+				.required = true},
+		[pol_remote] = { .key = "remote", .type = json_type_object,
+				 .required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_local],
+						   &state->local, error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_remote],
+						   &state->remote, error);
+	if (rc != 0)
+		return rc;
+
+	return 0;
+}
+
+static int
+bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
+				 struct bbdd_c_session *sess,
+				 struct bbdd_c_session_state *state,
+				 char **error)
 {
 	enum {
 		pol_data,
@@ -903,13 +985,16 @@ bbdd_c_jrpc_dissect_params_session_list(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_d_jrpc_dissect_params_session_one(values[pol_data], sess,
-						    false, error);
+	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess,
+					     false, error);
 	if (rc != 0)
 		return rc;
 
-	// xxx parse state
-	*state = (struct bbdd_c_session_state){};
+	rc = bbdd_c_jrpc_dissect_session_state(values[pol_state], state,
+					       error);
+	if (rc != 0)
+		return rc;
+
 	return 0;
 }
 
@@ -947,8 +1032,8 @@ bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
 		struct bbdd_c_session_state *state = &states[i];
 		int err;
 
-		err = bbdd_c_jrpc_dissect_params_session_list(sess_obj, session,
-							      state, error);
+		err = bbdd_c_jrpc_dissect_session_list(sess_obj, session,
+						       state, error);
 		if (err != 0)
 			goto free_sessions;
 	}
@@ -997,8 +1082,16 @@ static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
 							 num_sessions, error);
 }
 
+static void
+bbdd_c_session_list_show_state_end(struct bbdd_c_session_state_end *end)
+{
+	printf("state %s diag %s ",
+	       bbdd_d_bfd_state_to_str(end->state),
+	       bbdd_d_bfd_diag_to_str(end->diag));
+}
+
 static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess,
-					 struct bbdd_c_session_state *)
+					 struct bbdd_c_session_state *state)
 {
 	bool seen = false;
 	if (sess->lid_seen) {
@@ -1050,13 +1143,14 @@ static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess,
 		seen = true;
 	}
 
-	// xxx show state
+	if (!seen)
+		printf("(session without data)");
 
-	if (!seen) {
-		printf("(session without data)\n");
-	} else {
-		printf("\n");
-	}
+	printf(": local ");
+	bbdd_c_session_list_show_state_end(&state->local);
+	printf("remote ");
+	bbdd_c_session_list_show_state_end(&state->remote);
+	printf("\n");
 }
 
 static int bbdd_c_session_list_jrpc(void)

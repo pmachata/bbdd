@@ -114,10 +114,10 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 	bbdd_d_respond_empty(peer, id);
 }
 
-int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
-					   struct bbdd_c_session *sess,
-					   bool allow_bulk,
-					   char **error)
+int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
+				    struct bbdd_c_session *sess,
+				    bool allow_bulk,
+				    char **error)
 {
 #define BBDD_D_SESSION_EXPAND_POL_IX(NAME, name, ...) pol_ ## name,
 #define BBDD_D_SESSION_EXPAND_POLICY(NAME, name, ...) \
@@ -296,13 +296,13 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	}
 
 	if (seen[pol_select] &&
-	    bbdd_d_jrpc_dissect_params_session_one(values[pol_select], select,
-						   true, error))
+	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
+					    true, error))
 		goto fail;
 
 	if (seen[pol_change] &&
-	    bbdd_d_jrpc_dissect_params_session_one(values[pol_change], change,
-						   false, error))
+	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
+					    false, error))
 		goto fail;
 
 	return 0;
@@ -436,47 +436,115 @@ static void bbdd_d_session_from_soft(struct bbdd_c_session *sess,
 	};
 }
 
+static const char *bbdd_d_strtab_val_to_str(int value, const char **tab,
+					    size_t sz)
+{
+	if (value < 0 || (size_t)value >= sz)
+		return NULL;
+	return tab[value];
+}
+
+static int bbdd_d_strtab_str_to_val(const char *str, int *ret,
+				    const char **tab, size_t sz)
+{
+	for (size_t i = 0; i < sz; i++)
+		if (strcmp(tab[i], str) == 0) {
+			*ret = (int) i;
+			return 0;
+		}
+
+	return -EINVAL;
+}
+
+static const char *bbdd_d_jrpc_session_state_str[] = {
+	[STATE_ADMINDOWN] = "admindown",
+	[STATE_DOWN] = "down",
+	[STATE_INIT] = "init",
+	[STATE_UP] = "up",
+};
+
+const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv)
+{
+	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_state_str);
+	const char **tab = bbdd_d_jrpc_session_state_str;
+
+	return bbdd_d_strtab_val_to_str(sv, tab, sz);
+}
+
+int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv)
+{
+	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_state_str);
+	const char **tab = bbdd_d_jrpc_session_state_str;
+	int tmp;
+
+	if (bbdd_d_strtab_str_to_val(str, &tmp, tab, sz) < 0)
+		return -EINVAL;
+	*sv = tmp;
+	return 0;
+}
+
 static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
 						  enum bfd_state_value sv)
 {
-	static const char *str[] = {
-		[STATE_ADMINDOWN] = "admindown",
-		[STATE_DOWN] = "down",
-		[STATE_INIT] = "init",
-		[STATE_UP] = "up",
-	};
+	const char *str = bbdd_d_bfd_state_to_str(sv);
 
-	if (sv > ARRAY_SIZE(str))
+	if (str == NULL)
 		return -EINVAL;
+	return bbdd_jrpc_append_str(obj, "state", str);
+}
 
-	return bbdd_jrpc_append_str(obj, "state", str[sv]);
+static const char *bbdd_d_jrpc_session_diag_str[] = {
+	[DIAG_NOTHING] = "nothing",
+	[DIAG_CONTROL_EXPIRED] = "control_expired",
+	[DIAG_ECHO_FAILED] = "echo_failed",
+	[DIAG_DOWN] = "down",
+	[DIAG_FP_RESET] = "fp_reset",
+	[DIAG_PATH_DOWN] = "path_down",
+	[DIAG_CONCAT_PATH_DOWN] = "concat_path_down",
+	[DIAG_ADMIN_DOWN] = "admin_down",
+	[DIAG_REV_CONCAT_PATH_DOWN] = "rev_concat_path_down",
+};
+
+const char *bbdd_d_bfd_diag_to_str(enum bfd_diagnostic_value sv)
+{
+	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_diag_str);
+	const char **tab = bbdd_d_jrpc_session_diag_str;
+
+	return bbdd_d_strtab_val_to_str(sv, tab, sz);
+}
+
+int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv)
+{
+	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_diag_str);
+	const char **tab = bbdd_d_jrpc_session_diag_str;
+	int tmp;
+
+	if (bbdd_d_strtab_str_to_val(str, &tmp, tab, sz) < 0)
+		return -EINVAL;
+	*sv = tmp;
+	return 0;
 }
 
 static int bbdd_d_jrpc_session_state_attach_diag(struct json_object *obj,
 						 enum bfd_diagnostic_value dv)
 {
-	static const char *str[] = {
-		[DIAG_NOTHING] = "nothing",
-		[DIAG_CONTROL_EXPIRED] = "control_expired",
-		[DIAG_ECHO_FAILED] = "echo_failed",
-		[DIAG_DOWN] = "down",
-		[DIAG_FP_RESET] = "fp_reset",
-		[DIAG_PATH_DOWN] = "path_down",
-		[DIAG_CONCAT_PATH_DOWN] = "concat_path_down",
-		[DIAG_ADMIN_DOWN] = "admin_down",
-		[DIAG_REV_CONCAT_PATH_DOWN] = "rev_concat_path_down",
-	};
+	const char *str = bbdd_d_bfd_diag_to_str(dv);
 
-	if (dv > ARRAY_SIZE(str))
+	if (str == NULL)
 		return -EINVAL;
-
-	return bbdd_jrpc_append_str(obj, "diag", str[dv]);
+	return bbdd_jrpc_append_str(obj, "diag", str);
 }
 
 static struct json_object *
 bbdd_d_jrpc_session_state_end(struct bbdd_c_session_state_end *state)
 {
 	struct json_object *entry_obj;
+
+	/* STATE_END ::= {
+	 *     "state": STRING,
+	 *     "diag": STRING,
+	 * }
+	 */
 
 	entry_obj = json_object_new_object();
 	if (entry_obj == NULL)
@@ -501,6 +569,11 @@ bbdd_d_jrpc_session_state_obj(struct bbdd_c_session_state *state)
 	struct json_object *remote_obj;
 	int rc;
 
+	/* STATE ::= {
+	 *     "local": STATE_END,
+	 *     "remote": STATE_END,
+	 * }
+	 */
 	entry_obj = json_object_new_object();
 	if (entry_obj == NULL)
 		return NULL;
@@ -615,12 +688,12 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 		if (sess_obj == NULL)
 			goto put_state_obj;
 
-		rc = json_object_object_add(obj, "data", sess_obj);
+		rc = json_object_object_add(entry_obj, "data", sess_obj);
 		if (rc != 0)
 			goto put_sess_obj;
 		sess_obj = NULL;
 
-		rc = json_object_object_add(obj, "state", state_obj);
+		rc = json_object_object_add(entry_obj, "state", state_obj);
 		if (rc != 0)
 			goto put_state_obj;
 		state_obj = NULL;

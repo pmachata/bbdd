@@ -112,7 +112,13 @@ struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess);
 
 int bbdd_d_start(int argc, char **argv);
 
-int bbdd_d_jrpc_dissect_params_session_one(struct json_object *obj,
-					   struct bbdd_c_session *sess,
-					   bool allow_bulk,
-					   char **error);
+int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
+				    struct bbdd_c_session *sess,
+				    bool allow_bulk,
+				    char **error);
+
+const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv);
+int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv);
+
+const char *bbdd_d_bfd_diag_to_str(enum bfd_diagnostic_value sv);
+int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv);
