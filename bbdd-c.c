@@ -317,6 +317,7 @@ enum bbdd_c_session_command {
 	bbdd_c_session_command_add,
 	bbdd_c_session_command_set,
 	bbdd_c_session_command_del,
+	bbdd_c_session_command_show,
 };
 
 static void bbdd_c_session_help(void)
@@ -325,7 +326,7 @@ static void bbdd_c_session_help(void)
 		"Usage:	bbdd session add [ SET-PARAMS ]\n"
 		"	bbdd session [ QUERY-PARAMS ] [bulk] set [ SET-PARAMS ]\n"
 		"	bbdd session [ QUERY-PARAMS ] [bulk] del\n"
-		"	bbdd session list\n"
+		"	bbdd session show\n"
 		"\n"
 		"where	QUERY-PARAMS := PARAMS	-- parameters for session select\n"
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
@@ -599,285 +600,6 @@ put_params_obj:
 	return NULL;
 }
 
-static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
-			       struct bbdd_c_session *select,
-			       struct bbdd_c_session *change)
-{
-	struct json_object *select_obj;
-	struct json_object *change_obj;
-	struct json_object *params_obj;
-	struct json_object *response;
-	struct json_object *request;
-	struct json_object *result;
-	const char *method;
-	const int id = 1;
-	int err;
-
-	// xxx seems like errors here are not reported in any way to the user
-
-	switch (command) {
-	case bbdd_c_session_command_add:
-		method = "session-add";
-		select_obj = NULL;
-		change_obj = bbdd_c_jrpc_session_obj(change);
-		if (change_obj == NULL)
-			return -1;
-		break;
-
-	case bbdd_c_session_command_set:
-		method = "session-set";
-		select_obj = bbdd_c_jrpc_session_obj(select);
-		if (select_obj == NULL)
-			return -1;
-		change_obj = bbdd_c_jrpc_session_obj(change);
-		if (change_obj == NULL) {
-			err = -ENOMEM;
-			goto put_select;
-		}
-		break;
-
-	case bbdd_c_session_command_del:
-		method = "session-del";
-		select_obj = bbdd_c_jrpc_session_obj(select);
-		change_obj = NULL;
-		if (select_obj == NULL)
-			return -1;
-		break;
-	}
-
-	request = bbdd_jrpc_new_request(id, method);
-	if (request == NULL) {
-		err = -ENOMEM;
-		goto put_select_change;
-	}
-
-	params_obj = json_object_new_object();
-	if (params_obj == NULL) {
-		err = -ENOMEM;
-		goto put_request;
-	}
-
-	if (select_obj != NULL &&
-	    json_object_object_add(params_obj, "select", select_obj)) {
-		err = -ENOMEM;
-		goto put_params_obj;
-	}
-	select_obj = NULL;
-
-	if (change_obj != NULL &&
-	    json_object_object_add(params_obj, "change", change_obj)) {
-		err = -ENOMEM;
-		goto put_params_obj;
-	}
-	change_obj = NULL;
-
-	if (json_object_object_add(request, "params", params_obj)) {
-		err = -ENOMEM;
-		goto put_params_obj;
-	}
-	params_obj = NULL;
-
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
-	}
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		err = -1;
-		goto put_response;
-	}
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "xxx sent %s & got response\n", method);
-	err = 0;
-
-put_result:
-	json_object_put(result);
-put_response:
-	json_object_put(response);
-put_params_obj:
-	json_object_put(params_obj);
-put_request:
-	json_object_put(request);
-put_select_change:
-	json_object_put(change_obj);
-put_select:
-	json_object_put(select_obj);
-	return err;
-}
-
-static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
-{
-	if (sess->src_af != 0 && sess->dst_af != 0 &&
-	    sess->src_af != sess->dst_af) {
-		fprintf(stderr, "src and dst are given from different protocols: `%s' (%s) vs. `%s' (%s).\n",
-			sess->src, sess->src_af == AF_INET ? "IPv4" : "IPv6",
-			sess->dst, sess->dst_af == AF_INET ? "IPv4" : "IPv6");
-		return -1;
-	}
-	if ((sess->src_af == AF_INET || sess->dst_af == AF_INET) &&
-	    sess->flags.ipv6.seen && sess->flags.ipv6.value) {
-		fprintf(stderr, "src or dst given as IPv4, but `ipv6' flag given as well.\n");
-		return -1;
-	}
-	if (sess->src_af == AF_INET6 || sess->dst_af == AF_INET6) {
-		sess->flags.ipv6.seen = true;
-		sess->flags.ipv6.value = true;
-	}
-
-	// xxx check ifindex vs. ifname if both given. If one is given, deduce
-	// one from the other.
-	return 0;
-}
-
-static int bbdd_c_session_asd(int argc, char **argv)
-{
-	struct bbdd_c_session select = {};
-	struct bbdd_c_session change = {};
-	struct bbdd_c_session *sess = &select;
-	bool seen_arg = false;
-	bool seen_command = false;
-	struct bbdd_c_session_flag bulk = {};
-	enum bbdd_c_session_command command;
-	int rc;
-
-	while (argc > 0) {
-		if (strcmp(*argv, "add") == 0) {
-			if (seen_command) {
-			seen_command:
-				fprintf(stderr, "`%s' seen when a command was already given\n",
-					*argv);
-				return -1;
-			}
-			if (seen_arg) {
-				fprintf(stderr, "`add' used with session query parameters\n");
-				return -1;
-			}
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_add;
-			seen_command = true;
-			sess = &change;
-			continue;
-
-		} else if (strcmp(*argv, "set") == 0) {
-			if (seen_command)
-				goto seen_command;
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_set;
-			seen_command = true;
-			sess = &change;
-			continue;
-
-		} else if (strcmp(*argv, "del") == 0) {
-			if (seen_command)
-				goto seen_command;
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_del;
-			seen_command = true;
-			sess = NULL;
-			continue;
-		} else if (strcmp(*argv, "help") == 0) {
-			bbdd_c_session_help();
-			return 0;
-		}
-
-		if (sess == NULL) {
-			fprintf(stderr, "`del' used with session change parameters\n");
-			return -1;
-		}
-
-		seen_arg = true;
-
-		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
-					       &sess->flags.multihop)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "demand",
-					       &sess->flags.demand)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
-					       &sess->flags.cbit)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "echo",
-					       &sess->flags.echo)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",
-					       &sess->flags.ipv6)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
-					       &sess->flags.passive)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
-					       &sess->flags.shutdown)) ||
-
-		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "src",
-					       sess->src,
-					       &sess->src_af)) ||
-		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
-					       sess->dst,
-					       &sess->dst_af)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "lid",
-					      &sess->lid,
-					      &sess->lid_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
-					      &sess->min_tx,
-					      &sess->min_tx_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-rx",
-					      &sess->min_rx,
-					      &sess->min_rx_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-tx",
-					      &sess->min_echo_tx,
-					      &sess->min_echo_tx_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-rx",
-					      &sess->min_echo_rx,
-					      &sess->min_echo_rx_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "hold-time",
-					      &sess->hold_time,
-					      &sess->hold_time_seen)) ||
-		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "ttl",
-					     &sess->ttl,
-					     &sess->ttl_seen)) ||
-		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "detect-mult",
-					     &sess->detect_mult,
-					     &sess->detect_mult_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "ifindex",
-					      &sess->ifindex,
-					      &sess->ifindex_seen)) ||
-		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
-						 sess->ifname,
-						 &sess->ifname_seen)) ||
-
-		    (!seen_command &&
-		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk)))) {
-			if (rc > 0)
-				continue;
-			return rc;
-		}
-
-		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
-	}
-
-	if (!seen_command) {
-		fprintf(stderr, "No command given.\n");
-		return -1;
-	}
-
-	if (bulk.seen && bulk.value) {
-		if (command == bbdd_c_session_command_add) {
-			fprintf(stderr, "`add' does not support bulk operations\n");
-			return -1;
-		}
-		select.bulk = true;
-	}
-
-	if (bbdd_c_session_check_params(&select) < 0 ||
-	    bbdd_c_session_check_params(&change) < 0)
-		return -1;
-
-	return bbdd_c_session_jrpc(command, &select, &change);
-}
-
 static int
 bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
 				      struct bbdd_c_session_state_end *state_end,
@@ -960,11 +682,10 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	return 0;
 }
 
-static int
-bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
-				 struct bbdd_c_session *sess,
-				 struct bbdd_c_session_state *state,
-				 char **error)
+static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
+					    struct bbdd_c_session *sess,
+					    struct bbdd_c_session_state *state,
+					    char **error)
 {
 	enum {
 		pol_data,
@@ -999,7 +720,7 @@ bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
 }
 
 static int
-bbdd_c_session_list_jrpc_dissect_sessions(struct json_object *sess_array,
+bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
 					  struct bbdd_c_session **psessions,
 					  struct bbdd_c_session_state **pstates,
 					  size_t *pnum_sessions,
@@ -1048,7 +769,7 @@ free_sessions:
 	return -1;
 }
 
-static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
+static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
 					    struct bbdd_c_session **sessions,
 					    struct bbdd_c_session_state **states,
 					    size_t *num_sessions,
@@ -1077,21 +798,21 @@ static int bbdd_c_session_list_jrpc_dissect(struct json_object *obj,
 	if (err != 0)
 		return err;
 
-	return bbdd_c_session_list_jrpc_dissect_sessions(values[pol_sessions],
+	return bbdd_c_session_show_jrpc_dissect_sessions(values[pol_sessions],
 							 sessions, states,
 							 num_sessions, error);
 }
 
 static void
-bbdd_c_session_list_show_state_end(struct bbdd_c_session_state_end *end)
+bbdd_c_session_show_state_end(struct bbdd_c_session_state_end *end)
 {
 	printf("state %s diag %s ",
 	       bbdd_d_bfd_state_to_str(end->state),
 	       bbdd_d_bfd_diag_to_str(end->diag));
 }
 
-static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess,
-					 struct bbdd_c_session_state *state)
+static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
+				    struct bbdd_c_session_state *state)
 {
 	bool seen = false;
 	if (sess->lid_seen) {
@@ -1147,46 +868,32 @@ static void bbdd_c_session_list_show_one(struct bbdd_c_session *sess,
 		printf("(session without data)");
 
 	printf(": local ");
-	bbdd_c_session_list_show_state_end(&state->local);
+	bbdd_c_session_show_state_end(&state->local);
 	printf("remote ");
-	bbdd_c_session_list_show_state_end(&state->remote);
+	bbdd_c_session_show_state_end(&state->remote);
 	printf("\n");
 }
 
-static int bbdd_c_session_list_jrpc(void)
+static int bbdd_c_session_show_jrpc_result(struct json_object *response,
+					   const int id)
 {
-	struct json_object *response;
-	struct json_object *request;
 	struct json_object *result;
 	struct bbdd_c_session *sessions;
 	struct bbdd_c_session_state *states;
 	size_t num_sessions;
-	const int id = 1;
 	char *error;
 	int err;
 
-	request = bbdd_jrpc_new_request(id, "session-list");
-	if (request == NULL)
+	if (!bbdd_c_response_extract_result(response, id,
+					    json_type_object, &result))
 		return -1;
-
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
-	}
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result)) {
-		err = -1;
-		goto put_response;
-	}
 
 	if (bbdd_c_result_show_json(result)) {
 		err = 0;
 		goto put_result;
 	}
 
-	err = bbdd_c_session_list_jrpc_dissect(result, &sessions, &states,
+	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
 					       &num_sessions, &error);
 	if (err != 0) {
 		fprintf(stderr, "Invalid session object: %s\n", error);
@@ -1195,40 +902,336 @@ static int bbdd_c_session_list_jrpc(void)
 	}
 
 	for (size_t i = 0; i < num_sessions; i++)
-		bbdd_c_session_list_show_one(&sessions[i], &states[i]);
+		bbdd_c_session_show_one(&sessions[i], &states[i]);
 	if (num_sessions == 0 && bbdd_env.verbosity > 0)
 		printf("(no sessions)\n");
 	free(sessions);
+	free(states);
 
 put_result:
 	json_object_put(result);
+	return 0;
+}
+
+static int bbdd_c_session_act_jrpc_result(struct json_object *response,
+					  const char *method,
+					  const int id)
+
+{
+	struct json_object *result;
+
+	if (!bbdd_c_response_extract_result(response, id,
+					   json_type_null, &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "`%s' was handled by the daemon\n", method);
+
+put_result:
+	json_object_put(result);
+	return 0;
+}
+
+static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
+			       struct bbdd_c_session *select,
+			       struct bbdd_c_session *change)
+{
+	struct json_object *select_obj;
+	struct json_object *change_obj;
+	struct json_object *params_obj;
+	struct json_object *response;
+	struct json_object *request;
+	const char *method;
+	const int id = 1;
+	int err;
+
+	// xxx seems like errors here are not reported in any way to the user
+
+	switch (command) {
+	case bbdd_c_session_command_add:
+		method = "session-add";
+		select_obj = NULL;
+		change_obj = bbdd_c_jrpc_session_obj(change);
+		if (change_obj == NULL)
+			return -1;
+		break;
+
+	case bbdd_c_session_command_set:
+		method = "session-set";
+		select_obj = bbdd_c_jrpc_session_obj(select);
+		if (select_obj == NULL)
+			return -1;
+		change_obj = bbdd_c_jrpc_session_obj(change);
+		if (change_obj == NULL) {
+			err = -ENOMEM;
+			goto put_select;
+		}
+		break;
+
+	case bbdd_c_session_command_del:
+		method = "session-del";
+		select_obj = bbdd_c_jrpc_session_obj(select);
+		change_obj = NULL;
+		if (select_obj == NULL)
+			return -1;
+		break;
+
+	case bbdd_c_session_command_show:
+		method = "session-show";
+		select_obj = bbdd_c_jrpc_session_obj(select);
+		change_obj = NULL;
+		if (select_obj == NULL)
+			return -1;
+		break;
+	}
+
+	request = bbdd_jrpc_new_request(id, method);
+	if (request == NULL) {
+		err = -ENOMEM;
+		goto put_select_change;
+	}
+
+	params_obj = json_object_new_object();
+	if (params_obj == NULL) {
+		err = -ENOMEM;
+		goto put_request;
+	}
+
+	if (select_obj != NULL &&
+	    json_object_object_add(params_obj, "select", select_obj)) {
+		err = -ENOMEM;
+		goto put_params_obj;
+	}
+	select_obj = NULL;
+
+	if (change_obj != NULL &&
+	    json_object_object_add(params_obj, "change", change_obj)) {
+		err = -ENOMEM;
+		goto put_params_obj;
+	}
+	change_obj = NULL;
+
+	if (json_object_object_add(request, "params", params_obj)) {
+		err = -ENOMEM;
+		goto put_params_obj;
+	}
+	params_obj = NULL;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL) {
+		err = -1;
+		goto put_request;
+	}
+
+	if (command == bbdd_c_session_command_show)
+		err = bbdd_c_session_show_jrpc_result(response, id);
+	else
+		err = bbdd_c_session_act_jrpc_result(response, method, id);
+	if (err)
+		goto put_response;
+
+	err = 0;
+
 put_response:
 	json_object_put(response);
+put_params_obj:
+	json_object_put(params_obj);
 put_request:
 	json_object_put(request);
+put_select_change:
+	json_object_put(change_obj);
+put_select:
+	json_object_put(select_obj);
 	return err;
 }
 
-static int bbdd_c_session_list(int argc, char **argv)
+static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 {
-	int err;
+	if (sess->src_af != 0 && sess->dst_af != 0 &&
+	    sess->src_af != sess->dst_af) {
+		fprintf(stderr, "src and dst are given from different protocols: `%s' (%s) vs. `%s' (%s).\n",
+			sess->src, sess->src_af == AF_INET ? "IPv4" : "IPv6",
+			sess->dst, sess->dst_af == AF_INET ? "IPv4" : "IPv6");
+		return -1;
+	}
+	if ((sess->src_af == AF_INET || sess->dst_af == AF_INET) &&
+	    sess->flags.ipv6.seen && sess->flags.ipv6.value) {
+		fprintf(stderr, "src or dst given as IPv4, but `ipv6' flag given as well.\n");
+		return -1;
+	}
+	if (sess->src_af == AF_INET6 || sess->dst_af == AF_INET6) {
+		sess->flags.ipv6.seen = true;
+		sess->flags.ipv6.value = true;
+	}
 
-	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_session_help);
-	if (err != 0)
-		return err;
-
-	return bbdd_c_session_list_jrpc();
+	// xxx check ifindex vs. ifname if both given. If one is given, deduce
+	// one from the other.
+	return 0;
 }
 
 int bbdd_c_session(int argc, char **argv)
 {
-	if (!argc || strcmp(*argv, "help") == 0) {
-		bbdd_c_session_help();
-		return 0;
-	} else if (strcmp(*argv, "list") == 0) {
-		NEXT_ARG_FWD();
-		return bbdd_c_session_list(argc, argv);
+	struct bbdd_c_session select = {};
+	struct bbdd_c_session change = {};
+	struct bbdd_c_session *sess = &select;
+	const char *command_str = NULL;
+	bool seen_arg = false;
+	bool seen_command = false;
+	struct bbdd_c_session_flag bulk = {};
+	enum bbdd_c_session_command command;
+	int rc;
+
+	while (argc > 0) {
+		if (strcmp(*argv, "add") == 0) {
+			if (seen_command) {
+			seen_command:
+				fprintf(stderr, "`%s' seen when a command `%s' was already given\n",
+					*argv, command_str);
+				return -1;
+			}
+			command_str = *argv;
+			if (seen_arg) {
+				fprintf(stderr, "`add' used with session query parameters\n");
+				return -1;
+			}
+			NEXT_ARG_FWD();
+			command = bbdd_c_session_command_add;
+			seen_command = true;
+			sess = &change;
+			continue;
+
+		} else if (strcmp(*argv, "set") == 0) {
+			if (seen_command)
+				goto seen_command;
+			command_str = *argv;
+			NEXT_ARG_FWD();
+			command = bbdd_c_session_command_set;
+			seen_command = true;
+			sess = &change;
+			continue;
+
+		} else if (strcmp(*argv, "del") == 0) {
+			if (seen_command)
+				goto seen_command;
+			command_str = *argv;
+			NEXT_ARG_FWD();
+			command = bbdd_c_session_command_del;
+			seen_command = true;
+			sess = NULL;
+			continue;
+
+		} else if (strcmp(*argv, "show") == 0) {
+			if (seen_command)
+				goto seen_command;
+			command_str = *argv;
+			NEXT_ARG_FWD();
+			command = bbdd_c_session_command_show;
+			seen_command = true;
+			sess = NULL;
+			continue;
+
+		} else if (strcmp(*argv, "help") == 0) {
+			bbdd_c_session_help();
+			return 0;
+		}
+
+		if (sess == NULL) {
+			fprintf(stderr, "`%s' used with session change parameters\n",
+				command_str);
+			return -1;
+		}
+
+		seen_arg = true;
+
+		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
+					       &sess->flags.multihop)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "demand",
+					       &sess->flags.demand)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
+					       &sess->flags.cbit)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "echo",
+					       &sess->flags.echo)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",
+					       &sess->flags.ipv6)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
+					       &sess->flags.passive)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
+					       &sess->flags.shutdown)) ||
+
+		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "src",
+					       sess->src,
+					       &sess->src_af)) ||
+		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
+					       sess->dst,
+					       &sess->dst_af)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "lid",
+					      &sess->lid,
+					      &sess->lid_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
+					      &sess->min_tx,
+					      &sess->min_tx_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-rx",
+					      &sess->min_rx,
+					      &sess->min_rx_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-tx",
+					      &sess->min_echo_tx,
+					      &sess->min_echo_tx_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-rx",
+					      &sess->min_echo_rx,
+					      &sess->min_echo_rx_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "hold-time",
+					      &sess->hold_time,
+					      &sess->hold_time_seen)) ||
+		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "ttl",
+					     &sess->ttl,
+					     &sess->ttl_seen)) ||
+		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "detect-mult",
+					     &sess->detect_mult,
+					     &sess->detect_mult_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "ifindex",
+					      &sess->ifindex,
+					      &sess->ifindex_seen)) ||
+		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
+						 sess->ifname,
+						 &sess->ifname_seen)) ||
+
+		    (!seen_command &&
+		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk)))) {
+			if (rc > 0)
+				continue;
+			return rc;
+		}
+
+		fprintf(stderr, "What is \"%s\"?\n", *argv);
+		return -1;
 	}
 
-	return bbdd_c_session_asd(argc, argv);
+	if (!seen_command) {
+		fprintf(stderr, "No command given.\n");
+		return -1;
+	}
+
+	if (bulk.seen && bulk.value) {
+		switch (command) {
+		case bbdd_c_session_command_del:
+		case bbdd_c_session_command_set:
+			break;
+		case bbdd_c_session_command_add:
+			fprintf(stderr, "`add' does not support bulk operations\n");
+			return -1;
+		case bbdd_c_session_command_show:
+			fprintf(stderr, "`show' is implicitly bulk\n");
+			return -1;
+		}
+		select.bulk = true;
+	}
+
+	if (bbdd_c_session_check_params(&select) < 0 ||
+	    bbdd_c_session_check_params(&change) < 0)
+		return -1;
+
+	return bbdd_c_session_jrpc(command, &select, &change);
 }

@@ -607,21 +607,19 @@ put_entry_obj:
 	return NULL;
 }
 
-static void bbdd_d_handle_session_list(struct events_ctx *,
-				       struct bfddp_ctx *,
-				       struct bbdd_sock *peer,
-				       struct json_object *params_obj,
-				       struct json_object *id)
+static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
+					  struct json_object *id,
+					  uint32_t *lids,
+					  size_t nlids)
 {
 	struct json_object *obj;
 	struct json_object *result_obj;
-	struct bfd_session *bs = NULL;
 	struct json_object *array;
 	struct json_object *entry_obj;
 	struct json_object *sess_obj;
 	struct json_object *state_obj;
-	char *error;
 	int rc;
+	bool dumped;
 
 	/* The response is as follows:
 	 *
@@ -646,13 +644,6 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 	 * bbdd_d_jrpc_session_state_obj().
 	 */
 
-	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
-
 	obj = bbdd_jrpc_new_object(id);
 	if (obj == NULL)
 		return;
@@ -661,18 +652,21 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 	if (result_obj == NULL)
 		goto put_obj;
 
-	rc = json_object_object_add(obj, "result", params_obj);
-	if (rc != 0)
-		goto put_obj;
-	json_object_get(params_obj);
-
 	array = json_object_new_array();
 	if (array == NULL)
 		goto put_result_obj;
 
-	while ((bs = bfd_sessions_walk(bs))) {
+	dumped = false;
+	for (size_t i = 0; i < nlids; i++) {
 		struct bbdd_c_session sess;
 		struct bbdd_c_session_state state;
+		struct bfd_session *bs;
+
+		bs = bfd_session_lookup(lids[i]);
+		if (!bs)
+			continue;
+
+		dumped = true;
 
 		bbdd_d_session_from_soft(&sess, &state, bs);
 
@@ -703,10 +697,16 @@ static void bbdd_d_handle_session_list(struct events_ctx *,
 		entry_obj = NULL;
 	}
 
+	if (!dumped) {
+		/* Not sure this can actually happen. */
+		bbdd_d_respond_invalid_params(peer, id,
+					      "All matching sessions went away mid request");
+		goto put_array;
+	}
+
 	rc = json_object_object_add(result_obj, "sessions", array);
 	if (rc != 0)
 		goto put_array;
-	array = NULL;
 
 	if (json_object_object_add(obj, "result", result_obj))
 		goto put_result_obj;
@@ -990,17 +990,25 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 		free(error);
 		return -1;
 	}
-	if (*nlids == 0) {
+
+	return 0;
+}
+
+static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
+					    struct json_object *id,
+					    struct bbdd_c_session *select,
+					    size_t nlids)
+{
+	if (nlids == 0) {
 		bbdd_d_respond_invalid_params(peer, id,
 					      "The set request matches no session");
 		return -1;
 	}
-	if (*nlids > 1 && !select->bulk) {
+	if (nlids > 1 && !select->bulk) {
 		bbdd_d_respond_invalid_params(peer, id,
 					      "Non-bulk set request matches more than one session");
 		return -1;
 	}
-
 	return 0;
 }
 
@@ -1023,6 +1031,10 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 	if (rc < 0)
 		return;
 
+	rc = bbdd_d_handle_session_check_bulk(peer, id, &select, nlids);
+	if (rc < 0)
+		goto free_lids;
+
 	for (size_t i = 0; i < nlids; i++) {
 		struct bfddp_session bds;
 		struct bfddp_session mask;
@@ -1036,7 +1048,7 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 		if (rc != 0)  {
 			bbdd_d_respond_interr(peer, id, error);
 			free(error);
-			return;
+			goto free_lids;
 		}
 
 		bfddp_session_update_masked(bs, NULL, &bds, &mask);
@@ -1047,10 +1059,13 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 		/* Not sure this can actually happen. */
 		bbdd_d_respond_invalid_params(peer, id,
 					      "All matching sessions went away mid request");
-		return;
+		goto free_lids;
 	}
 
 	bbdd_d_respond_empty(peer, id);
+
+free_lids:
+	free(lids);
 }
 
 static void bbdd_d_handle_session_del(struct events_ctx *,
@@ -1070,6 +1085,10 @@ static void bbdd_d_handle_session_del(struct events_ctx *,
 	if (rc < 0)
 		return;
 
+	rc = bbdd_d_handle_session_check_bulk(peer, id, &sess, nlids);
+	if (rc < 0)
+		goto free_lids;
+
 	for (size_t i = 0; i < nlids; i++) {
 		struct bfd_session *bs;
 
@@ -1084,10 +1103,32 @@ static void bbdd_d_handle_session_del(struct events_ctx *,
 		/* Not sure this can actually happen. */
 		bbdd_d_respond_invalid_params(peer, id,
 					      "All matching sessions went away mid request");
-		return;
+		goto free_lids;
 	}
 
 	bbdd_d_respond_empty(peer, id);
+
+free_lids:
+	free(lids);
+}
+
+static void bbdd_d_handle_session_show(struct events_ctx *,
+				       struct bfddp_ctx *,
+				       struct bbdd_sock *peer,
+				       struct json_object *params_obj,
+				       struct json_object *id)
+{
+	struct bbdd_c_session sess;
+	uint32_t *lids;
+	size_t nlids;
+	int rc;
+
+	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+					  &sess, NULL, &lids, &nlids);
+	if (rc < 0)
+		return;
+
+	return bbdd_d_handle_session_show_do(peer, id, lids, nlids);
 }
 
 static void bbdd_d_handle_method(struct events_ctx *ec,
@@ -1108,7 +1149,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 	static struct bbdd_d_method_handler handlers[] = {
 		{"stop", bbdd_d_handle_stop},
 		{"ping", bbdd_d_handle_ping},
-		{"session-list", bbdd_d_handle_session_list},
+		{"session-show", bbdd_d_handle_session_show},
 		{"session-add", bbdd_d_handle_session_add},
 		{"session-set", bbdd_d_handle_session_set},
 		{"session-del", bbdd_d_handle_session_del},
