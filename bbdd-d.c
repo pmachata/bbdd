@@ -242,7 +242,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
 #define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
 
-	DISSECT_U32(lid);
+	DISSECT_U32_NON0(lid);
 	DISSECT_U32(min_tx);
 	DISSECT_U32(min_rx);
 	DISSECT_U32(min_echo_tx);
@@ -946,6 +946,7 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 		return;
 	}
 
+	/* Note: lid is validated to be non-zero in dissection. */
 	if (!sess.lid_seen) {
 		sess.lid = bfd_session_gen_discriminator();
 		sess.lid_seen = true;
