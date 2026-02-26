@@ -201,10 +201,9 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 #undef BBDD_D_SESSION_EXPAND_DISSECT
 
+	/* Note: Caller needs to validate / recognize protocol change, here we
+	 * just parse things out. */
 	af = bbdd_c_session_flag_isset(sess->flags.ipv6) ? AF_INET6 : AF_INET;
-	// xxx figure out how to handle change in protocol without giving an
-	// address. Maybe it needs to be forbidden. But then src address is a
-	// non-mandatory argument, so can't just force the user to provide it.
 	// xxx also scope ID is necessary for link-local addresses
 
 	if (seen[pol_src]) {
@@ -1025,6 +1024,7 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 	uint32_t *lids;
 	size_t nlids;
 	char *error;
+	int af = 0;
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
@@ -1036,6 +1036,11 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 	if (rc < 0)
 		goto free_lids;
 
+	if (change.src_af != 0)
+		af = change.src_af;
+	else if (change.dst_af != 0)
+		af = change.dst_af;
+
 	for (size_t i = 0; i < nlids; i++) {
 		struct bfddp_session bds;
 		struct bfddp_session mask;
@@ -1044,6 +1049,15 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 		bs = bfd_session_lookup(lids[i]);
 		if (!bs)
 			continue;
+
+		if ((af == AF_INET6 && bs->bs_ipv4) ||
+		    (af == AF_INET && !bs->bs_ipv4)) {
+			bbdd_jrpc_fmterr(&error, "Session protocol change requested for lid %d",
+					 bs->bs_lid);
+			bbdd_d_respond_invalid_params(peer, id, error);
+			free(error);
+			goto free_lids;
+		}
 
 		rc = bbdd_d_session_to_frr(&change, &bds, &mask, &error);
 		if (rc != 0)  {
