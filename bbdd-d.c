@@ -116,7 +116,6 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
-				    bool allow_bulk,
 				    char **error)
 {
 #define BBDD_D_SESSION_EXPAND_POL_IX(NAME, name, ...) pol_ ## name,
@@ -142,8 +141,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		pol_ifindex,
 		pol_ifname,
-
-		pol_bulk, /* Only valid when allow_bulk set. */
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
@@ -167,8 +164,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
 		[pol_ifname] = { .key = "ifname", .type = json_type_string },
-
-		[pol_bulk] = { .key = "bulk", .type = json_type_boolean },
 	};
 
 #undef BBDD_D_SESSION_EXPAND_POLICY
@@ -176,15 +171,11 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	size_t polsize;
 	int af;
 	int rc;
 
-	polsize = ARRAY_SIZE(policy);
-	if (! allow_bulk)
-		polsize--;
-
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, polsize, error);
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
 	if (rc != 0)
 		return rc;
 
@@ -226,9 +217,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		sess->ifname_seen = 1;
 	}
 
-	if (seen[pol_bulk])
-		sess->bulk = json_object_get_boolean(values[pol_bulk]);
-
 #define __DISSECT(NAME, CB) do {					\
 		if (seen[pol_ ## NAME]) {				\
 			if (CB(values[pol_ ## NAME], &sess->NAME, error) < 0) \
@@ -265,16 +253,18 @@ fail:
 static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      struct bbdd_c_session *select,
 					      struct bbdd_c_session *change,
+					      bool *bulk,
 					      char **error)
 {
 	enum {
 		pol_select,
 		pol_change,
-		// xxx maybe bulk should be here
+		pol_bulk,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		[pol_select] = { .key = "select", .type = json_type_object },
 		[pol_change] = { .key = "change", .type = json_type_object },
+		[pol_bulk] =   { .key = "bulk",   .type = json_type_boolean },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
@@ -293,21 +283,25 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 		bbdd_jrpc_fmterr(error, "RPC method doesn't allow session change");
 		return -1;
 	}
+	if (seen[pol_bulk] && bulk == NULL) {
+		bbdd_jrpc_fmterr(error, "RPC method doesn't allow bulk operations");
+		return -1;
+	}
 
 	if (seen[pol_select] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
-					    true, error))
-		goto fail;
+	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select, error))
+		return -1;
 
 	if (seen[pol_change] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
-					    false, error))
-		goto fail;
+	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change, error))
+		return -1;
+
+	if (seen[pol_bulk])
+		*bulk = json_object_get_boolean(values[pol_bulk]);
+	else if (bulk != NULL)
+		*bulk = false;
 
 	return 0;
-
-fail:
-	return -1;
 }
 
 static bool bbdd_d_addr_in4_zero(const struct sockaddr_in *sin)
@@ -937,7 +931,7 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 	char *error;
 	int rc;
 
-	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &sess,
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &sess, NULL,
 						&error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, error);
@@ -970,14 +964,15 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 					struct json_object *id,
 					struct bbdd_c_session *select,
 					struct bbdd_c_session *change,
+					bool *bulk,
 					uint32_t **lids,
 					size_t *nlids)
 {
 	char *error;
 	int rc;
 
-	rc = bbdd_d_jrpc_dissect_params_session(params_obj, select, change,
-						&error);
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj,
+						select, change, bulk, &error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, error);
 		free(error);
@@ -996,7 +991,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 
 static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 					    struct json_object *id,
-					    struct bbdd_c_session *select,
+					    bool bulk,
 					    size_t nlids)
 {
 	if (nlids == 0) {
@@ -1004,7 +999,7 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 					      "The set request matches no session");
 		return -1;
 	}
-	if (nlids > 1 && !select->bulk) {
+	if (nlids > 1 && !bulk) {
 		bbdd_d_respond_invalid_params(peer, id,
 					      "Non-bulk set request matches more than one session");
 		return -1;
@@ -1020,6 +1015,7 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 {
 	struct bbdd_c_session select;
 	struct bbdd_c_session change;
+	bool bulk;
 	bool set = false;
 	uint32_t *lids;
 	size_t nlids;
@@ -1028,11 +1024,12 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &select, &change, &lids, &nlids);
+					  &select, &change, &bulk,
+					  &lids, &nlids);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, &select, nlids);
+	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, nlids);
 	if (rc < 0)
 		goto free_lids;
 
@@ -1090,17 +1087,18 @@ static void bbdd_d_handle_session_del(struct events_ctx *,
 				      struct json_object *id)
 {
 	struct bbdd_c_session sess;
+	bool bulk;
 	bool deleted = false;
 	uint32_t *lids;
 	size_t nlids;
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &lids, &nlids);
+					  &sess, NULL, &bulk, &lids, &nlids);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, &sess, nlids);
+	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, nlids);
 	if (rc < 0)
 		goto free_lids;
 
@@ -1139,7 +1137,7 @@ static void bbdd_d_handle_session_show(struct events_ctx *,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &lids, &nlids);
+					  &sess, NULL, NULL, &lids, &nlids);
 	if (rc < 0)
 		return;
 

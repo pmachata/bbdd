@@ -84,7 +84,6 @@ const char *bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag);
 
 struct bbdd_c_session {
 	struct bbdd_c_session_flags flags;
-	bool bulk;
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
 	uint32_t lid;			int lid_seen;
@@ -106,7 +105,7 @@ struct bbdd_c_session_state {
 	} local, remote;
 };
 
-struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess);
+struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 
 /* bbdd-d.c */
 
@@ -114,7 +113,6 @@ int bbdd_d_start(int argc, char **argv);
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
-				    bool allow_bulk,
 				    char **error);
 
 const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv);

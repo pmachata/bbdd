@@ -542,7 +542,7 @@ bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag)
 	return bbdd_c_session_flag_names[flag];
 }
 
-struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess)
+struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 {
 	struct json_object *params_obj;
 
@@ -552,7 +552,7 @@ struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess)
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++) {
 		const char *flag_name = bbdd_c_session_flag_names[i];
-		struct bbdd_c_session_flag *flag = &sess->flags.flags[i];
+		const struct bbdd_c_session_flag *flag = &sess->flags.flags[i];
 
 		if (!flag->seen)
 			continue;
@@ -587,10 +587,7 @@ struct json_object *bbdd_c_jrpc_session_obj(struct bbdd_c_session *sess)
 	    (sess->ifindex_seen &&
 	     bbdd_jrpc_append_int(params_obj, "ifindex", sess->ifindex)) ||
 	    (sess->ifname_seen &&
-	     bbdd_jrpc_append_str(params_obj, "ifname", sess->ifname)) ||
-
-	    (sess->bulk &&
-	     bbdd_jrpc_append_bool(params_obj, "bulk", sess->bulk)))
+	     bbdd_jrpc_append_str(params_obj, "ifname", sess->ifname)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -706,8 +703,7 @@ static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess,
-					     false, error);
+	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess, error);
 	if (rc != 0)
 		return rc;
 
@@ -936,8 +932,9 @@ put_result:
 }
 
 static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
-			       struct bbdd_c_session *select,
-			       struct bbdd_c_session *change)
+			       const struct bbdd_c_session *select,
+			       const struct bbdd_c_session *change,
+			       struct bbdd_c_session_flag bulk)
 {
 	struct json_object *select_obj;
 	struct json_object *change_obj;
@@ -1013,6 +1010,12 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 		goto put_params_obj;
 	}
 	change_obj = NULL;
+
+	if (bulk.seen && bulk.value &&
+	    bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) {
+		err = -ENOMEM;
+		goto put_params_obj;
+	}
 
 	if (json_object_object_add(request, "params", params_obj)) {
 		err = -ENOMEM;
@@ -1226,12 +1229,11 @@ int bbdd_c_session(int argc, char **argv)
 			fprintf(stderr, "`show' is implicitly bulk\n");
 			return -1;
 		}
-		select.bulk = true;
 	}
 
 	if (bbdd_c_session_check_params(&select) < 0 ||
 	    bbdd_c_session_check_params(&change) < 0)
 		return -1;
 
-	return bbdd_c_session_jrpc(command, &select, &change);
+	return bbdd_c_session_jrpc(command, &select, &change, bulk);
 }
