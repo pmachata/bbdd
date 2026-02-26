@@ -931,6 +931,12 @@ put_result:
 	return 0;
 }
 
+static int bbdd_c_enomem(void)
+{
+	fprintf(stderr, "Failed to form RPC request: %m");
+	return -ENOMEM;
+}
+
 static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 			       const struct bbdd_c_session *select,
 			       const struct bbdd_c_session *change,
@@ -944,8 +950,6 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 	const char *method;
 	const int id = 1;
 	int err;
-
-	// xxx seems like errors here are not reported in any way to the user
 
 	switch (command) {
 	case bbdd_c_session_command_add:
@@ -987,38 +991,38 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL) {
-		err = -ENOMEM;
+		err = -1;
 		goto put_select_change;
 	}
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL) {
-		err = -ENOMEM;
+		err = bbdd_c_enomem();
 		goto put_request;
 	}
 
 	if (select_obj != NULL &&
 	    json_object_object_add(params_obj, "select", select_obj)) {
-		err = -ENOMEM;
+		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
 	select_obj = NULL;
 
 	if (change_obj != NULL &&
 	    json_object_object_add(params_obj, "change", change_obj)) {
-		err = -ENOMEM;
+		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
 	change_obj = NULL;
 
 	if (bulk.seen && bulk.value &&
 	    bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) {
-		err = -ENOMEM;
+		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
 
 	if (json_object_object_add(request, "params", params_obj)) {
-		err = -ENOMEM;
+		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
 	params_obj = NULL;
