@@ -6,6 +6,7 @@
 #include <argp.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config.h"
@@ -15,8 +16,6 @@ struct bbdd_env bbdd_env = {
 };
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";
-
-#define HELP_BLURB								\
 
 static int bbdd_help(void)
 {
@@ -68,6 +67,7 @@ int main(int argc, char **argv)
 		{ NULL, 0, NULL, 0 }
 	};
 	int opt;
+	int rc;
 
 	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
 	while ((opt = getopt_long(argc, argv, "hqvV",
@@ -75,10 +75,10 @@ int main(int argc, char **argv)
 		switch (opt) {
 		case 'V':
 			printf("%s\n", program_version);
-			return 0;
+			return EXIT_SUCCESS;
 		case 'h':
 			bbdd_help();
-			return 0;
+			return EXIT_SUCCESS;
 		case 'v':
 			bbdd_env.verbosity++;
 			break;
@@ -94,14 +94,17 @@ int main(int argc, char **argv)
 		default:
 			fprintf(stderr, "Unknown option.\n");
 			bbdd_help();
-			return 1;
+			return EXIT_FAILURE;
 		}
 	}
 
 	argc -= optind;
 	argv += optind;
 
-	return bbdd_cmd(argc, argv);
+	rc = bbdd_cmd(argc, argv);
+	if (rc != 0)
+		return EXIT_FAILURE;
+	return EXIT_SUCCESS;
 }
 
 int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj)

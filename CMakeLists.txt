@@ -8,10 +8,11 @@ add_executable(
   bbdd-c.c
   bbdd-d.c
   bbdd-jrpc.c
+  bbdd-nl.c
   bbdd-sock.c
   )
 
-target_link_libraries(bbdd json-c systemd)
+target_link_libraries(bbdd json-c systemd mnl)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
   -Wall -Wextra -Wshadow -Wpointer-arith -Wconversion -Wswitch-enum -Wpacked \

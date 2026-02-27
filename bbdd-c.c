@@ -1075,7 +1075,7 @@ static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 	}
 
 	// xxx check ifindex vs. ifname if both given. If one is given, deduce
-	// one from the other.
+	// one from the other. -- actually this needs to be done in daemon
 	return 0;
 }
 

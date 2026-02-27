@@ -15,6 +15,7 @@
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-nl.h"
 #include "bbdd-sock.h"
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
@@ -112,6 +113,28 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 
 	bfdd_request_terminate();
 	bbdd_d_respond_empty(peer, id);
+}
+
+static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
+					     char **error)
+{
+	struct bbdd_nl *nl;
+	int rc;
+
+	if (!sess->ifindex_seen && !sess->ifname_seen)
+		return 0;
+
+	nl = bbdd_nl_create();
+	if (nl == NULL) {
+		bbdd_jrpc_fmterr(error, "Failed to open netlink socket");
+		return -1;
+	}
+
+	*error = NULL;
+	rc = bbdd_nl_list_ifs(nl, error);
+
+	bbdd_nl_destroy(nl);
+	return rc;
 }
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
@@ -243,6 +266,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #undef DISSECT_U32
 #undef DISSECT_U32_NON0
 #undef __DISSECT
+
+	if ((sess->ifindex_seen || sess->ifname_seen) &&
+	    bbdd_d_session_validate_interface(sess, error) < 0)
+		goto fail;
 
 	return 0;
 
