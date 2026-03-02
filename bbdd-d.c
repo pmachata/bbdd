@@ -1300,10 +1300,14 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
 
+static const char bbdd_d_veth_name[] = "bfd_rx";
+static const char bbdd_d_veth_peer_name[] = "bfd_tx";
+
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
 	struct bbdd_context bbdd;
 	struct events_ctx *ec;
+	char *error;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
@@ -1320,10 +1324,18 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bfddp_free;
 	}
 
+	err = bbdd_nl_add_veth(bbdd.nl, bbdd_d_veth_name, bbdd_d_veth_peer_name,
+			       &error);
+	if (err) {
+		fprintf(stderr, "Failed to create veth pair: %s\n", error);
+		free(error);
+		goto nl_destroy;
+	}
+
 	ec = events_ctx_new(64);
 	if (ec == NULL) {
 		fprintf(stderr, "Failed to create event context: %m\n");
-		goto nl_destroy;
+		goto veth_del;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
@@ -1337,6 +1349,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 	bbdd_sock_close_d(&bbdd.ctl);
 ctx_free:
 	events_ctx_free(&ec);
+veth_del:
+	/* Note: the peer is autodeleted when the first endpoint is deleted. */
+	bbdd_nl_del_if(bbdd.nl, bbdd_d_veth_name, &error);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
 bfddp_free:
