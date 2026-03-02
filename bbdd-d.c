@@ -118,7 +118,11 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 					     char **error)
 {
+	struct bbdd_nl_if *ifindex_if = NULL;
+	struct bbdd_nl_if *ifname_if = NULL;
+	struct bbdd_nl_if *ifs;
 	struct bbdd_nl *nl;
+	size_t nifs;
 	int rc;
 
 	if (!sess->ifindex_seen && !sess->ifname_seen)
@@ -130,9 +134,58 @@ static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 		return -1;
 	}
 
-	*error = NULL;
-	rc = bbdd_nl_list_ifs(nl, error);
+	rc = bbdd_nl_list_ifs(nl, &ifs, &nifs, error);
+	if (rc < 0)
+		goto destroy_nl;
 
+	for (size_t i = 0; i < nifs; i++) {
+		if (sess->ifindex_seen &&
+		    ifs[i].ifindex == sess->ifindex)
+			ifindex_if = &ifs[i];
+		if (sess->ifname_seen &&
+		    strcmp(sess->ifname, ifs[i].ifname) == 0)
+			ifname_if = &ifs[i];
+	}
+
+	if (!sess->ifindex_seen)
+		ifindex_if = ifname_if;
+	else if (!sess->ifname_seen)
+		ifname_if = ifindex_if;
+
+	if (ifindex_if == NULL) {
+		bbdd_jrpc_fmterr(error, "No interface with ifindex %u found",
+				 sess->ifindex);
+		rc = -1;
+		goto free_ifs;
+	}
+	if (ifname_if == NULL) {
+		bbdd_jrpc_fmterr(error, "No interface named `%s' found",
+				 sess->ifname);
+		rc = -1;
+		goto free_ifs;
+	}
+	if (ifindex_if != ifname_if) {
+		bbdd_jrpc_fmterr(error,
+				 "No interface with ifindex `%u' and name `%s' found",
+				 sess->ifindex, sess->ifname);
+		rc = -1;
+		goto free_ifs;
+	}
+
+	if (!sess->ifindex_seen) {
+		sess->ifindex_seen = 1;
+		sess->ifindex = ifindex_if->ifindex;
+	}
+	if (!sess->ifname_seen) {
+		sess->ifname_seen = 1;
+		strcpy(sess->ifname, ifname_if->ifname);
+	}
+			
+	rc = 0;
+
+free_ifs:
+	free(ifs);
+destroy_nl:
 	bbdd_nl_destroy(nl);
 	return rc;
 }

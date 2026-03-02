@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <libmnl/libmnl.h>
 #include <libmnl/libmnl.h>
@@ -158,12 +159,18 @@ static int bbdd_socket_recv_run(struct bbdd_nl *nl, unsigned int seq,
 
 struct bbdd_nl_list_ifs {
 	struct bbdd_nl_cb base;
+	struct bbdd_nl_if *ifs;
+	size_t nifs;
+	size_t cap;
 };
 
-static int bbdd_nl_list_ifs_attr(const struct nlattr *attr, void *)
+static int bbdd_nl_list_ifs_attr(const struct nlattr *attr, void *attr_data)
 {
+	struct bbdd_nl_if *entry = attr_data;
+
 	if (mnl_attr_get_type(attr) == IFLA_IFNAME)
-		fprintf(stderr, " name %s\n", mnl_attr_get_str(attr));
+		strncpy(entry->ifname, mnl_attr_get_str(attr),
+			sizeof(entry->ifname) - 1);
 	return MNL_CB_OK;
 }
 
@@ -171,20 +178,43 @@ static int bbdd_nl_list_ifs_cb(const struct nlmsghdr *nlh, void *cb_data)
 {
 	struct bbdd_nl_list_ifs *data = cb_data;
 	struct ifinfomsg *ifi = mnl_nlmsg_get_payload(nlh);
+	struct bbdd_nl_if entry = {
+		.ifindex = (uint32_t) ifi->ifi_index,
+	};
+	struct bbdd_nl_if *new_ifs;
+	int rc;
 
-	fprintf(stderr, "bbdd_nl_list_ifs_cb ifindex %d\n", ifi->ifi_index);
-	return mnl_attr_parse(nlh, sizeof(struct ifinfomsg),
-			      bbdd_nl_list_ifs_attr, data);
+	rc = mnl_attr_parse(nlh, sizeof(struct ifinfomsg),
+			    bbdd_nl_list_ifs_attr, &entry);
+	if (rc != MNL_CB_OK)
+		return rc;
+
+	if (entry.ifname[0] == '\0')
+		return MNL_CB_OK;
+
+	if (data->nifs >= data->cap) {
+		size_t new_cap = data->cap ? data->cap * 2 : 8;
+
+		new_ifs = realloc(data->ifs, new_cap * sizeof(*new_ifs));
+		if (!new_ifs) {
+			errno = ENOMEM;
+			return MNL_CB_ERROR;
+		}
+		data->ifs = new_ifs;
+		data->cap = new_cap;
+	}
+
+	data->ifs[data->nifs++] = entry;
+	return MNL_CB_OK;
 }
 
-int bbdd_nl_list_ifs(struct bbdd_nl *nl, char **error)
+int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
+		     size_t *p_nifs, char **error)
 {
 	struct bbdd_nl_list_ifs cb_data;
 	struct nlmsghdr *nlh;
 	struct ifinfomsg *ifi;
 	ssize_t rc;
-
-	fprintf(stderr, "bbdd_nl_list_ifs\n");
 
 	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
 	nlh->nlmsg_type = RTM_GETLINK;
@@ -205,6 +235,15 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, char **error)
 			.error = error,
 		},
 	};
-	return bbdd_socket_recv_run(nl, nlh->nlmsg_seq,
-				    bbdd_nl_list_ifs_cb, &cb_data);
+	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq,
+				  bbdd_nl_list_ifs_cb, &cb_data);
+	if (rc < 0) {
+		free(cb_data.ifs);
+		bbdd_jrpc_fmterr(error, "Failed to obtain list of interfaces: %m");
+		return -1;
+	}
+
+	*p_ifs = cb_data.ifs;
+	*p_nifs = cb_data.nifs;
+	return 0;
 }
