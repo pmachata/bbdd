@@ -189,8 +189,13 @@ static int bbdd_nl_list_ifs_cb(const struct nlmsghdr *nlh, void *cb_data)
 	if (rc != MNL_CB_OK)
 		return rc;
 
-	if (entry.ifname[0] == '\0')
-		return MNL_CB_OK;
+	if (entry.ifname[0] == '\0') {
+		bbdd_jrpc_fmterr(data->base.error,
+				 "Netlink gave no name for interface with ifindex `%d'",
+				 entry.ifindex);
+		errno = EPROTO;
+		return MNL_CB_ERROR;
+	}
 
 	if (data->nifs >= data->cap) {
 		size_t new_cap = data->cap ? data->cap * 2 : 8;
@@ -235,11 +240,13 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 			.error = error,
 		},
 	};
+	errno = 0;
 	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq,
 				  bbdd_nl_list_ifs_cb, &cb_data);
 	if (rc < 0) {
 		free(cb_data.ifs);
-		bbdd_jrpc_fmterr(error, "Failed to obtain list of interfaces: %m");
+		if (!errno)
+			bbdd_jrpc_fmterr(error, "Failed to obtain list of interfaces: %m");
 		return -1;
 	}
 
