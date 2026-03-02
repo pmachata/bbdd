@@ -717,7 +717,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 		entry_obj = NULL;
 	}
 
-	if (!dumped) {
+	if (nlids > 0 && !dumped) {
 		/* Not sure this can actually happen. */
 		bbdd_d_respond_invalid_params(peer, id,
 					      "All matching sessions went away mid request");
