@@ -48,12 +48,9 @@ static void bbdd_d_respond_memerr(struct bbdd_sock *peer,
 	bbdd_d_respond_interr(peer, id, "Memory allocation issue");
 }
 
-static void bbdd_d_handle_ping(struct events_ctx *,
-			       struct bfddp_ctx *,
-			       struct bbdd_sock *peer,
+static void bbdd_d_handle_ping(struct bbdd_sock *peer,
 			       struct json_object *params_obj,
-			       struct json_object *id,
-			       struct bbdd_nl *)
+			       struct json_object *id)
 {
 	struct json_object *obj;
 	int rc;
@@ -96,12 +93,9 @@ put_obj:
 	bbdd_d_respond_memerr(peer, id);
 }
 
-static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
-			       __attribute__((unused)) struct bfddp_ctx *bctx,
-			       struct bbdd_sock *peer,
+static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 			       struct json_object *params_obj,
-			       struct json_object *id,
-			       struct bbdd_nl *)
+			       struct json_object *id)
 {
 	char *error;
 	int rc;
@@ -1086,9 +1080,7 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 	return 0;
 }
 
-static void bbdd_d_handle_session_set(struct events_ctx *,
-				      struct bfddp_ctx *,
-				      struct bbdd_sock *peer,
+static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
 				      struct bbdd_nl *nl)
@@ -1160,9 +1152,7 @@ free_lids:
 	free(lids);
 }
 
-static void bbdd_d_handle_session_del(struct events_ctx *,
-				      struct bfddp_ctx *,
-				      struct bbdd_sock *peer,
+static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
 				      struct bbdd_nl *nl)
@@ -1206,9 +1196,7 @@ free_lids:
 	free(lids);
 }
 
-static void bbdd_d_handle_session_show(struct events_ctx *,
-				       struct bfddp_ctx *,
-				       struct bbdd_sock *peer,
+static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id,
 				       struct bbdd_nl *nl)
@@ -1235,17 +1223,17 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bbdd_nl *nl)
 {
 	if (strcmp(method, "stop") == 0)
-		bbdd_d_handle_stop(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_stop(peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
-		bbdd_d_handle_ping(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
-		bbdd_d_handle_session_show(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_session_show(peer, params_obj, id, nl);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_d_handle_session_add(ec, bctx, peer, params_obj, id, nl);
 	else if (strcmp(method, "session-set") == 0)
-		bbdd_d_handle_session_set(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_session_set(peer, params_obj, id, nl);
 	else if (strcmp(method, "session-del") == 0)
-		bbdd_d_handle_session_del(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_session_del(peer, params_obj, id, nl);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
