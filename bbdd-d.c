@@ -320,10 +320,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #undef DISSECT_U32_NON0
 #undef __DISSECT
 
-	if ((sess->ifindex_seen || sess->ifname_seen) &&
-	    bbdd_d_session_validate_interface(sess, error) < 0)
-		goto fail;
-
 	return 0;
 
 fail:
@@ -369,11 +365,17 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	}
 
 	if (seen[pol_select] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select, error))
+	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
+					    error) &&
+	    ((select->ifindex_seen || select->ifname_seen) &&
+	     bbdd_d_session_validate_interface(select, error) < 0))
 		return -1;
 
 	if (seen[pol_change] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change, error))
+	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
+					    error) &&
+	    ((change->ifindex_seen || change->ifname_seen) &&
+	     bbdd_d_session_validate_interface(change, error) < 0))
 		return -1;
 
 	if (seen[pol_bulk])
