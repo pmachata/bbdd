@@ -20,3 +20,5 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 
 int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 		     const char *peer_name, char **error);
+
+int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error);

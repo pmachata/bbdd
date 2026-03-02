@@ -305,3 +305,35 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 
 	return 0;
 }
+
+int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
+{
+	struct nlmsghdr *nlh;
+	struct ifinfomsg *ifi;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_DELLINK;
+	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof(*ifi));
+	ifi->ifi_family = AF_UNSPEC;
+
+	mnl_attr_put_strz(nlh, IFLA_IFNAME, name);
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		return -1;
+	}
+
+	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to delete interface `%s': %m",
+				 name);
+		return -1;
+	}
+
+	return 0;
+}
