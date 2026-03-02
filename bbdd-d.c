@@ -1234,31 +1234,20 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct json_object *id,
 				 struct bbdd_nl *nl)
 {
-	struct bbdd_d_method_handler {
-		const char *method;
-		void (*handler)(struct events_ctx *ec,
-				struct bfddp_ctx *bctx,
-				struct bbdd_sock *peer,
-				struct json_object *params_obj,
-				struct json_object *id,
-				struct bbdd_nl *nl);
-	};
-	static struct bbdd_d_method_handler handlers[] = {
-		{"stop", bbdd_d_handle_stop},
-		{"ping", bbdd_d_handle_ping},
-		{"session-show", bbdd_d_handle_session_show},
-		{"session-add", bbdd_d_handle_session_add},
-		{"session-set", bbdd_d_handle_session_set},
-		{"session-del", bbdd_d_handle_session_del},
-	};
-	size_t i;
-
-	for (i = 0; i < ARRAY_SIZE(handlers); i++)
-		if (strcmp(method, handlers[i].method) == 0)
-			return handlers[i].handler(ec, bctx, peer,
-						   params_obj, id, nl);
-
-	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
+	if (strcmp(method, "stop") == 0)
+		bbdd_d_handle_stop(ec, bctx, peer, params_obj, id, nl);
+	else if (strcmp(method, "ping") == 0)
+		bbdd_d_handle_ping(ec, bctx, peer, params_obj, id, nl);
+	else if (strcmp(method, "session-show") == 0)
+		bbdd_d_handle_session_show(ec, bctx, peer, params_obj, id, nl);
+	else if (strcmp(method, "session-add") == 0)
+		bbdd_d_handle_session_add(ec, bctx, peer, params_obj, id, nl);
+	else if (strcmp(method, "session-set") == 0)
+		bbdd_d_handle_session_set(ec, bctx, peer, params_obj, id, nl);
+	else if (strcmp(method, "session-del") == 0)
+		bbdd_d_handle_session_del(ec, bctx, peer, params_obj, id, nl);
+	else
+		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
 static void bbdd_d_ctl_activity(struct events_ctx *ec,
