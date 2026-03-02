@@ -689,10 +689,10 @@ static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
 		pol_state,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_data] =  { .key = "data", .type = json_type_object,
+		[pol_data] = { .key = "data", .type = json_type_object,
+			       .required = true},
+		[pol_state] = { .key = "state", .type = json_type_object,
 				.required = true},
-		[pol_state] =  { .key = "state", .type = json_type_object,
-				 .required = true},
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};

@@ -6,6 +6,7 @@
 #include <net/if.h>
 #include <json-c/json_object.h>
 
+#include "bbdd-nl.h"
 #include "bbdd-sock.h"
 #include "bfddp_packet.h"
 

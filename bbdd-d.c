@@ -52,7 +52,8 @@ static void bbdd_d_handle_ping(struct events_ctx *,
 			       struct bfddp_ctx *,
 			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
-			       struct json_object *id)
+			       struct json_object *id,
+			       struct bbdd_nl *)
 {
 	struct json_object *obj;
 	int rc;
@@ -99,7 +100,8 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 			       __attribute__((unused)) struct bfddp_ctx *bctx,
 			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
-			       struct json_object *id)
+			       struct json_object *id,
+			       struct bbdd_nl *)
 {
 	char *error;
 	int rc;
@@ -116,27 +118,21 @@ static void bbdd_d_handle_stop(__attribute__((unused)) struct events_ctx *ec,
 }
 
 static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
+					     struct bbdd_nl *nl,
 					     char **error)
 {
 	struct bbdd_nl_if *ifindex_if = NULL;
 	struct bbdd_nl_if *ifname_if = NULL;
 	struct bbdd_nl_if *ifs;
-	struct bbdd_nl *nl;
 	size_t nifs;
 	int rc;
 
 	if (!sess->ifindex_seen && !sess->ifname_seen)
 		return 0;
 
-	nl = bbdd_nl_create();
-	if (nl == NULL) {
-		bbdd_jrpc_fmterr(error, "Failed to open netlink socket");
-		return -1;
-	}
-
 	rc = bbdd_nl_list_ifs(nl, &ifs, &nifs, error);
 	if (rc < 0)
-		goto destroy_nl;
+		return -1;
 
 	for (size_t i = 0; i < nifs; i++) {
 		if (sess->ifindex_seen &&
@@ -185,8 +181,6 @@ static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 
 free_ifs:
 	free(ifs);
-destroy_nl:
-	bbdd_nl_destroy(nl);
 	return rc;
 }
 
@@ -330,6 +324,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      struct bbdd_c_session *select,
 					      struct bbdd_c_session *change,
 					      bool *bulk,
+					      struct bbdd_nl *nl,
 					      char **error)
 {
 	enum {
@@ -368,14 +363,14 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
 					    error) &&
 	    ((select->ifindex_seen || select->ifname_seen) &&
-	     bbdd_d_session_validate_interface(select, error) < 0))
+	     bbdd_d_session_validate_interface(select, nl, error) < 0))
 		return -1;
 
 	if (seen[pol_change] &&
 	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
 					    error) &&
 	    ((change->ifindex_seen || change->ifname_seen) &&
-	     bbdd_d_session_validate_interface(change, error) < 0))
+	     bbdd_d_session_validate_interface(change, nl, error) < 0))
 		return -1;
 
 	if (seen[pol_bulk])
@@ -713,7 +708,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	 * }
 	 *
 	 * For details of the DATA objects, see
-	 * bbdd_d_jrpc_dissect_params_session_one().
+	 * bbdd_d_jrpc_dissect_params_session().
 	 *
 	 * For details of the STATE objects, see
 	 * bbdd_d_jrpc_session_state_obj().
@@ -1005,7 +1000,8 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 				      struct bfddp_ctx *bctx,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
-				      struct json_object *id)
+				      struct json_object *id,
+				      struct bbdd_nl *nl)
 {
 	struct bbdd_c_session sess;
 	struct bfddp_session bds;
@@ -1014,7 +1010,7 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 	int rc;
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &sess, NULL,
-						&error);
+						nl, &error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, error);
 		free(error);
@@ -1047,6 +1043,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 					struct bbdd_c_session *select,
 					struct bbdd_c_session *change,
 					bool *bulk,
+					struct bbdd_nl *nl,
 					uint32_t **lids,
 					size_t *nlids)
 {
@@ -1054,7 +1051,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj,
-						select, change, bulk, &error);
+						select, change, bulk, nl, &error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, error);
 		free(error);
@@ -1093,7 +1090,8 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 				      struct bfddp_ctx *,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
-				      struct json_object *id)
+				      struct json_object *id,
+				      struct bbdd_nl *nl)
 {
 	struct bbdd_c_session select;
 	struct bbdd_c_session change;
@@ -1106,7 +1104,7 @@ static void bbdd_d_handle_session_set(struct events_ctx *,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &select, &change, &bulk,
+					  &select, &change, &bulk, nl,
 					  &lids, &nlids);
 	if (rc < 0)
 		return;
@@ -1166,7 +1164,8 @@ static void bbdd_d_handle_session_del(struct events_ctx *,
 				      struct bfddp_ctx *,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
-				      struct json_object *id)
+				      struct json_object *id,
+				      struct bbdd_nl *nl)
 {
 	struct bbdd_c_session sess;
 	bool bulk;
@@ -1176,7 +1175,7 @@ static void bbdd_d_handle_session_del(struct events_ctx *,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &bulk, &lids, &nlids);
+					  &sess, NULL, &bulk, nl, &lids, &nlids);
 	if (rc < 0)
 		return;
 
@@ -1211,7 +1210,8 @@ static void bbdd_d_handle_session_show(struct events_ctx *,
 				       struct bfddp_ctx *,
 				       struct bbdd_sock *peer,
 				       struct json_object *params_obj,
-				       struct json_object *id)
+				       struct json_object *id,
+				       struct bbdd_nl *nl)
 {
 	struct bbdd_c_session sess;
 	uint32_t *lids;
@@ -1219,7 +1219,7 @@ static void bbdd_d_handle_session_show(struct events_ctx *,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, &lids, &nlids);
+					  &sess, NULL, NULL, nl, &lids, &nlids);
 	if (rc < 0)
 		return;
 
@@ -1231,7 +1231,8 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
-				 struct json_object *id)
+				 struct json_object *id,
+				 struct bbdd_nl *nl)
 {
 	struct bbdd_d_method_handler {
 		const char *method;
@@ -1239,7 +1240,8 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 				struct bfddp_ctx *bctx,
 				struct bbdd_sock *peer,
 				struct json_object *params_obj,
-				struct json_object *id);
+				struct json_object *id,
+				struct bbdd_nl *nl);
 	};
 	static struct bbdd_d_method_handler handlers[] = {
 		{"stop", bbdd_d_handle_stop},
@@ -1254,14 +1256,15 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 	for (i = 0; i < ARRAY_SIZE(handlers); i++)
 		if (strcmp(method, handlers[i].method) == 0)
 			return handlers[i].handler(ec, bctx, peer,
-						   params_obj, id);
+						   params_obj, id, nl);
 
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
 static void bbdd_d_ctl_activity(struct events_ctx *ec,
 				struct bfddp_ctx *bctx,
-				struct bbdd_sock *ctl)
+				struct bbdd_sock *ctl,
+				struct bbdd_nl *nl)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -1292,7 +1295,7 @@ static void bbdd_d_ctl_activity(struct events_ctx *ec,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(ec, bctx, &peer, method, params, id);
+	bbdd_d_handle_method(ec, bctx, &peer, method, params, id, nl);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -1302,6 +1305,7 @@ free_req:
 
 struct bbdd_context {
 	struct bfddp_ctx *bctx;
+	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
 };
 
@@ -1310,13 +1314,11 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 			    short revents, void *arg)
 {
 	struct bbdd_context *bbdd = arg;
-	struct bfddp_ctx *bctx = bbdd->bctx;
-	struct bbdd_sock *ctl = &bbdd->ctl;
 
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(ec, bctx, ctl);
+	bbdd_d_ctl_activity(ec, bbdd->bctx, &bbdd->ctl, bbdd->nl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
@@ -1335,10 +1337,16 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto closelog;
 	}
 
+	bbdd.nl = bbdd_nl_create();
+	if (bbdd.nl == NULL) {
+		fprintf(stderr, "Failed to open netlink socket: %m\n");
+		goto bfddp_free;
+	}
+
 	ec = events_ctx_new(64);
 	if (ec == NULL) {
 		fprintf(stderr, "Failed to create event context: %m\n");
-		goto bfddp_free;
+		goto nl_destroy;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
@@ -1352,6 +1360,8 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 	bbdd_sock_close_d(&bbdd.ctl);
 ctx_free:
 	events_ctx_free(&ec);
+nl_destroy:
+	bbdd_nl_destroy(bbdd.nl);
 bfddp_free:
 	bfddp_free(bbdd.bctx);
 closelog:
