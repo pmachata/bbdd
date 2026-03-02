@@ -9,6 +9,7 @@
 #include <libmnl/libmnl.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <linux/veth.h>
 
 #include "bbdd-jrpc.h"
 
@@ -252,5 +253,55 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 
 	*p_ifs = cb_data.ifs;
 	*p_nifs = cb_data.nifs;
+	return 0;
+}
+
+int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
+		     const char *peer_name, char **error)
+{
+	struct nlattr *linkinfo, *infodata, *peer_attr;
+	struct nlmsghdr *nlh;
+	struct ifinfomsg *ifi;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_NEWLINK;
+	nlh->nlmsg_flags = (NLM_F_REQUEST | NLM_F_CREATE |
+			    NLM_F_EXCL | NLM_F_ACK);
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof(*ifi));
+	ifi->ifi_family = AF_UNSPEC;
+
+	mnl_attr_put_strz(nlh, IFLA_IFNAME, name);
+
+	linkinfo = mnl_attr_nest_start(nlh, IFLA_LINKINFO);
+	mnl_attr_put_strz(nlh, IFLA_INFO_KIND, "veth");
+
+	infodata = mnl_attr_nest_start(nlh, IFLA_INFO_DATA);
+
+	peer_attr = mnl_attr_nest_start(nlh, VETH_INFO_PEER);
+	mnl_nlmsg_put_extra_header(nlh, sizeof(struct ifinfomsg));
+	mnl_attr_put_strz(nlh, IFLA_IFNAME, peer_name);
+	mnl_attr_nest_end(nlh, peer_attr);
+
+	mnl_attr_nest_end(nlh, infodata);
+
+	mnl_attr_nest_end(nlh, linkinfo);
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		return -1;
+	}
+
+	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error,
+				 "Failed to create veth pair `%s'<->`%s': %m",
+				 name, peer_name);
+		return -1;
+	}
+
 	return 0;
 }

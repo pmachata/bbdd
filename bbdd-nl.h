@@ -17,3 +17,6 @@ struct bbdd_nl_if {
 
 int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 		     size_t *p_nifs, char **error);
+
+int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
+		     const char *peer_name, char **error);
