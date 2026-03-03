@@ -1300,13 +1300,16 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
 
-static const char bbdd_d_veth_name[] = "bfd_rx";
-static const char bbdd_d_veth_peer_name[] = "bfd_tx";
+static const char bbdd_d_veth_rx_name[] = "bfd_rx";
+static const char bbdd_d_veth_tx_name[] = "bfd_tx";
+static const uint16_t bbdd_d_veth_tx_mq_handle = 0xa000;
 
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
 	struct bbdd_context bbdd;
 	struct events_ctx *ec;
+	uint32_t ifindex_rx;
+	uint32_t ifindex_tx;
 	char *error;
 	int err;
 
@@ -1324,12 +1327,37 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bfddp_free;
 	}
 
-	err = bbdd_nl_add_veth(bbdd.nl, bbdd_d_veth_name, bbdd_d_veth_peer_name,
-			       &error);
+	err = bbdd_nl_add_veth(bbdd.nl,
+			       bbdd_d_veth_rx_name,
+			       bbdd_d_veth_tx_name, &error);
 	if (err) {
 		fprintf(stderr, "Failed to create veth pair: %s\n", error);
 		free(error);
 		goto nl_destroy;
+	}
+
+	ifindex_rx = if_nametoindex(bbdd_d_veth_rx_name);
+	if (!ifindex_rx) {
+		fprintf(stderr, "Failed to find ifindex of a just-created interface `%s'\n",
+			bbdd_d_veth_rx_name);
+		err = -1;
+		goto veth_del;
+	}
+
+	ifindex_tx = if_nametoindex(bbdd_d_veth_tx_name);
+	if (!ifindex_tx) {
+		fprintf(stderr, "Failed to find ifindex of a just-created interface `%s'\n",
+			bbdd_d_veth_tx_name);
+		err = -1;
+		goto veth_del;
+	}
+
+	err = bbdd_nl_add_mq_qdisc(bbdd.nl, ifindex_tx, bbdd_nl_tc_h_root(),
+				   bbdd_d_veth_tx_mq_handle, &error);
+	if (err) {
+		fprintf(stderr, "Failed to create MQ qdisc: %s\n", error);
+		free(error);
+		goto veth_del;
 	}
 
 	ec = events_ctx_new(64);
@@ -1351,7 +1379,7 @@ ctx_free:
 	events_ctx_free(&ec);
 veth_del:
 	/* Note: the peer is autodeleted when the first endpoint is deleted. */
-	bbdd_nl_del_if(bbdd.nl, bbdd_d_veth_name, &error);
+	bbdd_nl_del_if(bbdd.nl, bbdd_d_veth_rx_name, &error);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
 bfddp_free:

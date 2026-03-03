@@ -6,8 +6,8 @@
 #include <string.h>
 #include <time.h>
 #include <libmnl/libmnl.h>
-#include <libmnl/libmnl.h>
 #include <linux/netlink.h>
+#include <linux/pkt_sched.h>
 #include <linux/rtnetlink.h>
 #include <linux/veth.h>
 
@@ -336,4 +336,48 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 	}
 
 	return 0;
+}
+
+int bbdd_nl_add_mq_qdisc(struct bbdd_nl *nl,
+			 uint32_t ifindex, uint32_t parent,
+			 uint16_t handle, char **error)
+{
+	struct nlmsghdr *nlh;
+	struct tcmsg *tc;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_NEWQDISC;
+	nlh->nlmsg_flags = (NLM_F_REQUEST | NLM_F_CREATE |
+			    NLM_F_EXCL | NLM_F_ACK);
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	tc = mnl_nlmsg_put_extra_header(nlh, sizeof(*tc));
+	tc->tcm_family = AF_UNSPEC;
+	tc->tcm_ifindex = (int) ifindex;
+	tc->tcm_handle = ((uint32_t) handle) << 16;
+	tc->tcm_parent = parent;
+
+	mnl_attr_put_strz(nlh, TCA_KIND, "mq");
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		return -1;
+	}
+
+	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error,
+				 "Failed to create MQ qdisc on ifindex %u: %m",
+				 ifindex);
+		return -1;
+	}
+
+	return 0;
+}
+
+uint32_t bbdd_nl_tc_h_root(void)
+{
+	return TC_H_ROOT;
 }

@@ -22,3 +22,9 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 		     const char *peer_name, char **error);
 
 int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error);
+
+int bbdd_nl_add_mq_qdisc(struct bbdd_nl *nl,
+			 uint32_t ifindex, uint32_t parent,
+			 uint16_t handle, char **error);
+
+uint32_t bbdd_nl_tc_h_root(void);
