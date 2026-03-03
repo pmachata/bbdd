@@ -6,6 +6,8 @@
 #include <string.h>
 #include <time.h>
 #include <libmnl/libmnl.h>
+#include <linux/ethtool_netlink.h>
+#include <linux/genetlink.h>
 #include <linux/netlink.h>
 #include <linux/pkt_sched.h>
 #include <linux/rtnetlink.h>
@@ -15,6 +17,8 @@
 
 struct bbdd_nl {
 	struct mnl_socket *sk;
+	struct mnl_socket *genl_sk;
+	uint16_t ethtool_family;
 	size_t bufsize;
 	char buf[];
 };
@@ -120,11 +124,57 @@ socket_close:
 	return NULL;
 }
 
+static int bbdd_nl_ethtool_family_attr(const struct nlattr *attr, void *data)
+{
+	if (mnl_attr_get_type(attr) == CTRL_ATTR_FAMILY_ID)
+		*(uint16_t *) data = mnl_attr_get_u16(attr);
+	return MNL_CB_OK;
+}
+
+static int bbdd_nl_ethtool_family_cb(const struct nlmsghdr *nlh, void *data)
+{
+	struct genlmsghdr *genl = mnl_nlmsg_get_payload(nlh);
+
+	mnl_attr_parse(nlh, sizeof(*genl), bbdd_nl_ethtool_family_attr, data);
+	return MNL_CB_OK;
+}
+
+static int bbdd_nl_resolve_ethtool(struct bbdd_nl *nl)
+{
+	struct nlmsghdr *nlh;
+	struct genlmsghdr *genl;
+	uint16_t family_id = 0;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = GENL_ID_CTRL;
+	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	genl = mnl_nlmsg_put_extra_header(nlh, sizeof(*genl));
+	genl->cmd = CTRL_CMD_GETFAMILY;
+	genl->version = 1;
+
+	mnl_attr_put_strz(nlh, CTRL_ATTR_FAMILY_NAME, ETHTOOL_GENL_NAME);
+
+	rc = mnl_socket_sendto(nl->genl_sk, nlh, nlh->nlmsg_len);
+	if (rc < 0)
+		return -1;
+
+	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq,
+				  bbdd_nl_ethtool_family_cb, &family_id);
+	if (rc < 0)
+		return -1;
+
+	return family_id;
+}
+
 struct bbdd_nl *bbdd_nl_create(void)
 {
 	struct bbdd_nl *nl;
 	size_t bufsize;
 	long sz;
+	int err;
 
 	/* The macro MNL_SOCKET_BUFFER_SIZE involves sysconf() calls. */
 	sz = MNL_SOCKET_BUFFER_SIZE;
@@ -145,8 +195,25 @@ struct bbdd_nl *bbdd_nl_create(void)
 		goto free_nl;
 	}
 
+	nl->genl_sk = bbdd_nl_socket_open(NETLINK_GENERIC);
+	if (nl->genl_sk == NULL) {
+		fprintf(stderr, "Failed to open generic netlink socket: %m");
+		goto close_sk;
+	}
+
+	err = bbdd_nl_resolve_ethtool(nl);
+	if (err < 0) {
+		fprintf(stderr, "Failed to resolve ethtool netlink family: %m");
+		goto close_genl_sk;
+	}
+	nl->ethtool_family = (uint16_t) err;
+
 	return nl;
 
+close_genl_sk:
+	mnl_socket_close(nl->genl_sk);
+close_sk:
+	mnl_socket_close(nl->sk);
 free_nl:
 	free(nl);
 	return NULL;
@@ -154,6 +221,7 @@ free_nl:
 
 void bbdd_nl_destroy(struct bbdd_nl *nl)
 {
+	mnl_socket_close(nl->genl_sk);
 	mnl_socket_close(nl->sk);
 	free(nl);
 }
