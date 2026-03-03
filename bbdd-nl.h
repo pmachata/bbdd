@@ -28,3 +28,6 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		      uint16_t handle, const char *kind, char **error);
 
 uint32_t bbdd_nl_tc_h_root(void);
+
+int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
+			 unsigned int nqueues, char **error);
