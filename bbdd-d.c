@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <syslog.h>
+#include <unistd.h>
 #include <ctype.h>
 #include <arpa/inet.h>
 #include <json-c/json_object.h>
@@ -1304,6 +1305,19 @@ static const char bbdd_d_veth_rx_name[] = "bfd_rx";
 static const char bbdd_d_veth_tx_name[] = "bfd_tx";
 static const uint16_t bbdd_d_veth_tx_mq_handle = 0xa000;
 
+static int bbdd_d_num_cpus(char **error)
+{
+	long n;
+
+	n = sysconf(_SC_NPROCESSORS_ONLN);
+	if (n < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to determine number of CPUs: %m");
+		return -1;
+	}
+
+	return (int) n;
+}
+
 static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 {
 	char *error;
@@ -1351,6 +1365,9 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	if (err)
 		goto fini_veth;
 
+	err = bbdd_d_num_cpus(error);
+	if (err < 0)
+		goto fini_veth;
 	return 0;
 
 fini_veth:
