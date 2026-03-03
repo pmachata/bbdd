@@ -1304,12 +1304,64 @@ static const char bbdd_d_veth_rx_name[] = "bfd_rx";
 static const char bbdd_d_veth_tx_name[] = "bfd_tx";
 static const uint16_t bbdd_d_veth_tx_mq_handle = 0xa000;
 
+static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
+{
+	char *error;
+	int err;
+
+	/* Note: the peer is autodeleted when the first endpoint is deleted. */
+	err = bbdd_nl_del_if(nl, bbdd_d_veth_rx_name, &error);
+	if (err) {
+		fprintf(stderr, "Failed to clean up veth pair: %s\n", error);
+		free(error);
+	}
+}
+
+static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
+				  char **error)
+{
+	uint32_t ifindex_rx;
+	uint32_t ifindex_tx;
+	int err;
+
+	err = bbdd_nl_add_veth(nl,
+			       bbdd_d_veth_rx_name,
+			       bbdd_d_veth_tx_name, error);
+	if (err)
+		return err;
+
+	ifindex_rx = if_nametoindex(bbdd_d_veth_rx_name);
+	if (!ifindex_rx) {
+		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+				 bbdd_d_veth_rx_name);
+		err = -1;
+		goto fini_veth;
+	}
+
+	ifindex_tx = if_nametoindex(bbdd_d_veth_tx_name);
+	if (!ifindex_tx) {
+		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+				 bbdd_d_veth_tx_name);
+		err = -1;
+		goto fini_veth;
+	}
+
+	err = bbdd_nl_add_mq_qdisc(nl, ifindex_tx, bbdd_nl_tc_h_root(),
+				   bbdd_d_veth_tx_mq_handle, error);
+	if (err)
+		goto fini_veth;
+
+	return 0;
+
+fini_veth:
+	bbdd_d_start_fini_veth(nl);
+	return err;
+}
+
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
 	struct bbdd_context bbdd;
 	struct events_ctx *ec;
-	uint32_t ifindex_rx;
-	uint32_t ifindex_tx;
 	char *error;
 	int err;
 
@@ -1327,43 +1379,17 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bfddp_free;
 	}
 
-	err = bbdd_nl_add_veth(bbdd.nl,
-			       bbdd_d_veth_rx_name,
-			       bbdd_d_veth_tx_name, &error);
+	err = bbdd_d_start_init_veth(bbdd.nl, &error);
 	if (err) {
-		fprintf(stderr, "Failed to create veth pair: %s\n", error);
+		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
 		free(error);
 		goto nl_destroy;
-	}
-
-	ifindex_rx = if_nametoindex(bbdd_d_veth_rx_name);
-	if (!ifindex_rx) {
-		fprintf(stderr, "Failed to find ifindex of a just-created interface `%s'\n",
-			bbdd_d_veth_rx_name);
-		err = -1;
-		goto veth_del;
-	}
-
-	ifindex_tx = if_nametoindex(bbdd_d_veth_tx_name);
-	if (!ifindex_tx) {
-		fprintf(stderr, "Failed to find ifindex of a just-created interface `%s'\n",
-			bbdd_d_veth_tx_name);
-		err = -1;
-		goto veth_del;
-	}
-
-	err = bbdd_nl_add_mq_qdisc(bbdd.nl, ifindex_tx, bbdd_nl_tc_h_root(),
-				   bbdd_d_veth_tx_mq_handle, &error);
-	if (err) {
-		fprintf(stderr, "Failed to create MQ qdisc: %s\n", error);
-		free(error);
-		goto veth_del;
 	}
 
 	ec = events_ctx_new(64);
 	if (ec == NULL) {
 		fprintf(stderr, "Failed to create event context: %m\n");
-		goto veth_del;
+		goto fini_veth;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
@@ -1377,9 +1403,8 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 	bbdd_sock_close_d(&bbdd.ctl);
 ctx_free:
 	events_ctx_free(&ec);
-veth_del:
-	/* Note: the peer is autodeleted when the first endpoint is deleted. */
-	bbdd_nl_del_if(bbdd.nl, bbdd_d_veth_rx_name, &error);
+fini_veth:
+	bbdd_d_start_fini_veth(bbdd.nl);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
 bfddp_free:
