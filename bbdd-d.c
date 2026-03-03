@@ -1360,8 +1360,8 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 		goto fini_veth;
 	}
 
-	err = bbdd_nl_add_mq_qdisc(nl, ifindex_tx, bbdd_nl_tc_h_root(),
-				   bbdd_d_veth_tx_mq_handle, error);
+	err = bbdd_nl_add_qdisc(nl, ifindex_tx, bbdd_nl_tc_h_root(),
+				bbdd_d_veth_tx_mq_handle, "mq", error);
 	if (err)
 		goto fini_veth;
 

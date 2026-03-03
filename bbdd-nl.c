@@ -338,9 +338,9 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 	return 0;
 }
 
-int bbdd_nl_add_mq_qdisc(struct bbdd_nl *nl,
-			 uint32_t ifindex, uint32_t parent,
-			 uint16_t handle, char **error)
+int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
+		      uint32_t ifindex, uint32_t parent,
+		      uint16_t handle, const char *kind, char **error)
 {
 	struct nlmsghdr *nlh;
 	struct tcmsg *tc;
@@ -358,7 +358,7 @@ int bbdd_nl_add_mq_qdisc(struct bbdd_nl *nl,
 	tc->tcm_handle = ((uint32_t) handle) << 16;
 	tc->tcm_parent = parent;
 
-	mnl_attr_put_strz(nlh, TCA_KIND, "mq");
+	mnl_attr_put_strz(nlh, TCA_KIND, kind);
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
@@ -369,8 +369,8 @@ int bbdd_nl_add_mq_qdisc(struct bbdd_nl *nl,
 	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
 		bbdd_jrpc_fmterr(error,
-				 "Failed to create MQ qdisc on ifindex %u: %m",
-				 ifindex);
+				 "Failed to create `%s' qdisc on ifindex %u: %m",
+				 kind, ifindex);
 		return -1;
 	}
 
