@@ -24,66 +24,6 @@ static char *bbdd_nl_buf(struct bbdd_nl *nl)
 	return nl->buf;
 }
 
-static struct mnl_socket *bbdd_nl_socket_open(int bus)
-{
-	struct mnl_socket *nl;
-	int one = 1;
-
-	nl = mnl_socket_open(bus);
-	if (nl == NULL)
-		return NULL;
-
-	mnl_socket_setsockopt(nl, NETLINK_CAP_ACK, &one, sizeof(one));
-	mnl_socket_setsockopt(nl, NETLINK_EXT_ACK, &one, sizeof(one));
-
-	if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0)
-		goto socket_close;
-
-	return nl;
-
-socket_close:
-	mnl_socket_close(nl);
-	return NULL;
-}
-
-struct bbdd_nl *bbdd_nl_create(void)
-{
-	struct bbdd_nl *nl;
-	size_t bufsize;
-	long sz;
-
-	/* The macro MNL_SOCKET_BUFFER_SIZE involves sysconf() calls. */
-	sz = MNL_SOCKET_BUFFER_SIZE;
-	if (sz < 0) {
-		fprintf(stderr, "Failed to determine netlink socket buffer size: %m");
-		return NULL;
-	}
-
-	bufsize = (unsigned long) sz;
-	nl = malloc(sizeof(*nl) + bufsize);
-	if (nl == NULL)
-		return NULL;
-
-	nl->bufsize = bufsize;
-	nl->sk = bbdd_nl_socket_open(NETLINK_ROUTE);
-	if (nl->sk == NULL) {
-		fprintf(stderr, "Failed to open netlink socket: %m");
-		goto free_nl;
-	}
-
-	return nl;
-
-free_nl:
-	free(nl);
-	return NULL;
-}
-
-void bbdd_nl_destroy(struct bbdd_nl *nl)
-{
-	mnl_socket_close(nl->sk);
-	free(nl);
-}
-
 struct bbdd_nl_cb {
 	char **error;
 };
@@ -156,6 +96,66 @@ static int bbdd_socket_recv_run(struct bbdd_nl *nl, struct mnl_socket *sk,
 	} while (rc > 0);
 
 	return (int) rc;
+}
+
+static struct mnl_socket *bbdd_nl_socket_open(int bus)
+{
+	struct mnl_socket *nl;
+	int one = 1;
+
+	nl = mnl_socket_open(bus);
+	if (nl == NULL)
+		return NULL;
+
+	mnl_socket_setsockopt(nl, NETLINK_CAP_ACK, &one, sizeof(one));
+	mnl_socket_setsockopt(nl, NETLINK_EXT_ACK, &one, sizeof(one));
+
+	if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0)
+		goto socket_close;
+
+	return nl;
+
+socket_close:
+	mnl_socket_close(nl);
+	return NULL;
+}
+
+struct bbdd_nl *bbdd_nl_create(void)
+{
+	struct bbdd_nl *nl;
+	size_t bufsize;
+	long sz;
+
+	/* The macro MNL_SOCKET_BUFFER_SIZE involves sysconf() calls. */
+	sz = MNL_SOCKET_BUFFER_SIZE;
+	if (sz < 0) {
+		fprintf(stderr, "Failed to determine netlink socket buffer size: %m");
+		return NULL;
+	}
+
+	bufsize = (unsigned long) sz;
+	nl = malloc(sizeof(*nl) + bufsize);
+	if (nl == NULL)
+		return NULL;
+
+	nl->bufsize = bufsize;
+	nl->sk = bbdd_nl_socket_open(NETLINK_ROUTE);
+	if (nl->sk == NULL) {
+		fprintf(stderr, "Failed to open netlink socket: %m");
+		goto free_nl;
+	}
+
+	return nl;
+
+free_nl:
+	free(nl);
+	return NULL;
+}
+
+void bbdd_nl_destroy(struct bbdd_nl *nl)
+{
+	mnl_socket_close(nl->sk);
+	free(nl);
 }
 
 struct bbdd_nl_list_ifs {
