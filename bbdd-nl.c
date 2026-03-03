@@ -137,16 +137,16 @@ static mnl_cb_t bbdd_mnl_cb_array[NLMSG_MIN_TYPE] = {
 	[NLMSG_OVERRUN]	= bbdd_mnl_cb_noop,
 };
 
-static int bbdd_socket_recv_run(struct bbdd_nl *nl, unsigned int seq,
-				mnl_cb_t cb, void *cb_data)
+static int bbdd_socket_recv_run(struct bbdd_nl *nl, struct mnl_socket *sk,
+				unsigned int seq, mnl_cb_t cb, void *cb_data)
 {
-	unsigned int portid = mnl_socket_get_portid(nl->sk);
+	unsigned int portid = mnl_socket_get_portid(sk);
 	char *buf = bbdd_nl_buf(nl);
 	size_t bufsize = nl->bufsize;
 	ssize_t rc;
 
 	do {
-		rc = mnl_socket_recvfrom(nl->sk, buf, bufsize);
+		rc = mnl_socket_recvfrom(sk, buf, bufsize);
 		if (rc <= 0)
 			break;
 		rc = mnl_cb_run2(buf, (size_t) rc, seq, portid,
@@ -242,7 +242,7 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 		},
 	};
 	errno = 0;
-	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq,
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq,
 				  bbdd_nl_list_ifs_cb, &cb_data);
 	if (rc < 0) {
 		free(cb_data.ifs);
@@ -295,7 +295,7 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
 		bbdd_jrpc_fmterr(error,
 				 "Failed to create veth pair `%s'<->`%s': %m",
@@ -328,7 +328,7 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
 		bbdd_jrpc_fmterr(error, "Failed to delete interface `%s': %m",
 				 name);
@@ -366,7 +366,7 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nlh->nlmsg_seq, NULL, NULL);
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
 		bbdd_jrpc_fmterr(error,
 				 "Failed to create `%s' qdisc on ifindex %u: %m",
