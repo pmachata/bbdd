@@ -1545,10 +1545,73 @@ fini_veth:
 	return err;
 }
 
+static struct bbdd_d_rx_socket {
+	uint16_t af;
+	uint16_t port;
+} bbdd_d_rx_sockets[] = {
+	{ AF_INET,  3784 },
+	{ AF_INET,  4784 },
+	{ AF_INET6, 3784 },
+	{ AF_INET6, 4784 },
+};
+enum {
+	bbdd_d_rx_nsockets = ARRAY_SIZE(bbdd_d_rx_sockets),
+};
+
+static void
+bbdd_d_rx_sockets_close(struct bbdd_sock rx_socks[bbdd_d_rx_nsockets])
+{
+	for (int i = 0; i < bbdd_d_rx_nsockets; i++)
+		if (rx_socks[i].sa.sa.sa_family != AF_UNSPEC)
+			bbdd_sock_close_udp(&rx_socks[i]);
+}
+
+static int
+bbdd_d_rx_sockets_open(struct bbdd_sock rx_socks[bbdd_d_rx_nsockets],
+		       char **error)
+{
+	int i;
+
+	for (i = 0; i < bbdd_d_rx_nsockets; i++)
+		rx_socks[i] = (struct bbdd_sock) {};
+
+	for (i = 0; i < bbdd_d_rx_nsockets; i++) {
+		uint16_t port = bbdd_d_rx_sockets[i].port;
+		uint16_t af = bbdd_d_rx_sockets[i].af;
+		struct bbdd_sockaddr addr;
+		int rc;
+
+		addr.sa.sa_family = af;
+		switch (af) {
+		case AF_INET:
+			addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
+			addr.sin.sin_port = htons(port);
+			addr.len = sizeof(addr.sin);
+			break;
+		case AF_INET6:
+			addr.sin6.sin6_addr = in6addr_any;
+			addr.sin6.sin6_port = htons(port);
+			addr.len = sizeof(addr.sin6);
+			break;
+		}
+
+		rc = bbdd_sock_open_udp(addr, &rx_socks[i], error);
+		if (rc)
+			goto close;
+	}
+
+	return 0;
+
+close:
+	bbdd_d_rx_sockets_close(rx_socks);
+	return -1;
+}
+
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
 	struct bbdd_context bbdd;
 	struct events_ctx *ec;
+	struct bbdd_sock rx_socks[bbdd_d_rx_nsockets];
 	char *error;
 	int err;
 
@@ -1576,10 +1639,18 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto nl_destroy;
 	}
 
+	err = bbdd_d_rx_sockets_open(rx_socks, &error);
+	if (err) {
+		fprintf(stderr, "Failed to open BFD RX sockets: %s\n",
+			error);
+		free(error);
+		goto fini_veth;
+	}
+
 	ec = events_ctx_new(64);
 	if (ec == NULL) {
 		fprintf(stderr, "Failed to create event context: %m\n");
-		goto fini_veth;
+		goto close_sockets;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
@@ -1593,6 +1664,8 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 	bbdd_sock_close_d(&bbdd.ctl);
 ctx_free:
 	events_ctx_free(&ec);
+close_sockets:
+	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
 nl_destroy:

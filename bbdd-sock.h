@@ -35,6 +35,11 @@ int bbdd_sock_open_c(struct bbdd_sock *cli,
 		     const char *sockdir);
 void bbdd_sock_close_c(struct bbdd_sock *cli);
 
+int bbdd_sock_open_udp(struct bbdd_sockaddr sa,
+		       struct bbdd_sock *sock,
+		       char **error);
+void bbdd_sock_close_udp(struct bbdd_sock *sock);
+
 int bbdd_sock_recv(struct bbdd_sock *sock,
 		   struct bbdd_sock *peer,
 		   char **bufp);

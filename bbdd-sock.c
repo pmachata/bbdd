@@ -8,7 +8,9 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -374,6 +376,74 @@ close_cli:
 void bbdd_sock_close_c(struct bbdd_sock *cli)
 {
 	bbdd_sock_close(cli);
+}
+
+int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
+		       struct bbdd_sock *sock,
+		       char **error)
+{
+	int one = 1;
+	int fd;
+	int rc;
+
+	switch (addr.sa.sa_family) {
+	case AF_INET:
+	case AF_INET6:
+		break;
+	default:
+		if (asprintf(error, "bbdd_sock_open_udp: family `%d' not supported",
+			     addr.sa.sa_family) < 0)
+			*error = NULL;
+		return -1;
+	}
+
+	fd = socket(addr.sa.sa_family, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		if (asprintf(error, "socket(af=%d, SOCK_DGRAM): %s",
+			     addr.sa.sa_family, strerror(errno)) < 0)
+			*error = NULL;
+		return -1;
+	}
+
+	rc = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	if (rc < 0) {
+		if (asprintf(error, "SO_REUSEADDR: %s", strerror(errno)) < 0)
+			*error = NULL;
+		goto close_fd;
+	}
+
+	if (addr.sa.sa_family == AF_INET6) {
+		rc = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+				&one, sizeof(one));
+		if (rc < 0) {
+			if (asprintf(error, "IPV6_V6ONLY: %s",
+				     strerror(errno)) < 0)
+				*error = NULL;
+			goto close_fd;
+		}
+	}
+
+	rc = bind(fd, &addr.sa, addr.len);
+	if (rc < 0) {
+		if (asprintf(error, "bind: %s", strerror(errno)) < 0)
+			*error = NULL;
+		goto close_fd;
+	}
+
+	*sock = (struct bbdd_sock) {
+		.fd = fd,
+		.sa = addr,
+	};
+	return 0;
+
+close_fd:
+	close(fd);
+	return -1;
+}
+
+void bbdd_sock_close_udp(struct bbdd_sock *sock)
+{
+	close(sock->fd);
 }
 
 int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
