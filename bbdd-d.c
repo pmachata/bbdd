@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -1302,6 +1303,24 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
 
+static int bbdd_d_raise_nofile(void)
+{
+	struct rlimit rlim;
+
+	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0) {
+		fprintf(stderr, "Failed to get RLIMIT_NOFILE: %m\n");
+		return -1;
+	}
+
+	rlim.rlim_cur = rlim.rlim_max;
+	if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
+		fprintf(stderr, "Failed to set RLIMIT_NOFILE: %m\n");
+		return -1;
+	}
+
+	return 0;
+}
+
 static const char bbdd_d_veth_rx_name[] = "bfd_rx";
 static const char bbdd_d_veth_tx_name[] = "bfd_tx";
 static const uint16_t bbdd_d_veth_tx_mq_handle = 0xa000;
@@ -1534,6 +1553,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
+
+	if (bbdd_d_raise_nofile() < 0)
+		goto closelog;
 
 	bbdd.bctx = bfddp_new(0, 0);
 	if (bbdd.bctx == NULL) {
