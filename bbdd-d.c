@@ -1319,7 +1319,7 @@ static int bbdd_d_num_cpus(char **error)
 	return (int) n;
 }
 
-static char *bbdd_d_xps_mask(unsigned int i, unsigned int n, char **error)
+static char *bbdd_d_cpu_mask(unsigned int i, unsigned int n, char **error)
 {
 	/* CPU mask words are always 32 bits. */
 	unsigned int nwords = (n + 31) / 32;
@@ -1344,19 +1344,16 @@ static char *bbdd_d_xps_mask(unsigned int i, unsigned int n, char **error)
 	return buf;
 }
 
-static int bbdd_d_set_xps_queue(const char *ifname, unsigned int cpu,
-				unsigned int ncpus, char **error)
+static int bbdd_d_set_q_cpu_map(const char *path,
+				unsigned int cpu, unsigned int ncpus,
+				char **error)
 {
-#define FMT "/sys/class/net/%s/queues/tx-%u/xps_cpus"
-	char path[sizeof(FMT) + IFNAMSIZ + 10];
 	char *mask;
 	ssize_t rc;
 	int fd;
 	int err = 0;
 
-	sprintf(path, FMT, ifname, cpu);
-
-	mask = bbdd_d_xps_mask(cpu, ncpus, error);
+	mask = bbdd_d_cpu_mask(cpu, ncpus, error);
 	if (!mask)
 		return -1;
 
@@ -1377,7 +1374,29 @@ static int bbdd_d_set_xps_queue(const char *ifname, unsigned int cpu,
 free_mask:
 	free(mask);
 	return err;
-#undef FMT
+}
+
+#define BBDD_D_SET_Q_CPU_MAP(FMT, IFNAME, I, N, ERROR)			\
+	({								\
+		unsigned int BBDD_i = (I);				\
+		char BBDD_path[sizeof(FMT) + IFNAMSIZ + 10];		\
+									\
+		sprintf(BBDD_path, FMT, (IFNAME), BBDD_i);		\
+		bbdd_d_set_q_cpu_map(BBDD_path, BBDD_i, (N), (ERROR));	\
+	})
+
+static int bbdd_d_set_xps_queue(const char *ifname, unsigned int cpu,
+				unsigned int ncpus, char **error)
+{
+	return BBDD_D_SET_Q_CPU_MAP("/sys/class/net/%s/queues/tx-%u/xps_cpus",
+				    ifname, cpu, ncpus, error);
+}
+
+static int bbdd_d_set_rps_queue(const char *ifname, unsigned int cpu,
+				unsigned int ncpus, char **error)
+{
+	return BBDD_D_SET_Q_CPU_MAP("/sys/class/net/%s/queues/rx-%u/rps_cpus",
+				    ifname, cpu, ncpus, error);
 }
 
 static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
@@ -1391,6 +1410,34 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 		fprintf(stderr, "Failed to clean up veth pair: %s\n", error);
 		free(error);
 	}
+}
+
+static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
+				     const char *name,
+				     unsigned int ncpus,
+				     char **error)
+{
+	uint32_t ifindex;
+	int err;
+
+	ifindex = if_nametoindex(name);
+	if (!ifindex) {
+		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+				 name);
+		return -1;
+	}
+
+	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
+	if (err)
+		return err;
+
+	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
+		err = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
@@ -1453,6 +1500,11 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 			       bbdd_d_veth_tx_name, error);
 	if (err)
 		return err;
+
+	err = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name,
+					ncpus, error);
+	if (err)
+		goto fini_veth;
 
 	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name,
 					ncpus, error);
