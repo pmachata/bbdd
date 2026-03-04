@@ -450,6 +450,12 @@ uint32_t bbdd_nl_tc_h_root(void)
 	return TC_H_ROOT;
 }
 
+int bbdd_nl_add_clsact(struct bbdd_nl *nl, uint32_t ifindex, char **error)
+{
+	return bbdd_nl_add_qdisc(nl, ifindex, TC_H_CLSACT, 0xFFFF,
+				 "clsact", error);
+}
+
 int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
 			 unsigned int nqueues, char **error)
 {

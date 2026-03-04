@@ -1431,6 +1431,10 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
+	err = bbdd_nl_add_clsact(nl, ifindex, error);
+	if (err)
+		return err;
+
 	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
 		err = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
 		if (err)
@@ -1461,6 +1465,10 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 		return err;
 
 	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
+	if (err)
+		return err;
+
+	err = bbdd_nl_add_clsact(nl, ifindex, error);
 	if (err)
 		return err;
 
