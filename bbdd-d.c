@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -1318,6 +1319,67 @@ static int bbdd_d_num_cpus(char **error)
 	return (int) n;
 }
 
+static char *bbdd_d_xps_mask(unsigned int i, unsigned int n, char **error)
+{
+	/* CPU mask words are always 32 bits. */
+	unsigned int nwords = (n + 31) / 32;
+	unsigned int word_idx = i / 32;
+	uint32_t word_val = (uint32_t) 1 << (i % 32);
+	size_t len = nwords * 9 + 1; /* 8-digit hex + comma / \0. */
+	int pos = 0;
+	char *buf;
+
+	buf = malloc(len);
+	if (!buf) {
+		bbdd_jrpc_fmterr(error, "%m");
+		return NULL;
+	}
+
+	for (unsigned int w = nwords; w-- > 0; ) {
+		uint32_t val = (w == word_idx) ? word_val : 0;
+
+		pos += sprintf(buf + pos, "%08x,", val);
+	}
+	buf[--pos] = '\0';
+	return buf;
+}
+
+static int bbdd_d_set_xps_queue(const char *ifname, unsigned int cpu,
+				unsigned int ncpus, char **error)
+{
+#define FMT "/sys/class/net/%s/queues/tx-%u/xps_cpus"
+	char path[sizeof(FMT) + IFNAMSIZ + 10];
+	char *mask;
+	ssize_t rc;
+	int fd;
+	int err = 0;
+
+	sprintf(path, FMT, ifname, cpu);
+
+	mask = bbdd_d_xps_mask(cpu, ncpus, error);
+	if (!mask)
+		return -1;
+
+	fd = open(path, O_WRONLY);
+	if (fd < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to open `%s': %m", path);
+		err = -1;
+		goto free_mask;
+	}
+
+	rc = write(fd, mask, strlen(mask));
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to write to `%s': %m", path);
+		err = -1;
+	}
+
+	close(fd);
+free_mask:
+	free(mask);
+	return err;
+#undef FMT
+}
+
 static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 {
 	char *error;
@@ -1360,6 +1422,22 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
 	if (err)
 		return err;
+
+	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
+		uint32_t parent;
+
+		parent = ((uint32_t) bbdd_d_veth_tx_mq_handle << 16) |
+			(uint32_t)(cpu + 1);
+
+		err = bbdd_nl_add_qdisc(nl, ifindex, parent,
+					0, "fq", error);
+		if (err)
+			return err;
+
+		err = bbdd_d_set_xps_queue(name, cpu, ncpus, error);
+		if (err)
+			return err;
+	}
 
 	return 0;
 }
