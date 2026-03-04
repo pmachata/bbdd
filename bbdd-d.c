@@ -1331,11 +1331,42 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 	}
 }
 
+static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
+				     const char *name,
+				     char **error)
+{
+	uint32_t ifindex;
+	unsigned int ncpus;
+	int err;
+
+	ifindex = if_nametoindex(name);
+	if (!ifindex) {
+		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+				 name);
+		return -1;
+	}
+
+	err = bbdd_nl_add_qdisc(nl, ifindex, bbdd_nl_tc_h_root(),
+				bbdd_d_veth_tx_mq_handle, "mq", error);
+	if (err)
+		return err;
+
+	/* Note: this returns number of CPUs, or < 0 on failure. */
+	err = bbdd_d_num_cpus(error);
+	if (err < 0)
+		return err;
+	ncpus = (unsigned int) err;
+
+	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
+	if (err)
+		return err;
+
+	return 0;
+}
+
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 				  char **error)
 {
-	uint32_t ifindex_rx;
-	uint32_t ifindex_tx;
 	int err;
 
 	err = bbdd_nl_add_veth(nl,
@@ -1344,30 +1375,10 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
-	ifindex_rx = if_nametoindex(bbdd_d_veth_rx_name);
-	if (!ifindex_rx) {
-		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
-				 bbdd_d_veth_rx_name);
-		err = -1;
-		goto fini_veth;
-	}
-
-	ifindex_tx = if_nametoindex(bbdd_d_veth_tx_name);
-	if (!ifindex_tx) {
-		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
-				 bbdd_d_veth_tx_name);
-		err = -1;
-		goto fini_veth;
-	}
-
-	err = bbdd_nl_add_qdisc(nl, ifindex_tx, bbdd_nl_tc_h_root(),
-				bbdd_d_veth_tx_mq_handle, "mq", error);
+	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name, error);
 	if (err)
 		goto fini_veth;
 
-	err = bbdd_d_num_cpus(error);
-	if (err < 0)
-		goto fini_veth;
 	return 0;
 
 fini_veth:
