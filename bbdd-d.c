@@ -1395,10 +1395,10 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 				     const char *name,
+				     unsigned int ncpus,
 				     char **error)
 {
 	uint32_t ifindex;
-	unsigned int ncpus;
 	int err;
 
 	ifindex = if_nametoindex(name);
@@ -1412,12 +1412,6 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 				bbdd_d_veth_tx_mq_handle, "mq", error);
 	if (err)
 		return err;
-
-	/* Note: this returns number of CPUs, or < 0 on failure. */
-	err = bbdd_d_num_cpus(error);
-	if (err < 0)
-		return err;
-	ncpus = (unsigned int) err;
 
 	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
 	if (err)
@@ -1445,7 +1439,14 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 				  char **error)
 {
+	unsigned int ncpus;
 	int err;
+
+	/* Note: this returns number of CPUs, or < 0 on failure. */
+	err = bbdd_d_num_cpus(error);
+	if (err < 0)
+		return err;
+	ncpus = (unsigned int) err;
 
 	err = bbdd_nl_add_veth(nl,
 			       bbdd_d_veth_rx_name,
@@ -1453,7 +1454,8 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
-	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name, error);
+	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name,
+					ncpus, error);
 	if (err)
 		goto fini_veth;
 
