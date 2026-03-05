@@ -5,6 +5,8 @@
 
 enum { NS_PER_MS = 1 * 1000 * 1000 };
 
+volatile int bbdd_veth_tx_ifindex;
+
 SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {

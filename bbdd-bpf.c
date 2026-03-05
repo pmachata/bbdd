@@ -149,6 +149,7 @@ int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,
 int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 			    char **error)
 {
+	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)ifindex;
 	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_tx, ifindex,
 				  BPF_TC_EGRESS, error);
 	return bpf->tx != NULL ? 0 : -1;
