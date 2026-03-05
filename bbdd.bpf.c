@@ -11,4 +11,10 @@ int bbdd_tx(struct __sk_buff *skb)
 	return TC_ACT_OK;
 }
 
+SEC("tc")
+int bbdd_rx(struct __sk_buff *skb)
+{
+	return TC_ACT_OK;
+}
+
 char _license[] SEC("license") = "GPL";

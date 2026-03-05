@@ -1434,6 +1434,7 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 }
 
 static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
+				     struct bbdd_bpf *bpf,
 				     const char *name,
 				     unsigned int ncpus,
 				     char **error)
@@ -1457,6 +1458,10 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 		if (err)
 			return err;
 	}
+
+	err = bbdd_bpf_attach_veth_rx(bpf, ifindex, error);
+	if (err)
+		return err;
 
 	return bbdd_nl_set_if_up(nl, ifindex, error);
 }
@@ -1528,7 +1533,7 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
-	err = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name,
+	err = bbdd_d_start_init_veth_rx(nl, bpf, bbdd_d_veth_rx_name,
 					ncpus, error);
 	if (err)
 		goto fini_veth;

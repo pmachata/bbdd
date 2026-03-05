@@ -20,6 +20,7 @@ struct bbdd_bpf_attachment {
 
 struct bbdd_bpf {
 	struct bpf_object *obj;
+	struct bbdd_bpf_attachment *rx;
 	struct bbdd_bpf_attachment *tx;
 };
 
@@ -153,6 +154,14 @@ free:
 	return NULL;
 }
 
+int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,
+			    char **error)
+{
+	bpf->rx = bbdd_bpf_attach(bpf, ifindex, BPF_TC_INGRESS, "bbdd_rx",
+				  error);
+	return bpf->rx != NULL ? 0 : -1;
+}
+
 int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 			    char **error)
 {
@@ -169,6 +178,8 @@ static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
+	if (bpf->rx)
+		bbdd_bpf_detach(bpf->rx);
 	if (bpf->tx)
 		bbdd_bpf_detach(bpf->tx);
 	bpf_object__close(bpf->obj);
