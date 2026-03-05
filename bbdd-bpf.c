@@ -13,12 +13,14 @@
 
 #include "bbdd.h"
 
+struct bbdd_bpf_attachment {
+	struct bpf_tc_hook hook;
+	struct bpf_tc_opts opts;
+};
+
 struct bbdd_bpf {
 	struct bpf_object *obj;
-	struct bpf_program *prog;
-	struct bpf_tc_hook tx_hook;
-	struct bpf_tc_opts tx_opts;
-	bool tx_attached;
+	struct bbdd_bpf_attachment *tx;
 };
 
 static int bbdd_bpf_print(enum libbpf_print_level level,
@@ -75,14 +77,6 @@ struct bbdd_bpf *bbdd_bpf_create(char **error)
 		goto close_obj;
 	}
 
-	bpf->prog = bpf_object__find_program_by_name(bpf->obj, "bbdd_tx");
-	if (!bpf->prog) {
-		if (asprintf(error, "program `bbdd_tx' not found in `%s'",
-			     BBDD_BPF_PROG_PATH) < 0)
-			*error = NULL;
-		goto close_obj;
-	}
-
 	return bpf;
 
 close_obj:
@@ -92,48 +86,91 @@ free_bpf:
 	return NULL;
 }
 
-int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
-			    char **error)
+static struct bbdd_bpf_attachment *
+bbdd_bpf_attach(struct bbdd_bpf *bpf, uint32_t ifindex,
+		enum bpf_tc_attach_point attach_point,
+		const char *name,
+		char **error)
 {
 	struct bpf_tc_hook hook = {
 		.sz = sizeof(hook),
 		.ifindex = (int)ifindex,
-		.attach_point = BPF_TC_EGRESS,
+		.attach_point = attach_point,
 	};
-	struct bpf_tc_opts opts = {
-		.sz = sizeof(opts),
-		.prog_fd = bpf_program__fd(bpf->prog),
-		.handle = 1,
-		.priority = 1,
-	};
+
+	struct bbdd_bpf_attachment *attachment;
+	struct bpf_tc_opts opts;
+	struct bpf_program *prog;
 	int err;
+
+	attachment = malloc(sizeof(*attachment));
+	if (!attachment) {
+		if (asprintf(error, "bbdd_bpf_attach: %m") < 0)
+			*error = NULL;
+		return NULL;
+	}
+
+	prog = bpf_object__find_program_by_name(bpf->obj, name);
+	if (!prog) {
+		if (asprintf(error, "BPF program `%s' not found", name) < 0)
+			*error = NULL;
+		goto free;
+	}
 
 	err = bpf_tc_hook_create(&hook);
 	if (err) {
 		if (asprintf(error, "bpf_tc_hook_create(ifindex=%u): %s",
 			     ifindex, strerror(-err)) < 0)
 			*error = NULL;
-		return -1;
+		goto free;
 	}
+
+	opts = (struct bpf_tc_opts) {
+		.sz = sizeof(opts),
+		.prog_fd = bpf_program__fd(prog),
+		.handle = 1,
+		.priority = 1,
+	};
 
 	err = bpf_tc_attach(&hook, &opts);
 	if (err) {
 		if (asprintf(error, "bpf_tc_attach(ifindex=%u): %s",
 			     ifindex, strerror(-err)) < 0)
 			*error = NULL;
-		return -1;
+		goto hook_destroy;
 	}
 
-	bpf->tx_hook = hook;
-	bpf->tx_opts = opts;
-	bpf->tx_attached = true;
-	return 0;
+	*attachment = (struct bbdd_bpf_attachment) {
+		.hook = hook,
+		.opts = opts,
+	};
+	return attachment;
+
+hook_destroy:
+	bpf_tc_hook_destroy(&hook);
+free:
+	free(attachment);
+	return NULL;
+}
+
+int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
+			    char **error)
+{
+	bpf->tx = bbdd_bpf_attach(bpf, ifindex, BPF_TC_EGRESS, "bbdd_tx",
+				  error);
+	return bpf->tx != NULL ? 0 : -1;
+}
+
+static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
+{
+	bpf_tc_detach(&attachment->hook, &attachment->opts);
+	free(attachment);
 }
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
-	if (bpf->tx_attached)
-		bpf_tc_detach(&bpf->tx_hook, &bpf->tx_opts);
+	if (bpf->tx)
+		bbdd_bpf_detach(bpf->tx);
 	bpf_object__close(bpf->obj);
 	free(bpf);
 }
