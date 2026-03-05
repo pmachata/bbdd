@@ -22,6 +22,7 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 		     const char *peer_name, char **error);
 
 int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error);
+int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error);
 
 int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		      uint32_t ifindex, uint32_t parent,

@@ -406,6 +406,40 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 	return 0;
 }
 
+int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
+{
+	struct nlmsghdr *nlh;
+	struct ifinfomsg *ifi;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_NEWLINK;
+	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof(*ifi));
+	ifi->ifi_family = AF_UNSPEC;
+	ifi->ifi_index = (int)ifindex;
+	ifi->ifi_flags = IFF_UP;
+	ifi->ifi_change = IFF_UP;
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		return -1;
+	}
+
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	if (rc < 0) {
+		bbdd_jrpc_fmterr(error,
+				 "Failed to bring up interface %u: %m",
+				 ifindex);
+		return -1;
+	}
+
+	return 0;
+}
+
 int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		      uint32_t ifindex, uint32_t parent,
 		      uint16_t handle, const char *kind, char **error)

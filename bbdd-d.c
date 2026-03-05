@@ -1458,7 +1458,7 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 			return err;
 	}
 
-	return 0;
+	return bbdd_nl_set_if_up(nl, ifindex, error);
 }
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
@@ -1506,7 +1506,7 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 			return err;
 	}
 
-	return 0;
+	return bbdd_nl_set_if_up(nl, ifindex, error);
 }
 
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
