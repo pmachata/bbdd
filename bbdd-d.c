@@ -1452,10 +1452,6 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
-	err = bbdd_nl_add_clsact(nl, ifindex, error);
-	if (err)
-		return err;
-
 	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
 		err = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
 		if (err)
@@ -1466,6 +1462,7 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 }
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
+				     struct bbdd_bpf *bpf,
 				     const char *name,
 				     unsigned int ncpus,
 				     char **error)
@@ -1489,7 +1486,7 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 	if (err)
 		return err;
 
-	err = bbdd_nl_add_clsact(nl, ifindex, error);
+	err = bbdd_bpf_attach_veth_tx(bpf, ifindex, error);
 	if (err)
 		return err;
 
@@ -1513,6 +1510,7 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 }
 
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
+				  struct bbdd_bpf *bpf,
 				  char **error)
 {
 	unsigned int ncpus;
@@ -1535,7 +1533,7 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	if (err)
 		goto fini_veth;
 
-	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name,
+	err = bbdd_d_start_init_veth_tx(nl, bpf, bbdd_d_veth_tx_name,
 					ncpus, error);
 	if (err)
 		goto fini_veth;
@@ -1641,7 +1639,7 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto nl_destroy;
 	}
 
-	err = bbdd_d_start_init_veth(bbdd.nl, &error);
+	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &error);
 	if (err) {
 		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
 		free(error);
