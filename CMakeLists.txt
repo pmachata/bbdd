@@ -5,6 +5,7 @@ project(bbdd VERSION 0.1.0)
 add_executable(
   bbdd
   bbdd.c
+  bbdd-bpf.c
   bbdd-c.c
   bbdd-d.c
   bbdd-jrpc.c
@@ -12,7 +13,7 @@ add_executable(
   bbdd-sock.c
   )
 
-target_link_libraries(bbdd json-c systemd mnl)
+target_link_libraries(bbdd json-c systemd mnl bpf)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
   -Wall -Wextra -Wshadow -Wpointer-arith -Wconversion -Wswitch-enum -Wpacked \

@@ -17,6 +17,7 @@
 #include <json-c/json_util.h>
 
 #include "bbdd.h"
+#include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
 #include "bbdd-sock.h"
@@ -1285,6 +1286,7 @@ free_req:
 
 struct bbdd_context {
 	struct bfddp_ctx *bctx;
+	struct bbdd_bpf *bpf;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
 };
@@ -1632,11 +1634,18 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bfddp_free;
 	}
 
+	bbdd.bpf = bbdd_bpf_create(&error);
+	if (bbdd.bpf == NULL) {
+		fprintf(stderr, "Failed to initialize BPF: %s\n", error);
+		free(error);
+		goto nl_destroy;
+	}
+
 	err = bbdd_d_start_init_veth(bbdd.nl, &error);
 	if (err) {
 		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
 		free(error);
-		goto nl_destroy;
+		goto bpf_destroy;
 	}
 
 	err = bbdd_d_rx_sockets_open(rx_socks, &error);
@@ -1668,6 +1677,8 @@ close_sockets:
 	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
+bpf_destroy:
+	bbdd_bpf_destroy(bbdd.bpf);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
 bfddp_free:
