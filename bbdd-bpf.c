@@ -10,6 +10,7 @@
 #include <syslog.h>
 
 #include <bpf/libbpf.h>
+#include <json-c/json_object.h>
 
 #include "bbdd.h"
 #include "bbdd-prog.h"
@@ -166,6 +167,37 @@ static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 {
 	bpf_tc_detach(&attachment->hook, &attachment->opts);
 	free(attachment);
+}
+
+struct json_object *bbdd_bpf_global_stats_json(struct bbdd_bpf *bpf,
+					       char **error)
+{
+	struct bbdd_prog_stats *stats = &bpf->skel->bss->bbdd_stats;
+	struct json_object *obj;
+
+	obj = json_object_new_object();
+	if (!obj) {
+		if (asprintf(error, "Failed to format global stats to JSON: %m") < 0)
+			*error = NULL;
+		return NULL;
+	}
+
+#define FIELD(NAME)							\
+	if (json_object_object_add(obj, #NAME,				\
+				   json_object_new_uint64(stats->NAME))) { \
+		if (asprintf(error,					\
+			     "Failed to format global stats to JSON: %m") < 0) \
+			*error = NULL;					\
+		goto err;						\
+	}
+	BBDD_GLOBAL_STATS(FIELD)
+#undef FIELD
+
+	return obj;
+
+err:
+	json_object_put(obj);
+	return NULL;
 }
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)

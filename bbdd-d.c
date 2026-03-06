@@ -115,6 +115,49 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 	bbdd_d_respond_empty(peer, id);
 }
 
+static void bbdd_d_handle_global_stats_get(struct bbdd_bpf *bpf,
+					   struct bbdd_sock *peer,
+					   struct json_object *params_obj,
+					   struct json_object *id)
+{
+	struct json_object *result;
+	struct json_object *obj;
+	char *error;
+	int rc;
+
+	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
+	if (rc != 0) {
+		bbdd_d_respond_invalid_params(peer, id, error);
+		free(error);
+		return;
+	}
+
+	result = bbdd_bpf_global_stats_json(bpf, &error);
+	if (!result) {
+		bbdd_d_respond_interr(peer, id, error);
+		free(error);
+		return;
+	}
+
+	obj = bbdd_jrpc_new_object(id);
+	if (!obj)
+		goto put_result;
+
+	rc = json_object_object_add(obj, "result", result);
+	if (rc != 0)
+		goto put_obj;
+
+	bbdd_jrpc_send(peer, obj);
+	json_object_put(obj);
+	return;
+
+put_obj:
+	json_object_put(obj);
+put_result:
+	json_object_put(result);
+	bbdd_d_respond_memerr(peer, id);
+}
+
 static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 					     struct bbdd_nl *nl,
 					     char **error)
@@ -1220,6 +1263,7 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 
 static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bfddp_ctx *bctx,
+				 struct bbdd_bpf *bpf,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1230,6 +1274,8 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 		bbdd_d_handle_stop(peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
+	else if (strcmp(method, "global-stats-get") == 0)
+		bbdd_d_handle_global_stats_get(bpf, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl);
 	else if (strcmp(method, "session-add") == 0)
@@ -1244,6 +1290,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 
 static void bbdd_d_ctl_activity(struct events_ctx *ec,
 				struct bfddp_ctx *bctx,
+				struct bbdd_bpf *bpf,
 				struct bbdd_sock *ctl,
 				struct bbdd_nl *nl)
 {
@@ -1276,7 +1323,7 @@ static void bbdd_d_ctl_activity(struct events_ctx *ec,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(ec, bctx, &peer, method, params, id, nl);
+	bbdd_d_handle_method(ec, bctx, bpf, &peer, method, params, id, nl);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -1300,7 +1347,7 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(ec, bbdd->bctx, &bbdd->ctl, bbdd->nl);
+	bbdd_d_ctl_activity(ec, bbdd->bctx, bbdd->bpf, &bbdd->ctl, bbdd->nl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }

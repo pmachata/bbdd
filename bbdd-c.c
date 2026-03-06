@@ -313,6 +313,72 @@ int bbdd_c_stop(int argc, char **argv)
 	return bbdd_c_stop_jrpc();
 }
 
+static void bbdd_c_global_stats_help(void)
+{
+	fprintf(stderr,
+		"Usage: bbdd global-stats\n"
+		"\n"
+	);
+}
+
+static int bbdd_c_global_stats_get_jrpc_result(struct json_object *response,
+					       const int id)
+{
+	struct json_object *result;
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+					    &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	json_object_object_foreach(result, key, val) {
+		if (json_object_get_type(val) != json_type_int)
+			continue;
+		printf("%s: %" PRIu64 "\n", key, json_object_get_uint64(val));
+	}
+
+put_result:
+	json_object_put(result);
+	return 0;
+}
+
+static int bbdd_c_global_stats_get_jrpc(void)
+{
+	struct json_object *response;
+	struct json_object *request;
+	const int id = 1;
+	int err;
+
+	request = bbdd_jrpc_new_request(id, "global-stats-get");
+	if (request == NULL)
+		return -1;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL) {
+		err = -1;
+		goto put_request;
+	}
+
+	err = bbdd_c_global_stats_get_jrpc_result(response, id);
+	json_object_put(response);
+put_request:
+	json_object_put(request);
+	return err;
+}
+
+int bbdd_c_global_stats(int argc, char **argv)
+{
+	int err;
+
+	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_global_stats_help);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_global_stats_get_jrpc();
+}
+
 enum bbdd_c_session_command {
 	bbdd_c_session_command_add,
 	bbdd_c_session_command_set,
