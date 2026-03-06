@@ -11,12 +11,19 @@
 
 #include <bpf/libbpf.h>
 
+#include "bbdd.h"
+#include "bbdd-prog.h"
+
+#define FIELD(NAME) uint64_t NAME;
+struct bbdd_prog_stats {
+	BBDD_GLOBAL_STATS(FIELD)
+};
+#undef FIELD
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #include "bbdd-prog.skel.h"
 #pragma GCC diagnostic pop
-
-#include "bbdd.h"
 
 struct bbdd_bpf_attachment {
 	struct bpf_tc_hook hook;

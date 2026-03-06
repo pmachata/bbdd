@@ -174,7 +174,7 @@ static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 		sess->ifname_seen = 1;
 		strcpy(sess->ifname, ifname_if->ifname);
 	}
-			
+
 	rc = 0;
 
 free_ifs:

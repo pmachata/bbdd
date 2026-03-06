@@ -2,6 +2,13 @@
 #include "vmlinux.h"
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
+#include "bbdd-prog.h"
+
+#define FIELD(NAME) __u64 NAME;
+struct bbdd_prog_stats {
+	BBDD_GLOBAL_STATS(FIELD)
+};
+#undef FIELD
 
 #define ETH_P_IP  0x0800          /* Internet Protocol packet     */
 
@@ -14,6 +21,7 @@
 enum { NS_PER_MS = 1 * 1000 * 1000 };
 
 volatile int bbdd_veth_tx_ifindex;
+struct bbdd_prog_stats bbdd_stats;
 
 struct bfd_control_packet {
 	__be16 vsf;	/* version, state, flags */
@@ -75,6 +83,7 @@ int bbdd_tx(struct __sk_buff *skb)
 
 out:
 	skb->tstamp = bpf_ktime_get_ns() + 300 * NS_PER_MS;
+	__sync_fetch_and_add(&bbdd_stats.packets_processed, 1);
 	return TC_ACT_OK;
 }
 
