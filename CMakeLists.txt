@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.10)
 
 project(bbdd VERSION 0.1.0)
 
+include(GNUInstallDirs)
+
+set(BBDD_DEFAULT_SOCKDIR "${CMAKE_INSTALL_FULL_RUNSTATEDIR}")
+configure_file(config.h.in config.h)
+
 add_executable(
   bbdd
   bbdd.c
