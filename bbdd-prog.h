@@ -15,5 +15,4 @@
 	FIELD(rx_socket_not_found)		\
 	FIELD(rx_socket_assign_error)		\
 	FIELD(rx_ring_buffer_error)		\
-	FIELD(packets_processed)	/*xxx*/	\
 	/**/

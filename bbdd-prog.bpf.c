@@ -83,7 +83,6 @@ int bbdd_tx(struct __sk_buff *skb)
 
 out:
 	skb->tstamp = bpf_ktime_get_ns() + 300 * NS_PER_MS;
-	__sync_fetch_and_add(&bbdd_stats.packets_processed, 1);
 	return TC_ACT_OK;
 }
 
