@@ -25,11 +25,19 @@ find_program(CLANG clang REQUIRED)
 find_program(BPFTOOL bpftool REQUIRED)
 
 add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vmlinux.h
+  COMMAND ${BPFTOOL} btf dump file /sys/kernel/btf/vmlinux format c
+          > ${CMAKE_CURRENT_BINARY_DIR}/vmlinux.h
+  VERBATIM)
+
+add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bbdd-prog.bpf.o
-  COMMAND ${CLANG} -O2 -g -target bpf -c
-          ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.bpf.c
+  COMMAND ${CLANG} -O2 -g -target bpf
+          -I${CMAKE_CURRENT_BINARY_DIR}
+          -c ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.bpf.c
           -o ${CMAKE_CURRENT_BINARY_DIR}/bbdd-prog.bpf.o
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.bpf.c
+          ${CMAKE_CURRENT_BINARY_DIR}/vmlinux.h
   VERBATIM)
 
 add_custom_command(
