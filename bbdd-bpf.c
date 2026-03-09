@@ -13,6 +13,7 @@
 #include <json-c/json_object.h>
 
 #include "bbdd.h"
+#include "bbdd-jrpc.h"
 #include "bbdd-prog.h"
 
 #define FIELD(NAME) uint64_t NAME;
@@ -161,6 +162,96 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_tx, ifindex,
 				  BPF_TC_EGRESS, error);
 	return bpf->tx != NULL ? 0 : -1;
+}
+
+int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+			    uint32_t lid,
+			    uint32_t ifindex,
+			    const struct bbdd_sockaddr *src,
+			    const struct bbdd_sockaddr *dst,
+			    uint32_t tbid,
+			    uint32_t flags,
+			    uint64_t min_interval,
+			    uint64_t max_interval,
+			    char **error)
+{
+	int af = src->sa.sa_family;
+	struct bbdd_bfd_session_config config = {
+		.fib_lookup = {
+			.family  = (uint8_t) af,
+			.ifindex = ifindex,
+			.tbid    = tbid,
+		},
+		.bpf_fib_lookup_flags = flags,
+		.min_interval         = min_interval,
+		.max_interval         = max_interval,
+	};
+	int err;
+
+	if (af != dst->sa.sa_family) {
+		bbdd_jrpc_fmterr(error, "Mismatch in families of source and destination addresses");
+		return -1;
+	}
+
+	switch (af) {
+	case AF_INET:
+		config.fib_lookup.ipv4_src = src->sin.sin_addr.s_addr;
+		config.fib_lookup.ipv4_dst = dst->sin.sin_addr.s_addr;
+		config.fib_lookup.sport = src->sin.sin_port;
+		config.fib_lookup.dport = dst->sin.sin_port;
+		break;
+	case AF_INET6:
+		memcpy(config.fib_lookup.ipv6_src, &src->sin6.sin6_addr,
+		       sizeof(config.fib_lookup.ipv6_src));
+		memcpy(config.fib_lookup.ipv6_dst, &dst->sin6.sin6_addr,
+		       sizeof(config.fib_lookup.ipv6_dst));
+		config.fib_lookup.sport = src->sin6.sin6_port;
+		config.fib_lookup.dport = dst->sin6.sin6_port;
+		break;
+	default:
+		bbdd_jrpc_fmterr(error, "Unsupported session address family %d",
+				 af);
+		return -1;
+	}
+
+	{
+		struct bbdd_bfd_session_config old;
+
+		err = bpf_map__lookup_elem(
+			bpf->skel->maps.bbdd_bpf_session_config_hash,
+			&lid, sizeof(lid),
+			&old, sizeof(old), 0);
+
+		if (err)
+			config.gen_id = 1;
+		else
+			config.gen_id = old.gen_id + 1;
+	}
+
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+				   &lid, sizeof(lid),
+				   &config, sizeof(config),
+				   BPF_ANY);
+	if (err) {
+		bbdd_jrpc_fmterr(error, "bpf_map__update_elem: %s",
+				 strerror(-err));
+		return -1;
+	}
+
+	return 0;
+}
+
+int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid,
+			    char **error)
+{
+	int err;
+
+	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+				   &lid, sizeof(lid), 0);
+	if (err)
+		bbdd_jrpc_fmterr(error, "session %u: bpf_map__delete_elem: %s",
+				 lid, strerror(-err));
+	return err;
 }
 
 static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
