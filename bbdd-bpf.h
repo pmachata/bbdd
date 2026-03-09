@@ -28,8 +28,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_sockaddr *dst,
 			    uint32_t tbid,
 			    uint32_t flags,
-			    uint64_t min_interval,
-			    uint64_t max_interval,
+			    uint64_t min_interval_ns,
+			    uint64_t max_interval_ns,
 			    char **error);
 
 int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid, char **error);
