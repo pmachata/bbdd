@@ -51,26 +51,26 @@ int bbdd_tx(struct __sk_buff *skb)
 
 	/* Filtering */
 	if (skb->protocol != bpf_htons(ETH_P_IP))
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	if (bpf_dynptr_from_skb(skb, 0, &p))
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	off = sizeof(struct ethhdr);
 	iph = bpf_dynptr_slice(&p, off, iph_buf, sizeof(iph_buf));
 	if (!iph)
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	if (iph->protocol != IPPROTO_UDP)
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	off += sizeof(struct iphdr);
 	udph = bpf_dynptr_slice(&p, off, udph_buf, sizeof(udph_buf));
 	if (!udph)
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	if (udph->dest != bpf_htons(BFD_CONTROL_DPORT_SHOP))
-		return TC_ACT_SHOT;
+		goto tx_not_bfd;
 
 	off += sizeof(*udph);
 	bfd = bpf_dynptr_slice(&p, off, bfd_buf, sizeof(bfd_buf));
@@ -84,6 +84,10 @@ int bbdd_tx(struct __sk_buff *skb)
 out:
 	skb->tstamp = bpf_ktime_get_ns() + 300 * NS_PER_MS;
 	return TC_ACT_OK;
+
+tx_not_bfd:
+	__sync_fetch_and_add(&bbdd_stats.tx_not_bfd, 1);
+	return TC_ACT_SHOT;
 }
 
 SEC("tc")
