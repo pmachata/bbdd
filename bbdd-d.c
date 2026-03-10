@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,27 @@ static void bbdd_d_respond_interr(struct bbdd_sock *peer,
 				  const char *data)
 {
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_int_error(id, data));
+}
+
+__attribute__((format(printf, 3, 4)))
+static void bbdd_d_respond_interr_fmt(struct bbdd_sock *peer,
+				      struct json_object *id,
+				      const char *fmt, ...)
+{
+	char *buf;
+	va_list ap;
+	int rc;
+
+	va_start(ap, fmt);
+	rc = vasprintf(&buf, fmt, ap);
+	va_end(ap);
+
+	if (rc >= 0) {
+		bbdd_d_respond_interr(peer, id, buf);
+		free(buf);
+	} else {
+		bbdd_d_respond_interr(peer, id, fmt);
+	}
 }
 
 static void bbdd_d_respond_memerr(struct bbdd_sock *peer,
@@ -1037,8 +1059,118 @@ oom:
 	return -1;
 }
 
+enum {
+	bbdd_d_bits_per_long = 8 * sizeof(long),
+
+	bbdd_d_sport_lo = 49152,
+	bbdd_d_sport_hi = 65535,
+	bbdd_d_sport_cap = bbdd_d_sport_hi - bbdd_d_sport_lo + 1,
+	bbdd_d_sport_nwords = bbdd_d_sport_cap / bbdd_d_bits_per_long,
+};
+
+struct bbdd_d_sport_alloc {
+	/* Has ones where ports are taken. */
+	long occ[bbdd_d_sport_nwords];
+};
+
+static int bbdd_d_sport_get(struct bbdd_d_sport_alloc *alloc, uint16_t *port)
+{
+	for (int i = 0; i < bbdd_d_sport_nwords; i++) {
+		int f = ffsl(~alloc->occ[i]);
+		if (f) {
+			f--;
+			alloc->occ[i] |= 1L << f;
+			*port = (uint16_t)(bbdd_d_sport_lo +
+					   i * bbdd_d_bits_per_long + f);
+			return 0;
+		}
+	}
+	errno = -ENOBUFS;
+	return -1;
+}
+
+static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
+{
+	uint16_t d;
+	int i, f;
+
+	assert(port >= bbdd_d_sport_lo);
+	d = port - bbdd_d_sport_lo;
+	i = d / bbdd_d_bits_per_long;
+	f = d % bbdd_d_bits_per_long;
+	alloc->occ[i] &= ~(1L << f);
+}
+
+enum { BBDD_D_NS_PER_US = 1 * 1000 };
+
+static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
+					 struct bbdd_d_sport_alloc *spa,
+					 const struct bfddp_session *bds,
+					 uint16_t *ret_sport,
+					 char **error)
+{
+	uint64_t min_tx_ns = ntohl(bds->min_tx) * BBDD_D_NS_PER_US;
+	uint64_t min_interval_ns;
+	uint64_t max_interval_ns;
+	bool mhop = bds->flags & htonl(SESSION_MULTIHOP);
+	bool ipv6 = bds->flags & htonl(SESSION_IPV6);
+	struct bbdd_sockaddr src = {};
+	struct bbdd_sockaddr dst = {};
+	uint32_t tbid = 0;    // xxx VRF support
+	uint32_t flags = 0;   // xxx
+	uint16_t sport;
+	uint16_t dport;
+	int rc;
+
+	rc = bbdd_d_sport_get(spa, &sport);
+	if (rc)
+		return rc;
+
+	dport = mhop ? BFD_MULTI_HOP_PORT : BFD_SINGLE_HOP_PORT;
+
+	// xxx: Note that the send interval needs to be deduced from the
+	// remote end values. For now, use local values.
+	min_interval_ns = min_tx_ns * 75 / 100;
+	if (bds->detect_mult == 1)
+		max_interval_ns = min_tx_ns * 90 / 100;
+	else
+		max_interval_ns = min_tx_ns;
+
+	/* Even for IPv4, the address is kept in struct in6_addr in the
+	 * BFDDP packet. So just initialize everything as if it were IPv6,
+	 * the layouts are compatible enough to allow this. */
+
+	src.sin6.sin6_family = ipv6 ? AF_INET6 : AF_INET;
+	src.sin6.sin6_port = sport;
+	src.sin6.sin6_addr = bds->src;
+	src.len = ipv6 ? sizeof(src.sin6) : sizeof(src.sin);
+
+	dst.sin6.sin6_family = src.sin6.sin6_family;
+	dst.sin6.sin6_port = dport;
+	dst.sin6.sin6_addr = bds->dst;
+	dst.len = src.len;
+
+	rc = bbdd_bpf_session_update(bpf, ntohl(bds->lid),
+				     ntohl(bds->ifindex),
+				     &src, &dst,
+				     tbid, flags,
+				     min_interval_ns, max_interval_ns,
+				     error);
+	if (rc)
+		goto put_port;
+
+	*ret_sport = sport;
+	return 0;
+
+put_port:
+	bbdd_d_sport_put(spa, sport);
+	return -1;
+}
+
 static void bbdd_d_handle_session_add(struct events_ctx *ec,
 				      struct bfddp_ctx *bctx,
+				      struct bbdd_bpf *bpf,
+				      struct bbdd_d_sport_alloc *spa,
 				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
@@ -1047,6 +1179,8 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 	struct bbdd_c_session sess;
 	struct bfddp_session bds;
 	struct bfddp_session mask;
+	struct bfd_session *bs;
+	uint16_t sport;
 	char *error;
 	int rc;
 
@@ -1074,7 +1208,16 @@ static void bbdd_d_handle_session_add(struct events_ctx *ec,
 		return;
 	}
 
-	bfddp_session_new(bctx, ec, &bds);
+	rc = bbdd_d_handle_session_add_bpf(bpf, spa, &bds, &sport, &error);
+	if (rc != 0) {
+		bbdd_d_respond_interr(peer, id, error);
+		free(error);
+		return;
+	}
+
+	bs = bfddp_session_new(bctx, ec, &bds);
+	bs->sport = sport;
+
 	bbdd_d_respond_empty(peer, id);
 }
 
@@ -1199,17 +1342,20 @@ free_lids:
 	free(lids);
 }
 
-static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
+static void bbdd_d_handle_session_del(struct bbdd_bpf *bpf,
+				      struct bbdd_d_sport_alloc *spa,
+				      struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
 				      struct bbdd_nl *nl)
 {
 	struct bbdd_c_session sess;
-	bool bulk;
-	bool deleted = false;
 	uint32_t *lids;
 	size_t nlids;
+	bool bulk;
 	int rc;
+	char *last_error = NULL;
+	size_t num_errors = 0;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &sess, NULL, &bulk, nl, &lids, &nlids);
@@ -1222,18 +1368,45 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 
 	for (size_t i = 0; i < nlids; i++) {
 		struct bfd_session *bs;
+		char *error = NULL;
+		bool bs_error = false;
+		uint16_t sport;
+
+		rc = bbdd_bpf_session_delete(bpf, lids[i], &error);
+		if (rc < 0)
+			syslog(LOG_WARNING, "Failed to delete BPF leg of session: %s",
+			       error ?: "(unknown error)");
 
 		bs = bfd_session_lookup(lids[i]);
 		if (bs) {
+			sport = bs->sport;
 			bfddp_session_free(&bs, NULL);
-			deleted = true;
+		} else {
+			bs_error = true;
+#define FMT_ARGS "Failed to look up session %u", lids[i]
+			syslog(LOG_WARNING, FMT_ARGS);
+			if (error == NULL)
+				bbdd_jrpc_fmterr(&error, FMT_ARGS);
+#undef FMT_ARGS
 		}
+
+		if (bs_error || rc < 0) {
+			if (error != NULL) {
+				free(last_error);
+				last_error = error;
+			}
+			num_errors++;
+		}
+
+		bbdd_d_sport_put(spa, sport);
 	}
 
-	if (!deleted) {
-		/* Not sure this can actually happen. */
-		bbdd_d_respond_invalid_params(peer, id,
-					      "All matching sessions went away mid request");
+	if (num_errors) {
+		bbdd_d_respond_interr_fmt(peer, id,
+					  "%zu/%zu sessions failed to delete. Last recorded error: `%s'",
+					  num_errors, nlids,
+					  last_error ?: "(unknown error)");
+		free(last_error);
 		goto free_lids;
 	}
 
@@ -1264,6 +1437,7 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 static void bbdd_d_handle_method(struct events_ctx *ec,
 				 struct bfddp_ctx *bctx,
 				 struct bbdd_bpf *bpf,
+				 struct bbdd_d_sport_alloc *spa,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1279,11 +1453,12 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl);
 	else if (strcmp(method, "session-add") == 0)
-		bbdd_d_handle_session_add(ec, bctx, peer, params_obj, id, nl);
+		bbdd_d_handle_session_add(ec, bctx, bpf, spa,
+					  peer, params_obj, id, nl);
 	else if (strcmp(method, "session-set") == 0)
 		bbdd_d_handle_session_set(peer, params_obj, id, nl);
 	else if (strcmp(method, "session-del") == 0)
-		bbdd_d_handle_session_del(peer, params_obj, id, nl);
+		bbdd_d_handle_session_del(bpf, spa, peer, params_obj, id, nl);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
@@ -1291,6 +1466,7 @@ static void bbdd_d_handle_method(struct events_ctx *ec,
 static void bbdd_d_ctl_activity(struct events_ctx *ec,
 				struct bfddp_ctx *bctx,
 				struct bbdd_bpf *bpf,
+				struct bbdd_d_sport_alloc *spa,
 				struct bbdd_sock *ctl,
 				struct bbdd_nl *nl)
 {
@@ -1323,7 +1499,7 @@ static void bbdd_d_ctl_activity(struct events_ctx *ec,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(ec, bctx, bpf, &peer, method, params, id, nl);
+	bbdd_d_handle_method(ec, bctx, bpf, spa, &peer, method, params, id, nl);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -1334,6 +1510,7 @@ free_req:
 struct bbdd_context {
 	struct bfddp_ctx *bctx;
 	struct bbdd_bpf *bpf;
+	struct bbdd_d_sport_alloc spa;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
 };
@@ -1347,7 +1524,8 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(ec, bbdd->bctx, bbdd->bpf, &bbdd->ctl, bbdd->nl);
+	bbdd_d_ctl_activity(ec, bbdd->bctx, bbdd->bpf, &bbdd->spa,
+			    &bbdd->ctl, bbdd->nl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
@@ -1601,10 +1779,10 @@ static struct bbdd_d_rx_socket {
 	uint16_t af;
 	uint16_t port;
 } bbdd_d_rx_sockets[] = {
-	{ AF_INET,  3784 },
-	{ AF_INET,  4784 },
-	{ AF_INET6, 3784 },
-	{ AF_INET6, 4784 },
+	{ AF_INET,  BFD_SINGLE_HOP_PORT },
+	{ AF_INET,  BFD_MULTI_HOP_PORT },
+	{ AF_INET6, BFD_SINGLE_HOP_PORT },
+	{ AF_INET6, BFD_MULTI_HOP_PORT },
 };
 enum {
 	bbdd_d_rx_nsockets = ARRAY_SIZE(bbdd_d_rx_sockets),
@@ -1661,7 +1839,7 @@ close:
 
 static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 {
-	struct bbdd_context bbdd;
+	struct bbdd_context bbdd = {};
 	struct events_ctx *ec;
 	struct bbdd_sock rx_socks[bbdd_d_rx_nsockets];
 	char *error;
