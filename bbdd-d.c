@@ -21,6 +21,7 @@
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
+#include "bbdd-sess.h"
 #include "bbdd-sock.h"
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
@@ -1510,6 +1511,7 @@ free_req:
 struct bbdd_context {
 	struct bfddp_ctx *bctx;
 	struct bbdd_bpf *bpf;
+	struct bbdd_sess_dir *sess_dir;
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
@@ -1869,11 +1871,17 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto nl_destroy;
 	}
 
+	bbdd.sess_dir = bbdd_sess_dir_create();
+	if (bbdd.sess_dir == NULL) {
+		fprintf(stderr, "Failed to create session directory: %m\n");
+		goto bpf_destroy;
+	}
+
 	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &error);
 	if (err) {
 		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
 		free(error);
-		goto bpf_destroy;
+		goto sess_dir_destroy;
 	}
 
 	err = bbdd_d_rx_sockets_open(rx_socks, &error);
@@ -1905,6 +1913,8 @@ close_sockets:
 	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
+sess_dir_destroy:
+	bbdd_sess_dir_destroy(bbdd.sess_dir);
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
 nl_destroy:

@@ -111,6 +111,24 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 
 /* bbdd-d.c */
 
+struct bbdd_d_session {
+	struct bbdd_c_session_flags flags;
+	uint32_t id;
+	struct bbdd_sockaddr src;
+	struct bbdd_sockaddr dst;
+
+	uint32_t min_tx;
+	uint32_t min_rx;
+	uint32_t min_echo_tx;
+	uint32_t min_echo_rx;
+	uint32_t hold_time;
+	uint8_t ttl;
+	uint8_t detect_mult;
+	uint32_t ifindex;
+
+	struct bbdd_c_session_state_end state;
+};
+
 int bbdd_d_start(int argc, char **argv);
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
