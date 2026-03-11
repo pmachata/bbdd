@@ -37,6 +37,7 @@ add_custom_command(
           -c ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.bpf.c
           -o ${CMAKE_CURRENT_BINARY_DIR}/bbdd-prog.bpf.o
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.bpf.c
+          ${CMAKE_CURRENT_SOURCE_DIR}/bbdd-prog.h
           ${CMAKE_CURRENT_BINARY_DIR}/vmlinux.h
   VERBATIM)
 
