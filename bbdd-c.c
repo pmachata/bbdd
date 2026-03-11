@@ -398,13 +398,13 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
-		"	KEY ::= { lid | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
+		"	KEY ::= { id | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
 		"	FLAG ::= { multihop | demand | cbit | echo | ipv6 | passive | shutdown }\n"
 		"       bulk		-- set & del requests are allowed to impact >1 session\n"
 		"	no FLAG		-- set the flag to negative value"
 		"\n"
 		"Parameter KEY and VALUE details:\n"
-		"	lid U32 	-- session ID\n"
+		"	id U32 		-- session ID\n"
 		"	src ADDR	-- source address\n"
 		"	dst ADDR	-- destination address\n"
 		"	min-tx U32	-- minimum tx interval in microseconds\n"
@@ -631,8 +631,8 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	     bbdd_jrpc_append_str(params_obj, "src", sess->src)) ||
 	    (sess->dst_af &&
 	     bbdd_jrpc_append_str(params_obj, "dst", sess->dst)) ||
-	    (sess->lid_seen &&
-	     bbdd_jrpc_append_int(params_obj, "lid", sess->lid)) ||
+	    (sess->id_seen &&
+	     bbdd_jrpc_append_int(params_obj, "id", sess->id)) ||
 	    (sess->min_tx_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_tx", sess->min_tx)) ||
 	    (sess->min_rx_seen &&
@@ -877,8 +877,8 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 				    struct bbdd_c_session_state *state)
 {
 	bool seen = false;
-	if (sess->lid_seen) {
-		printf("lid %u ", sess->lid);
+	if (sess->id_seen) {
+		printf("id %u ", sess->id);
 		seen = true;
 	}
 	if (sess->src_af) {
@@ -1240,9 +1240,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
 					       sess->dst,
 					       &sess->dst_af)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "lid",
-					      &sess->lid,
-					      &sess->lid_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "id",
+					      &sess->id,
+					      &sess->id_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
 					      &sess->min_tx,
 					      &sess->min_tx_seen)) ||

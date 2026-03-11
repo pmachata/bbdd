@@ -88,7 +88,7 @@ struct bbdd_c_session {
 	struct bbdd_c_session_flags flags;
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
-	uint32_t lid;			int lid_seen;
+	uint32_t id;			int id_seen;
 	uint32_t min_tx;		int min_tx_seen;
 	uint32_t min_rx;		int min_rx_seen;
 	uint32_t min_echo_tx;		int min_echo_tx_seen;
