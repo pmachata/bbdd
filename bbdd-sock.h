@@ -5,9 +5,17 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+/* This structure is layout-compatible with the start of struct sockaddr_in and
+ * struct sockaddr_in6, but not struct sockaddr_un. */
+struct bddd_sockaddr_in46 {
+	sa_family_t family;
+	in_port_t port;
+};
+
 struct bbdd_sockaddr {
 	union {
 		struct sockaddr sa;
+		struct bddd_sockaddr_in46 sin46;
 		struct sockaddr_in sin;
 		struct sockaddr_in6 sin6;
 		struct sockaddr_un sun;

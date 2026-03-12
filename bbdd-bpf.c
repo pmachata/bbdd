@@ -175,7 +175,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    uint64_t max_interval_ns,
 			    char **error)
 {
-	int af = src->sa.sa_family;
+	int af = src->sa.sa_family ?: dst->sa.sa_family;
 	struct bbdd_bfd_session_config config = {
 		.fib_lookup = {
 			.family  = (uint8_t) af,
@@ -193,20 +193,19 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
+	config.fib_lookup.sport = src->sin46.port;
+	config.fib_lookup.dport = dst->sin46.port;
+
 	switch (af) {
 	case AF_INET:
 		config.fib_lookup.ipv4_src = src->sin.sin_addr.s_addr;
 		config.fib_lookup.ipv4_dst = dst->sin.sin_addr.s_addr;
-		config.fib_lookup.sport = src->sin.sin_port;
-		config.fib_lookup.dport = dst->sin.sin_port;
 		break;
 	case AF_INET6:
 		memcpy(config.fib_lookup.ipv6_src, &src->sin6.sin6_addr,
 		       sizeof(config.fib_lookup.ipv6_src));
 		memcpy(config.fib_lookup.ipv6_dst, &dst->sin6.sin6_addr,
 		       sizeof(config.fib_lookup.ipv6_dst));
-		config.fib_lookup.sport = src->sin6.sin6_port;
-		config.fib_lookup.dport = dst->sin6.sin6_port;
 		break;
 	default:
 		bbdd_util_fmterr(error, "Unsupported session address family %d",

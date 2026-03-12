@@ -111,8 +111,21 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 
 /* bbdd-d.c */
 
+#define BBDD_D_SESSION_EXPAND_FIELD(NAME, name, ...) bool name;
+
+struct bbdd_d_session_flags {
+	union {
+		bool flags[bbdd_c_session_nflags];
+		struct {
+			BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_FIELD)
+		};
+	};
+};
+
+#undef BBDD_C_SESSION_EXPAND_FIELD
+
 struct bbdd_d_session {
-	struct bbdd_c_session_flags flags;
+	struct bbdd_d_session_flags flags;
 	uint32_t id;
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;

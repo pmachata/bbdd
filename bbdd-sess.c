@@ -21,66 +21,88 @@ struct bbdd_sess_dir {
 
 struct bbdd_sess_dir *bbdd_sess_dir_create(void)
 {
-	struct bbdd_sess_dir *dir;
+	struct bbdd_sess_dir *sdir;
 
-	dir = malloc(sizeof(*dir));
-	if (!dir)
+	sdir = malloc(sizeof(*sdir));
+	if (!sdir)
 		return NULL;
 
-	*dir = (struct bbdd_sess_dir) {};
+	*sdir = (struct bbdd_sess_dir) {};
 
-	return dir;
+	return sdir;
 }
 
-void bbdd_sess_dir_destroy(struct bbdd_sess_dir *dir)
+void bbdd_sess_dir_destroy(struct bbdd_sess_dir *sdir)
 {
 	struct bbdd_sess_dir_entry *entry, *tmp;
 
-	HASH_ITER(hh, dir->sessions, entry, tmp) {
-		HASH_DEL(dir->sessions, entry);
+	HASH_ITER(hh, sdir->sessions, entry, tmp) {
+		HASH_DEL(sdir->sessions, entry);
 		free(entry);
 	}
-	free(dir);
+	free(sdir);
 }
 
-int bbdd_sess_dir_add_session(struct bbdd_sess_dir *dir,
-			      const struct bbdd_d_session *sess)
+struct bbdd_d_session *
+bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir,
+			  const struct bbdd_d_session *template)
 {
 	struct bbdd_sess_dir_entry *entry;
 
 	entry = malloc(sizeof(*entry));
 	if (!entry)
-		return -ENOMEM;
+		return NULL;
 
 	*entry = (struct bbdd_sess_dir_entry) {
-		.sess = *sess,
+		.sess = *template,
 	};
 
-	HASH_ADD_INT(dir->sessions, sess.id, entry);
-	return 0;
+	HASH_ADD_INT(sdir->sessions, sess.id, entry);
+	return &entry->sess;
 }
 
-struct bbdd_d_session *bbdd_sess_dir_get_session(struct bbdd_sess_dir *dir,
+struct bbdd_d_session *bbdd_sess_dir_get_session(struct bbdd_sess_dir *sdir,
 						 uint32_t id)
 {
 	struct bbdd_sess_dir_entry *entry;
 
-	HASH_FIND_INT(dir->sessions, &id, entry);
+	HASH_FIND_INT(sdir->sessions, &id, entry);
 	if (entry == NULL)
 		return NULL;
 
 	return &entry->sess;
 }
 
-int bbdd_sess_dir_del_session(struct bbdd_sess_dir *dir, uint32_t id)
+bool bbdd_sess_dir_has_session(struct bbdd_sess_dir *sdir, uint32_t id)
 {
-	struct bbdd_sess_dir_entry *entry;
+	return bbdd_sess_dir_get_session(sdir, id) != NULL;
+}
 
-	HASH_FIND_INT(dir->sessions, &id, entry);
-	if (entry == NULL)
-		return -ENOENT;
+void bbdd_sess_dir_del_session(struct bbdd_sess_dir *sdir,
+			       struct bbdd_d_session *dsess)
+{
+	struct bbdd_sess_dir_entry *entry = (struct bbdd_sess_dir_entry *)dsess;
 
-	HASH_DEL(dir->sessions, entry);
+	HASH_DEL(sdir->sessions, entry);
 	free(entry);
-	return 0;
+}
+
+static struct bbdd_d_session *
+bbdd_sess_iter_step(struct bbdd_sess_dir_entry *entry)
+{
+	if (entry)
+		return &entry->sess;
+	return NULL;
+}
+
+struct bbdd_d_session *bbdd_sess_iter_start(struct bbdd_sess_dir *sdir)
+{
+	return bbdd_sess_iter_step(sdir->sessions);
+}
+
+struct bbdd_d_session *bbdd_sess_iter_next(struct bbdd_d_session *dsess)
+{
+	struct bbdd_sess_dir_entry *entry = (struct bbdd_sess_dir_entry *)dsess;
+
+	return bbdd_sess_iter_step(entry->hh.next);
 }
