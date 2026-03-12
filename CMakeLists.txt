@@ -56,4 +56,4 @@ add_dependencies(bbdd bbdd_bpf_prog)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
   -Wall -Wextra -Wshadow -Wpointer-arith -Wconversion -Wswitch-enum -Wpacked \
-  -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations")
+  -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -ggdb3")
