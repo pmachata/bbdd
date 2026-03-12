@@ -13,9 +13,11 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <netpacket/packet.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
 #include <json-c/json_util.h>
+#include <linux/if_ether.h>
 
 #include "bbdd.h"
 #include "bbdd-bpf.h"
@@ -1039,6 +1041,59 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 
 enum { BBDD_D_NS_PER_US = 1 * 1000 };
 
+static int bbdd_d_session_open_sock(struct bbdd_d_session *dsess,
+				    uint32_t tx_ifindex, char **error)
+{
+	uint16_t proto;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_ll sll;
+	} sa;
+	int fd;
+	int rc;
+
+	switch (dsess->dst.sa.sa_family) {
+	case AF_INET:
+		proto = ETH_P_IP;
+		break;
+	case AF_INET6:
+		proto = ETH_P_IPV6;
+		break;
+	default:
+		bbdd_util_fmterr(error, "Unsupported address family %d",
+				 dsess->src.sa.sa_family);
+		return -1;
+	}
+
+	fd = socket(AF_PACKET, SOCK_DGRAM, htons(proto));
+	if (fd < 0) {
+		bbdd_util_fmterr(error, "socket(AF_PACKET): %m");
+		return -1;
+	}
+
+	sa.sll.sll_family   = AF_PACKET;
+	sa.sll.sll_protocol = htons(proto);
+	sa.sll.sll_ifindex  = (int)tx_ifindex;
+
+	rc = bind(fd, &sa.sa, sizeof(sa));
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "bind(AF_PACKET): %m");
+		goto close_fd;
+	}
+
+	dsess->sock_fd = fd;
+	return 0;
+
+close_fd:
+	close(fd);
+	return -1;
+}
+
+static void bbdd_d_session_close_sock(struct bbdd_d_session *dsess)
+{
+	close(dsess->sock_fd);
+}
+
 static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 					 const struct bbdd_d_session *dsess,
 					 char **error)
@@ -1070,11 +1125,11 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf,
-				      struct bbdd_d_sport_alloc *spa)
+				      struct bbdd_d_sport_alloc *spa,
+				      uint32_t tx_ifindex)
 {
 	struct bbdd_c_session csess;
-	struct bbdd_d_session dsess;
-	struct bbdd_d_session *inserted_dsess;
+	struct bbdd_d_session *dsess;
 	uint16_t sport;
 	char *error;
 	int rc;
@@ -1102,28 +1157,37 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 		goto out;
 	}
 
-	dsess = (struct bbdd_d_session) {};
-	dsess.src.sin46.port = sport;
+	{
+		struct bbdd_d_session dsess_tmp = {};
+		dsess_tmp.sock_fd = -1;
+		dsess_tmp.src.sin46.port = sport;
 
-	rc = bbdd_d_session_apply_c(&dsess, &csess, &error);
-	if (rc != 0)
-		goto put_port;
+		rc = bbdd_d_session_apply_c(&dsess_tmp, &csess, &error);
+		if (rc != 0)
+			goto put_port;
 
-	inserted_dsess = bbdd_sess_dir_add_session(sdir, &dsess);
-	if (inserted_dsess == NULL) {
-		bbdd_util_fmterr(&error, "%m");
-		goto put_port;
+		dsess = bbdd_sess_dir_add_session(sdir, &dsess_tmp);
+		if (dsess == NULL) {
+			bbdd_util_fmterr(&error, "%m");
+			goto put_port;
+		}
 	}
 
-	rc = bbdd_d_handle_session_add_bpf(bpf, &dsess, &error);
+	rc = bbdd_d_session_open_sock(dsess, tx_ifindex, &error);
 	if (rc != 0)
 		goto del_session;
+
+	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, &error);
+	if (rc != 0)
+		goto close_sock;
 
 	bbdd_d_respond_empty(peer, id);
 	return;
 
+close_sock:
+	close(dsess->sock_fd);
 del_session:
-	bbdd_sess_dir_del_session(sdir, inserted_dsess);
+	bbdd_sess_dir_del_session(sdir, dsess);
 put_port:
 	bbdd_d_sport_put(spa, sport);
 out:
@@ -1291,6 +1355,7 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 		dsess = bbdd_sess_dir_get_session(sdir, ids[i]);
 		if (dsess) {
 			sport = dsess->src.sin46.port;
+			bbdd_d_session_close_sock(dsess);
 			bbdd_sess_dir_del_session(sdir, dsess);
 		} else {
 			dsess_error = true;
@@ -1350,6 +1415,7 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
 				 struct bbdd_d_sport_alloc *spa,
+				 uint32_t tx_ifindex,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1365,7 +1431,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
 	else if (strcmp(method, "session-add") == 0)
-		bbdd_d_handle_session_add(peer, params_obj, id, nl, sdir, bpf, spa);
+		bbdd_d_handle_session_add(peer, params_obj, id, nl, sdir, bpf, spa, tx_ifindex);
 	else if (strcmp(method, "session-set") == 0)
 		bbdd_d_handle_session_set(peer, params_obj, id, nl, sdir);
 	else if (strcmp(method, "session-del") == 0)
@@ -1377,6 +1443,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
+				uint32_t tx_ifindex,
 				struct bbdd_sock *ctl,
 				struct bbdd_nl *nl)
 {
@@ -1409,7 +1476,7 @@ static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(sdir, bpf, spa,
+	bbdd_d_handle_method(sdir, bpf, spa, tx_ifindex,
 			     &peer, method, params, id, nl);
 
 put_req_obj:
@@ -1436,7 +1503,7 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(bbdd->sdir, bbdd->bpf, &bbdd->spa,
+	bbdd_d_ctl_activity(bbdd->sdir, bbdd->bpf, &bbdd->spa, bbdd->tx_ifindex,
 			    &bbdd->ctl, bbdd->nl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);

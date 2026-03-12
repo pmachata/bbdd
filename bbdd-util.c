@@ -9,6 +9,9 @@ int bbdd_util_fmterr(char **strp, const char *fmt, ...)
 	va_list ap;
 	int rc;
 
+	if (!strp)
+		return 0;
+
 	va_start(ap, fmt);
 	rc = vasprintf(strp, fmt, ap);
 	va_end(ap);

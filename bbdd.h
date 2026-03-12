@@ -140,6 +140,8 @@ struct bbdd_d_session {
 	uint32_t ifindex;
 
 	struct bbdd_c_session_state_end state;
+
+	int sock_fd;
 };
 
 int bbdd_d_start(int argc, char **argv);
