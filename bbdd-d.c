@@ -1424,6 +1424,7 @@ struct bbdd_context {
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
+	uint32_t tx_ifindex;
 };
 
 static void bbdd_d_ctl_recv(struct events_ctx *ec,
@@ -1571,19 +1572,11 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 
 static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 				     struct bbdd_bpf *bpf,
-				     const char *name,
+				     const char *name, uint32_t ifindex,
 				     unsigned int ncpus,
 				     char **error)
 {
-	uint32_t ifindex;
 	int err;
-
-	ifindex = if_nametoindex(name);
-	if (!ifindex) {
-		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
-				 name);
-		return -1;
-	}
 
 	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
 	if (err)
@@ -1604,19 +1597,11 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 				     struct bbdd_bpf *bpf,
-				     const char *name,
+				     const char *name, uint32_t ifindex,
 				     unsigned int ncpus,
 				     char **error)
 {
-	uint32_t ifindex;
 	int err;
-
-	ifindex = if_nametoindex(name);
-	if (!ifindex) {
-		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
-				 name);
-		return -1;
-	}
 
 	err = bbdd_nl_add_qdisc(nl, ifindex, bbdd_nl_tc_h_root(),
 				bbdd_d_veth_tx_mq_handle, "mq", error);
@@ -1652,9 +1637,11 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 				  struct bbdd_bpf *bpf,
+				  uint32_t *tx_ifindex,
 				  char **error)
 {
 	unsigned int ncpus;
+	uint32_t rx_ifindex;
 	int err;
 
 	/* Note: this returns number of CPUs, or < 0 on failure. */
@@ -1664,17 +1651,20 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	ncpus = (unsigned int) err;
 
 	err = bbdd_nl_add_veth(nl,
-			       bbdd_d_veth_rx_name,
-			       bbdd_d_veth_tx_name, error);
+			       bbdd_d_veth_rx_name, &rx_ifindex,
+			       bbdd_d_veth_tx_name, tx_ifindex,
+			       error);
 	if (err)
 		return err;
 
-	err = bbdd_d_start_init_veth_rx(nl, bpf, bbdd_d_veth_rx_name,
+	err = bbdd_d_start_init_veth_rx(nl, bpf,
+					bbdd_d_veth_rx_name, rx_ifindex,
 					ncpus, error);
 	if (err)
 		goto fini_veth;
 
-	err = bbdd_d_start_init_veth_tx(nl, bpf, bbdd_d_veth_tx_name,
+	err = bbdd_d_start_init_veth_tx(nl, bpf,
+					bbdd_d_veth_tx_name, *tx_ifindex,
 					ncpus, error);
 	if (err)
 		goto fini_veth;
@@ -1787,7 +1777,8 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bpf_destroy;
 	}
 
-	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &error);
+	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.tx_ifindex,
+				     &error);
 	if (err) {
 		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
 		free(error);

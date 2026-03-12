@@ -324,8 +324,26 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 	return 0;
 }
 
-int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
-		     const char *peer_name, char **error)
+static int bbdd_nl_maybe_get_ifindex(uint32_t *ifindex, const char *name,
+				     char **error)
+{
+	if (!ifindex)
+		return 0;
+
+	*ifindex = if_nametoindex(name);
+	if (!*ifindex) {
+		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+				 name);
+		return -1;
+	}
+
+	return 0;
+}
+
+int bbdd_nl_add_veth(struct bbdd_nl *nl,
+		     const char *name, uint32_t *ifindex,
+		     const char *peer_name, uint32_t *peer_ifindex,
+		     char **error)
 {
 	struct nlattr *linkinfo, *infodata, *peer_attr;
 	struct nlmsghdr *nlh;
@@ -370,6 +388,10 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 				 name, peer_name);
 		return -1;
 	}
+
+	if (bbdd_nl_maybe_get_ifindex(ifindex, name, error) < 0 ||
+	    bbdd_nl_maybe_get_ifindex(peer_ifindex, peer_name, error) < 0)
+		return -1;
 
 	return 0;
 }

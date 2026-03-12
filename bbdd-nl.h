@@ -18,8 +18,10 @@ struct bbdd_nl_if {
 int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 		     size_t *p_nifs, char **error);
 
-int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
-		     const char *peer_name, char **error);
+int bbdd_nl_add_veth(struct bbdd_nl *nl,
+		     const char *name, uint32_t *ifindex,
+		     const char *peer_name, uint32_t *peer_ifindex,
+		     char **error);
 
 int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error);
 int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error);
