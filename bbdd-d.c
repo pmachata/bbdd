@@ -1940,6 +1940,7 @@ int bbdd_d_start(int argc, char **argv)
 {
 	const char *dplaneaddr = BBDD_D_DEFAULT_DPLANEADDR;
 	struct bbdd_sockaddr dplane_sa = {};
+	char *error;
 	int err;
 
 	while (argc > 0) {
@@ -1963,9 +1964,11 @@ incomplete_command:
 		return -1;
 	}
 
-	err = bbdd_sock_parse_addr(dplaneaddr, &dplane_sa);
-	if (err)
+	err = bbdd_sock_parse_addr_proto(dplaneaddr, &dplane_sa, &error);
+	if (err) {
+		bbdd_util_printerr(err, &error, NULL);
 		return -1;
+	}
 
 	return bbdd_d_do_start(&dplane_sa);
 }

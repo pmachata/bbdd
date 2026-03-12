@@ -513,13 +513,23 @@ incomplete_command:
 static int bbdd_c_parse_u8(const char *str, void *ret, const char *what)
 {
 	uint8_t *u8_ret = ret;
-	return bbdd_sock_parse_u8(str, u8_ret, what);
+	char *error;
+	int rc;
+
+	rc = bbdd_sock_parse_u8(str, u8_ret, what, &error);
+	bbdd_util_printerr(rc, &error, NULL);
+	return rc;
 }
 
 static int bbdd_c_parse_u32(const char *str, void *ret, const char *what)
 {
 	uint32_t *u32_ret = ret;
-	return bbdd_sock_parse_u32(str, u32_ret, what);
+	char *error;
+	int rc;
+
+	rc = bbdd_sock_parse_u32(str, u32_ret, what, &error);
+	bbdd_util_printerr(rc, &error, NULL);
+	return rc;
 }
 
 static int __bbdd_c_parse_ifname(const char *str, char ret_str[IFNAMSIZ],

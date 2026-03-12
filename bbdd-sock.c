@@ -16,11 +16,13 @@
 #include <sys/un.h>
 #include <linux/types.h>
 
+#include "bbdd-util.h"
 #include "bfddp_packet.h"
 
 static int bbdd_sock_parse_range(const char *str, long long *ret,
 				 long long min, long long max,
-				 const char *what)
+				 const char *what,
+				 char **error)
 {
 	char *nulbyte;
 	long long rv;
@@ -30,8 +32,8 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 	/* No conversion performed. */
 	if (rv == 0 && errno == EINVAL) {
 	invalid:
-		fprintf(stderr, "Invalid %s `%s'. Expected integral [%lld,%lld].\n",
-			what, str, min, max);
+		bbdd_util_fmterr(error, "Invalid %s `%s'. Expected integral [%lld,%lld]",
+				 what, str, min, max);
 		return -1;
 	}
 	/* Invalid number range. */
@@ -40,8 +42,8 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 
 	/* There was garbage at the end of the string. */
 	if (*nulbyte != 0) {
-		fprintf(stderr, "Invalid %s: value `%lld' followed by garbage.\n",
-			what, rv);
+		bbdd_util_fmterr(error, "Invalid %s: value `%lld' followed by garbage",
+				 what, rv);
 		return -1;
 	}
 
@@ -49,12 +51,13 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 	return 0;
 }
 
-int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what)
+int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what,
+		       char **error)
 {
 	long long v;
 	int err;
 
-	err = bbdd_sock_parse_range(str, &v, 0, UINT8_MAX, what);
+	err = bbdd_sock_parse_range(str, &v, 0, UINT8_MAX, what, error);
 	if (err)
 		return err;
 
@@ -62,12 +65,13 @@ int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what)
 	return 0;
 }
 
-int bbdd_sock_parse_u32(const char *str, uint32_t *ret, const char *what)
+int bbdd_sock_parse_u32(const char *str, uint32_t *ret, const char *what,
+			char **error)
 {
 	long long v;
 	int err;
 
-	err = bbdd_sock_parse_range(str, &v, 0, UINT32_MAX, what);
+	err = bbdd_sock_parse_range(str, &v, 0, UINT32_MAX, what, error);
 	if (err)
 		return err;
 
@@ -75,12 +79,13 @@ int bbdd_sock_parse_u32(const char *str, uint32_t *ret, const char *what)
 	return 0;
 }
 
-static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
+static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port,
+				char **error)
 {
 	long long v;
 	int err;
 
-	err = bbdd_sock_parse_range(str, &v, 1, 65534, "port number");
+	err = bbdd_sock_parse_range(str, &v, 1, 65534, "port number", error);
 	if (err)
 		return err;
 
@@ -90,7 +95,8 @@ static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port)
 
 static int bbdd_sock_parse_addr_unix(const char *sockdir,
 				     const char *addr,
-				     struct bbdd_sockaddr *bsa)
+				     struct bbdd_sockaddr *bsa,
+				     char **error)
 {
 	const char *maybe_slash = "/";
 	int len;
@@ -102,10 +108,14 @@ static int bbdd_sock_parse_addr_unix(const char *sockdir,
 	bsa->sun.sun_family = AF_UNIX;
 	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
 		       "%s%s%s", sockdir, maybe_slash, addr);
-	if (len < 0)
+	if (len < 0) {
+		bbdd_util_fmterr(error, "Failed to parse UNIX domain socket address: %m");
 		return len;
-	if ((unsigned) len >= sizeof(bsa->sun.sun_path))
+	}
+	if ((unsigned) len >= sizeof(bsa->sun.sun_path)) {
+		bbdd_util_fmterr(error, "UNIX domain socket address too long");
 		return -ENOBUFS;
+	}
 
 	return 0;
 }
@@ -120,34 +130,17 @@ int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 		return 0;
 
 	if (rc == -1) {
-		if (asprintf(error, "Invalid address family `%d'", af) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "Invalid address family `%d'", af);
 		return -1;
 	}
 
-	if (asprintf(error, "Invalid address: `%s'", addr) < 0)
-		*error = NULL;
+	bbdd_util_fmterr(error, "Invalid address: `%s'", addr);
 	return -1;
 }
 
-static int __bbdd_inet_pton(int af, const char *restrict addr,
-			    void *restrict dst)
-{
-	char *error;
-	int rc;
-
-	rc = bbdd_inet_pton(af, addr, dst, &error);
-	if (rc != 0) {
-		fprintf(stderr, "%s.\n",
-			error ?: "Couldn't parse address");
-		free(error);
-	}
-
-	return rc;
-}
-
-static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
-				     struct bbdd_sockaddr *bsa)
+static int bbdd_sock_parse_addr_ipv4(const char *addr_in, bool allow_port,
+				     struct bbdd_sockaddr *bsa,
+				     char **error)
 {
 	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
 	char *addr;
@@ -156,10 +149,10 @@ static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
 
 	addr = strdupa(addr_in);
 
-	port = strchr(addr, ':');
+	port = allow_port ? strchr(addr, ':') : NULL;
 	if (port != NULL) {
 		*port++ = '\0';
-		rc = bbdd_sock_parse_port(port, &port_num);
+		rc = bbdd_sock_parse_port(port, &port_num, error);
 		if (rc != 0)
 			return rc;
 	}
@@ -167,11 +160,12 @@ static int bbdd_sock_parse_addr_ipv4(const char *addr_in,
 	bsa->len = sizeof(bsa->sin);
 	bsa->sin.sin_family = AF_INET;
 	bsa->sin.sin_port = htons(port_num);
-	return __bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr);
+	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr, error);
 }
 
-static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
-				     struct bbdd_sockaddr *bsa)
+static int bbdd_sock_parse_addr_ipv6_port(const char *addr_in,
+					  struct bbdd_sockaddr *bsa,
+					  char **error)
 {
 	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
 	char *addr;
@@ -181,7 +175,7 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
 	/* Check & skip '['. */
 	if (*addr_in++ != '[') {
 	no_brackets:
-		fprintf(stderr, "IPv6 address needs to be []-enclosed.\n");
+		bbdd_util_fmterr(error, "IPv6 address needs to be []-enclosed");
 		return -1;
 	}
 
@@ -196,22 +190,33 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr_in,
 	/* Check & skip ':', parse port if any. */
 	if (*saux == ':') {
 		saux++;
-		rc = bbdd_sock_parse_port(saux, &port_num);
+		rc = bbdd_sock_parse_port(saux, &port_num, error);
 		if (rc != 0)
 			return rc;
 	} else if (*saux != '\0') {
-		fprintf(stderr, "Invalid address `%s': Garbage after closing bracket.\n",
-			addr_in);
+		bbdd_util_fmterr(error, "Invalid address `%s': Garbage after closing bracket",
+				 addr_in);
 		return -1;
 	}
 
 	bsa->len = sizeof(bsa->sin6);
 	bsa->sin6.sin6_family = AF_INET6;
 	bsa->sin6.sin6_port = htons(port_num);
-	return __bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr);
+	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr, error);
 }
 
-int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
+static int bbdd_sock_parse_addr_ipv6(const char *addr,
+				     struct bbdd_sockaddr *bsa,
+				     char **error)
+{
+	bsa->len = sizeof(bsa->sin6);
+	bsa->sin6.sin6_family = AF_INET6;
+	bsa->sin6.sin6_port = 0;
+	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr, error);
+}
+
+int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *bsa,
+			       char **error)
 {
 	const char *colon;
 	const char *addr;
@@ -219,7 +224,7 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 
 	colon = strchr(arg, ':');
 	if (colon == NULL) {
-		fprintf(stderr, "Invalid address format: %s\n", arg);
+		bbdd_util_fmterr(error, "Invalid address format: %s", arg);
 		return -1;
 	}
 
@@ -229,35 +234,57 @@ int bbdd_sock_parse_addr(const char *arg, struct bbdd_sockaddr *bsa)
 	memset(bsa, 0, sizeof(*bsa));
 
 	if (strncmp(arg, "unix", type_len) == 0)
-		return bbdd_sock_parse_addr_unix("", addr, bsa);
+		return bbdd_sock_parse_addr_unix("", addr, bsa, error);
 
 	else if (strncmp(arg, "ipv4", type_len) == 0)
-		return bbdd_sock_parse_addr_ipv4(addr, bsa);
+		return bbdd_sock_parse_addr_ipv4(addr, true, bsa, error);
 
 	else if (strncmp(arg, "ipv6", type_len) == 0)
-		return bbdd_sock_parse_addr_ipv6(addr, bsa);
+		return bbdd_sock_parse_addr_ipv6_port(addr, bsa, error);
 
-	fprintf(stderr, "invalid BFD data plane socket type in `%s'\n", arg);
+	bbdd_util_fmterr(error, "invalid BFD data plane socket type in `%s'",
+			 arg);
+	return -1;
+}
+
+int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
+			    char **error)
+{
+	switch (af) {
+	case AF_INET:
+		return bbdd_sock_parse_addr_ipv4(addr, true, bsa, error);
+	case AF_INET6:
+		return bbdd_sock_parse_addr_ipv6(addr, bsa, error);
+	}
+
+	bbdd_util_fmterr(error, "Unsupported address family %d", af);
 	return -1;
 }
 
 static int bbdd_ctl_sockaddr(const char *sockdir,
 			     struct bbdd_sockaddr *ctl_bsa)
 {
-	return bbdd_sock_parse_addr_unix(sockdir, "bbdd.ctl", ctl_bsa);
+	char *error;
+	int rc;
+
+	rc = bbdd_sock_parse_addr_unix(sockdir, "bbdd.ctl", ctl_bsa, &error);
+	bbdd_util_printerr(rc, &error, "CTL");
+	return rc;
 }
 
 static int bbdd_cli_sockaddr(const char *sockdir,
 			     struct bbdd_sockaddr *cli_bsa)
 {
 	char *sockname;
+	char *error;
 	int rc;
 
 	rc = asprintf(&sockname, "bbdd.cli.%d", getpid());
 	if (rc < 0)
 		return rc;
 
-	rc = bbdd_sock_parse_addr_unix(sockdir, sockname, cli_bsa);
+	rc = bbdd_sock_parse_addr_unix(sockdir, sockname, cli_bsa, &error);
+	bbdd_util_printerr(rc, &error, "CLI");
 	free(sockname);
 	return rc;
 }
@@ -391,24 +418,21 @@ int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 	case AF_INET6:
 		break;
 	default:
-		if (asprintf(error, "bbdd_sock_open_udp: family `%d' not supported",
-			     addr.sa.sa_family) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bbdd_sock_open_udp: family `%d' not supported",
+				 addr.sa.sa_family);
 		return -1;
 	}
 
 	fd = socket(addr.sa.sa_family, SOCK_DGRAM, 0);
 	if (fd < 0) {
-		if (asprintf(error, "socket(af=%d, SOCK_DGRAM): %s",
-			     addr.sa.sa_family, strerror(errno)) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "socket(af=%d, SOCK_DGRAM): %s",
+				 addr.sa.sa_family, strerror(errno));
 		return -1;
 	}
 
 	rc = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 	if (rc < 0) {
-		if (asprintf(error, "SO_REUSEADDR: %s", strerror(errno)) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "SO_REUSEADDR: %s", strerror(errno));
 		goto close_fd;
 	}
 
@@ -416,17 +440,15 @@ int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		rc = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
 				&one, sizeof(one));
 		if (rc < 0) {
-			if (asprintf(error, "IPV6_V6ONLY: %s",
-				     strerror(errno)) < 0)
-				*error = NULL;
+			bbdd_util_fmterr(error, "IPV6_V6ONLY: %s",
+					 strerror(errno));
 			goto close_fd;
 		}
 	}
 
 	rc = bind(fd, &addr.sa, addr.len);
 	if (rc < 0) {
-		if (asprintf(error, "bind: %s", strerror(errno)) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bind: %m");
 		goto close_fd;
 	}
 
