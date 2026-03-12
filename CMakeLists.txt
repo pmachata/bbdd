@@ -17,6 +17,7 @@ add_executable(
   bbdd-nl.c
   bbdd-sess.c
   bbdd-sock.c
+  bbdd-util.c
   )
 
 target_link_libraries(bbdd json-c systemd mnl bpf)

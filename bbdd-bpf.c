@@ -13,8 +13,8 @@
 #include <json-c/json_object.h>
 
 #include "bbdd.h"
-#include "bbdd-jrpc.h"
 #include "bbdd-prog.h"
+#include "bbdd-util.h"
 
 #define FIELD(NAME) uint64_t NAME;
 struct bbdd_prog_stats {
@@ -189,7 +189,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	int err;
 
 	if (af != dst->sa.sa_family) {
-		bbdd_jrpc_fmterr(error, "Mismatch in families of source and destination addresses");
+		bbdd_util_fmterr(error, "Mismatch in families of source and destination addresses");
 		return -1;
 	}
 
@@ -209,7 +209,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		config.fib_lookup.dport = dst->sin6.sin6_port;
 		break;
 	default:
-		bbdd_jrpc_fmterr(error, "Unsupported session address family %d",
+		bbdd_util_fmterr(error, "Unsupported session address family %d",
 				 af);
 		return -1;
 	}
@@ -233,7 +233,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				   &config, sizeof(config),
 				   BPF_ANY);
 	if (err) {
-		bbdd_jrpc_fmterr(error, "bpf_map__update_elem: %s",
+		bbdd_util_fmterr(error, "bpf_map__update_elem: %s",
 				 strerror(-err));
 		return -1;
 	}
@@ -249,7 +249,7 @@ int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid,
 	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
 				   &lid, sizeof(lid), 0);
 	if (err)
-		bbdd_jrpc_fmterr(error, "session %u: bpf_map__delete_elem: %s",
+		bbdd_util_fmterr(error, "session %u: bpf_map__delete_elem: %s",
 				 lid, strerror(-err));
 	return err;
 }

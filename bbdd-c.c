@@ -12,6 +12,7 @@
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-sock.h"
+#include "bbdd-util.h"
 
 static bool bbdd_c_validate_id(struct json_object *id_obj, int expect_id)
 {
@@ -692,7 +693,7 @@ bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
 	state_str = json_object_get_string(values[pol_state]);
 	rc = bbdd_d_bfd_state_from_str(state_str, &state_end->state);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Invalid session state `%s'",
+		bbdd_util_fmterr(error, "Invalid session state `%s'",
 				 state_str);
 		return rc;
 	}
@@ -700,7 +701,7 @@ bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
 	diag_str = json_object_get_string(values[pol_diag]);
 	rc = bbdd_d_bfd_diag_from_str(diag_str, &state_end->diag);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Invalid session diag `%s'",
+		bbdd_util_fmterr(error, "Invalid session diag `%s'",
 				 diag_str);
 		return rc;
 	}
@@ -798,13 +799,13 @@ bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
 
 	sessions = calloc(sess_array_len, sizeof(*sessions));
 	if (sessions == NULL) {
-		bbdd_jrpc_fmterr(error, "Couldn't allocate sessions: %m");
+		bbdd_util_fmterr(error, "Couldn't allocate sessions: %m");
 		return -1;
 	}
 
 	states = calloc(sess_array_len, sizeof(*states));
 	if (states == NULL) {
-		bbdd_jrpc_fmterr(error, "Couldn't allocate session states: %m");
+		bbdd_util_fmterr(error, "Couldn't allocate session states: %m");
 		goto free_sessions;
 	}
 

@@ -13,7 +13,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/veth.h>
 
-#include "bbdd-jrpc.h"
+#include "bbdd-util.h"
 
 struct bbdd_nl {
 	struct mnl_socket *sk;
@@ -259,7 +259,7 @@ static int bbdd_nl_list_ifs_cb(const struct nlmsghdr *nlh, void *cb_data)
 		return rc;
 
 	if (entry.ifname[0] == '\0') {
-		bbdd_jrpc_fmterr(data->base.error,
+		bbdd_util_fmterr(data->base.error,
 				 "Netlink gave no name for interface with ifindex `%d'",
 				 entry.ifindex);
 		errno = EPROTO;
@@ -300,7 +300,7 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
@@ -315,7 +315,7 @@ int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
 	if (rc < 0) {
 		free(cb_data.ifs);
 		if (!errno)
-			bbdd_jrpc_fmterr(error, "Failed to obtain list of interfaces: %m");
+			bbdd_util_fmterr(error, "Failed to obtain list of interfaces: %m");
 		return -1;
 	}
 
@@ -359,13 +359,13 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl, const char *name,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error,
+		bbdd_util_fmterr(error,
 				 "Failed to create veth pair `%s'<->`%s': %m",
 				 name, peer_name);
 		return -1;
@@ -392,13 +392,13 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to delete interface `%s': %m",
+		bbdd_util_fmterr(error, "Failed to delete interface `%s': %m",
 				 name);
 		return -1;
 	}
@@ -425,13 +425,13 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error,
+		bbdd_util_fmterr(error,
 				 "Failed to bring up interface %u: %m",
 				 ifindex);
 		return -1;
@@ -464,13 +464,13 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error,
+		bbdd_util_fmterr(error,
 				 "Failed to create `%s' qdisc on ifindex %u: %m",
 				 kind, ifindex);
 		return -1;
@@ -512,13 +512,13 @@ int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
 
 	rc = mnl_socket_sendto(nl->genl_sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq, NULL, NULL);
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error,
+		bbdd_util_fmterr(error,
 				 "Failed to set channels on ifindex %u: %m",
 				 ifindex);
 		return -1;

@@ -23,6 +23,7 @@
 #include "bbdd-nl.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
+#include "bbdd-util.h"
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
@@ -213,19 +214,19 @@ static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
 		ifname_if = ifindex_if;
 
 	if (ifindex_if == NULL) {
-		bbdd_jrpc_fmterr(error, "No interface with ifindex %u found",
+		bbdd_util_fmterr(error, "No interface with ifindex %u found",
 				 sess->ifindex);
 		rc = -1;
 		goto free_ifs;
 	}
 	if (ifname_if == NULL) {
-		bbdd_jrpc_fmterr(error, "No interface named `%s' found",
+		bbdd_util_fmterr(error, "No interface named `%s' found",
 				 sess->ifname);
 		rc = -1;
 		goto free_ifs;
 	}
 	if (ifindex_if != ifname_if) {
-		bbdd_jrpc_fmterr(error,
+		bbdd_util_fmterr(error,
 				 "No interface with ifindex `%u' and name `%s' found",
 				 sess->ifindex, sess->ifname);
 		rc = -1;
@@ -411,15 +412,15 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 		return rc;
 
 	if (seen[pol_select] && select == NULL) {
-		bbdd_jrpc_fmterr(error, "RPC method doesn't allow session select");
+		bbdd_util_fmterr(error, "RPC method doesn't allow session select");
 		return -1;
 	}
 	if (seen[pol_change] && change == NULL) {
-		bbdd_jrpc_fmterr(error, "RPC method doesn't allow session change");
+		bbdd_util_fmterr(error, "RPC method doesn't allow session change");
 		return -1;
 	}
 	if (seen[pol_bulk] && bulk == NULL) {
-		bbdd_jrpc_fmterr(error, "RPC method doesn't allow bulk operations");
+		bbdd_util_fmterr(error, "RPC method doesn't allow bulk operations");
 		return -1;
 	}
 
@@ -1055,7 +1056,7 @@ static int bbdd_d_select_sessions(const struct bbdd_c_session *sess,
 
 oom:
 	errno = -ENOMEM;
-	bbdd_jrpc_fmterr(error, "%m");
+	bbdd_util_fmterr(error, "%m");
 	free(ids);
 	return -1;
 }
@@ -1312,7 +1313,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 
 		if ((af == AF_INET6 && bs->bs_ipv4) ||
 		    (af == AF_INET && !bs->bs_ipv4)) {
-			bbdd_jrpc_fmterr(&error, "Session protocol change requested for id %d",
+			bbdd_util_fmterr(&error, "Session protocol change requested for id %d",
 					 bs->bs_lid);
 			bbdd_d_respond_invalid_params(peer, id, error);
 			free(error);
@@ -1387,7 +1388,7 @@ static void bbdd_d_handle_session_del(struct bbdd_bpf *bpf,
 #define FMT_ARGS "Failed to look up session %u", ids[i]
 			syslog(LOG_WARNING, FMT_ARGS);
 			if (error == NULL)
-				bbdd_jrpc_fmterr(&error, FMT_ARGS);
+				bbdd_util_fmterr(&error, FMT_ARGS);
 #undef FMT_ARGS
 		}
 
@@ -1560,7 +1561,7 @@ static int bbdd_d_num_cpus(char **error)
 
 	n = sysconf(_SC_NPROCESSORS_ONLN);
 	if (n < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to determine number of CPUs: %m");
+		bbdd_util_fmterr(error, "Failed to determine number of CPUs: %m");
 		return -1;
 	}
 
@@ -1579,7 +1580,7 @@ static char *bbdd_d_cpu_mask(unsigned int i, unsigned int n, char **error)
 
 	buf = malloc(len);
 	if (!buf) {
-		bbdd_jrpc_fmterr(error, "%m");
+		bbdd_util_fmterr(error, "%m");
 		return NULL;
 	}
 
@@ -1607,14 +1608,14 @@ static int bbdd_d_set_q_cpu_map(const char *path,
 
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to open `%s': %m", path);
+		bbdd_util_fmterr(error, "Failed to open `%s': %m", path);
 		err = -1;
 		goto free_mask;
 	}
 
 	rc = write(fd, mask, strlen(mask));
 	if (rc < 0) {
-		bbdd_jrpc_fmterr(error, "Failed to write to `%s': %m", path);
+		bbdd_util_fmterr(error, "Failed to write to `%s': %m", path);
 		err = -1;
 	}
 
@@ -1671,7 +1672,7 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 
 	ifindex = if_nametoindex(name);
 	if (!ifindex) {
-		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
 				 name);
 		return -1;
 	}
@@ -1704,7 +1705,7 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 
 	ifindex = if_nametoindex(name);
 	if (!ifindex) {
-		bbdd_jrpc_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
+		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
 				 name);
 		return -1;
 	}

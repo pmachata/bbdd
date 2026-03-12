@@ -5,12 +5,7 @@
 #include <stdint.h>
 #include <json-c/json_object.h>
 
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof(*(x)))
-
 struct bbdd_sock;
-
-__attribute__((format(printf, 2, 3)))
-int bbdd_jrpc_fmterr(char **strp, const char *fmt, ...);
 
 enum bbdd_jrpc_e {
 	bbdd_jrpc_e_capacity = -1,
