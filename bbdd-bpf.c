@@ -173,6 +173,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    uint32_t flags,
 			    uint64_t min_interval_ns,
 			    uint64_t max_interval_ns,
+			    uint32_t gen_id,
 			    char **error)
 {
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
@@ -185,6 +186,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		.bpf_fib_lookup_flags = flags,
 		.min_interval_ns = min_interval_ns,
 		.max_interval_ns = max_interval_ns,
+		.gen_id = gen_id,
 	};
 	int err;
 
@@ -211,20 +213,6 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		bbdd_util_fmterr(error, "Unsupported session address family %d",
 				 af);
 		return -1;
-	}
-
-	{
-		struct bbdd_bfd_session_config old;
-
-		err = bpf_map__lookup_elem(
-			bpf->skel->maps.bbdd_bpf_session_config_hash,
-			&lid, sizeof(lid),
-			&old, sizeof(old), 0);
-
-		if (err)
-			config.gen_id = 1;
-		else
-			config.gen_id = old.gen_id + 1;
 	}
 
 	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,

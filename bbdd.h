@@ -141,6 +141,7 @@ struct bbdd_d_session {
 
 	struct bbdd_c_session_state_end state;
 
+	uint32_t gen_id;
 	int sock_fd;
 };
 

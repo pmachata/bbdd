@@ -876,6 +876,7 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 #undef ASSIGN
 
+	dsess->gen_id++;
 	return 0;
 }
 
@@ -1116,7 +1117,7 @@ static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 				       dsess->ifindex, &dsess->src, &dsess->dst,
 				       tbid, flags,
 				       min_interval_ns, max_interval_ns,
-				       error);
+				       dsess->gen_id, error);
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
