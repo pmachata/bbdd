@@ -833,7 +833,7 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			dsess->flags.flags[i] = cflag.value;
 	}
 
-	sport = dsess->src.sin46.port;
+	sport = ntohs(dsess->src.sin46.port);
 
 	if (csess->src_af) {
 		err = bbdd_sock_parse_addr_af(csess->src_af, csess->src,
@@ -849,12 +849,12 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	}
 
 	/* Preserve the source port. */
-	dsess->src.sin46.port = sport;
+	dsess->src.sin46.port = htons(sport);
 
 	if (dsess->flags.multihop)
-		dsess->dst.sin46.port = BFD_MULTI_HOP_PORT;
+		dsess->dst.sin46.port = htons(BFD_MULTI_HOP_PORT);
 	else
-		dsess->dst.sin46.port = BFD_SINGLE_HOP_PORT;
+		dsess->dst.sin46.port = htons(BFD_SINGLE_HOP_PORT);
 
 	// xxx this skips ifname, I don't think we need to care about it?
 	// it gets converted to ifindex. But check this.
