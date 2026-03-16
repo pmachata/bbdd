@@ -1292,6 +1292,14 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 			goto free_ids;
 		}
 
+		if (change.id_seen && change.id != dsess->id) {
+			bbdd_util_fmterr(&error, "Cannot change session ID from %d to %d",
+					 dsess->id, change.id);
+			bbdd_d_respond_interr(peer, id, error);
+			free(error);
+			goto free_ids;
+		}
+
 		rc = bbdd_d_session_apply_c(dsess, &change, &error);
 		if (rc != 0)  {
 			bbdd_d_respond_interr(peer, id, error);
