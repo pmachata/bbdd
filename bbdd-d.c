@@ -1284,7 +1284,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 		if (dsess == NULL)
 			continue;
 
-		if (af != dsess->dst.sin46.family) {
+		if (af != 0 && af != dsess->dst.sin46.family) {
 			bbdd_util_fmterr(&error, "Session protocol change requested for id %d",
 					 dsess->id);
 			bbdd_d_respond_invalid_params(peer, id, error);
