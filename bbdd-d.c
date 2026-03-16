@@ -1524,6 +1524,13 @@ static int bbdd_d_raise_nofile(void)
 		return -1;
 	}
 
+	/* We support bbdd_d_sport_cap sessions due to the way the source port
+	 * allocator operates. To support this many sessions, we will also need
+	 * to have that many extra file descriptors. */
+	if (rlim.rlim_max < bbdd_d_sport_cap + 16)
+		fprintf(stderr, "Warning: RLIMIT_NOFILE of %ld is too low to support the design limit of %d sessions.\n",
+			rlim.rlim_max, bbdd_d_sport_cap);
+
 	return 0;
 }
 
