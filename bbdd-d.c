@@ -37,18 +37,36 @@ static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 	}
 }
 
-static void bbdd_d_respond_invalid_params(struct bbdd_sock *ctl,
-					  struct json_object *id,
-					  const char *data)
+static void __bbdd_d_respond_invalid_params(struct bbdd_sock *ctl,
+					    struct json_object *id,
+					    const char *data)
 {
 	__bbdd_d_respond(ctl, bbdd_jrpc_new_error_inv_params(id, data));
 }
 
-static void bbdd_d_respond_interr(struct bbdd_sock *peer,
-				  struct json_object *id,
-				  const char *data)
+static void bbdd_d_respond_invalid_params(struct bbdd_sock *ctl,
+					  struct json_object *id,
+					  char **data)
+{
+	__bbdd_d_respond_invalid_params(ctl, id, *data);
+	free(*data);
+	*data = NULL;
+}
+
+static void __bbdd_d_respond_interr(struct bbdd_sock *peer,
+				    struct json_object *id,
+				    const char *data)
 {
 	__bbdd_d_respond(peer, bbdd_jrpc_new_error_int_error(id, data));
+}
+
+static void bbdd_d_respond_interr(struct bbdd_sock *peer,
+				  struct json_object *id,
+				  char **data)
+{
+	__bbdd_d_respond_interr(peer, id, *data);
+	free(*data);
+	*data = NULL;
 }
 
 __attribute__((format(printf, 3, 4)))
@@ -64,18 +82,16 @@ static void bbdd_d_respond_interr_fmt(struct bbdd_sock *peer,
 	rc = vasprintf(&buf, fmt, ap);
 	va_end(ap);
 
-	if (rc >= 0) {
-		bbdd_d_respond_interr(peer, id, buf);
-		free(buf);
-	} else {
-		bbdd_d_respond_interr(peer, id, fmt);
-	}
+	if (rc >= 0)
+		return bbdd_d_respond_interr(peer, id, &buf);
+	else
+		return __bbdd_d_respond_interr(peer, id, fmt);
 }
 
 static void bbdd_d_respond_memerr(struct bbdd_sock *peer,
 				  struct json_object *id)
 {
-	bbdd_d_respond_interr(peer, id, "Memory allocation issue");
+	__bbdd_d_respond_interr(peer, id, "Memory allocation issue");
 }
 
 static void bbdd_d_handle_ping(struct bbdd_sock *peer,
@@ -131,11 +147,8 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
 
 	bfdd_request_terminate();
 	bbdd_d_respond_empty(peer, id);
@@ -152,18 +165,12 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_bpf *bpf,
 	int rc;
 
 	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
 
 	result = bbdd_bpf_global_stats_json(bpf, &error);
-	if (!result) {
-		bbdd_d_respond_interr(peer, id, error);
-		free(error);
-		return;
-	}
+	if (!result)
+		return bbdd_d_respond_interr(peer, id, &error);
 
 	obj = bbdd_jrpc_new_object(id);
 	if (!obj)
@@ -789,8 +796,8 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 	if (nids > 0 && !dumped) {
 		/* Not sure this can actually happen. */
-		bbdd_d_respond_invalid_params(peer, id,
-					      "All matching sessions went away mid request");
+		__bbdd_d_respond_invalid_params(peer, id,
+						"All matching sessions went away mid request");
 		goto put_array;
 	}
 
@@ -1173,19 +1180,15 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &csess, NULL,
 						nl, &error);
-	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
-		return;
-	}
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
 
 	/* Note: id is validated to be non-zero in dissection. */
 	if (!csess.id_seen) {
 		csess.id = bfd_session_gen_discriminator();
 		csess.id_seen = true;
 	} else if (bbdd_sess_dir_has_session(sdir, csess.id)) {
-		bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
-		return;
+		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
 	}
 
 	rc = bbdd_d_sport_get(spa, &sport);
@@ -1225,8 +1228,7 @@ sess_dir_del_session:
 put_port:
 	bbdd_d_sport_put(spa, sport);
 out:
-	bbdd_d_respond_interr(peer, id, error);
-	free(error);
+	bbdd_d_respond_interr(peer, id, &error);
 }
 
 static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
@@ -1246,15 +1248,13 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj,
 						select, change, bulk, nl, &error);
 	if (rc != 0) {
-		bbdd_d_respond_invalid_params(peer, id, error);
-		free(error);
+		bbdd_d_respond_invalid_params(peer, id, &error);
 		return -1;
 	}
 
 	rc = bbdd_d_select_sessions(sdir, select, ids, nids, &error);
 	if (rc) {
-		bbdd_d_respond_interr(peer, id, error);
-		free(error);
+		bbdd_d_respond_interr(peer, id, &error);
 		return -1;
 	}
 
@@ -1267,13 +1267,13 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 					    size_t nids)
 {
 	if (nids == 0) {
-		bbdd_d_respond_invalid_params(peer, id,
-					      "The set request matches no session");
+		__bbdd_d_respond_invalid_params(peer, id,
+						"The set request matches no session");
 		return -1;
 	}
 	if (nids > 1 && !bulk) {
-		bbdd_d_respond_invalid_params(peer, id,
-					      "Non-bulk set request matches more than one session");
+		__bbdd_d_respond_invalid_params(peer, id,
+						"Non-bulk set request matches more than one session");
 		return -1;
 	}
 	return 0;
@@ -1321,23 +1321,20 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 		if (af != 0 && af != dsess->dst.sin46.family) {
 			bbdd_util_fmterr(&error, "Session protocol change requested for id %d",
 					 dsess->id);
-			bbdd_d_respond_invalid_params(peer, id, error);
-			free(error);
+			bbdd_d_respond_invalid_params(peer, id, &error);
 			goto free_ids;
 		}
 
 		if (change.id_seen && change.id != dsess->id) {
 			bbdd_util_fmterr(&error, "Cannot change session ID from %d to %d",
 					 dsess->id, change.id);
-			bbdd_d_respond_interr(peer, id, error);
-			free(error);
+			bbdd_d_respond_invalid_params(peer, id, &error);
 			goto free_ids;
 		}
 
 		rc = bbdd_d_session_apply_c(dsess, &change, &error);
 		if (rc != 0)  {
-			bbdd_d_respond_interr(peer, id, error);
-			free(error);
+			bbdd_d_respond_interr(peer, id, &error);
 			goto free_ids;
 		}
 
@@ -1347,8 +1344,8 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 
 	if (!set) {
 		/* Not sure this can actually happen. */
-		bbdd_d_respond_invalid_params(peer, id,
-					      "All matching sessions went away mid request");
+		__bbdd_d_respond_invalid_params(peer, id,
+						"All matching sessions went away mid request");
 		goto free_ids;
 	}
 
