@@ -44,8 +44,7 @@ void bbdd_sess_dir_destroy(struct bbdd_sess_dir *sdir)
 }
 
 struct bbdd_d_session *
-bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir,
-			  const struct bbdd_d_session *template)
+bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir, uint32_t id)
 {
 	struct bbdd_sess_dir_entry *entry;
 
@@ -54,7 +53,7 @@ bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir,
 		return NULL;
 
 	*entry = (struct bbdd_sess_dir_entry) {
-		.sess = *template,
+		.sess.id = id,
 	};
 
 	HASH_ADD_INT(sdir->sessions, sess.id, entry);

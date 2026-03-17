@@ -1194,27 +1194,24 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 		goto out;
 	}
 
-	{
-		struct bbdd_d_session dsess_tmp = {};
-		dsess_tmp.sock_fd = -1;
-		dsess_tmp.src.sin46.port = sport;
-
-		rc = bbdd_d_session_apply_c(&dsess_tmp, &csess, &error);
-		if (rc != 0)
-			goto put_port;
-
-		dsess = bbdd_sess_dir_add_session(sdir, &dsess_tmp);
-		if (dsess == NULL) {
-			bbdd_util_fmterr(&error, "%m");
-			goto put_port;
-		}
+	dsess = bbdd_sess_dir_add_session(sdir, csess.id);
+	if (dsess == NULL) {
+		bbdd_util_fmterr(&error, "%m");
+		goto put_port;
 	}
+
+	dsess->sock_fd = -1;
+	dsess->src.sin46.port = sport;
+
+	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
+	if (rc != 0)
+		goto sess_dir_del_session;
 
 	rc = bbdd_d_session_open_sock(dsess, tx_ifindex, &error);
 	if (rc != 0)
-		goto del_session;
+		goto sess_dir_del_session;
 
-	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, &error);
+	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, tx_ifindex, &error);
 	if (rc != 0)
 		goto close_sock;
 
@@ -1222,8 +1219,8 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	return;
 
 close_sock:
-	close(dsess->sock_fd);
-del_session:
+	bbdd_d_session_close_sock(dsess);
+sess_dir_del_session:
 	bbdd_sess_dir_del_session(sdir, dsess);
 put_port:
 	bbdd_d_sport_put(spa, sport);
