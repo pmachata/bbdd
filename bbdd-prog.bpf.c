@@ -78,6 +78,10 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (!sess)
 		goto tx_no_session;
 
+	if (skb->mark != sess->gen_id)
+		/* Obsolete packet. */
+		return TC_ACT_SHOT;
+
 	if (!skb->hash)
 		bpf_set_hash(skb, id);
 

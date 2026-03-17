@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/udp.h>
 #include <netpacket/packet.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
@@ -1102,6 +1105,139 @@ static void bbdd_d_session_close_sock(struct bbdd_d_session *dsess)
 	close(dsess->sock_fd);
 }
 
+static uint32_t bbdd_d_cksum_acc(uint32_t sum, const void *buf, size_t len)
+{
+	const uint16_t *p = buf;
+
+	while (len >= 2) {
+		sum += *p++;
+		len -= 2;
+	}
+	if (len)
+		sum += *(const uint8_t *)p;
+	return sum;
+}
+
+static uint16_t bbdd_d_cksum_fold(uint32_t sum)
+{
+	while (sum >> 16)
+		sum = (sum & 0xffff) + (sum >> 16);
+	return ~(uint16_t)sum;
+}
+
+static uint16_t bbdd_d_inet_cksum(const void *buf, size_t len)
+{
+	return bbdd_d_cksum_fold(bbdd_d_cksum_acc(0, buf, len));
+}
+
+/* udp_len is in host byte order; udp points to UDP header followed by data */
+static uint16_t bbdd_d_udp6_cksum(const struct ip6_hdr *ip6,
+				   const void *udp, uint16_t udp_len)
+{
+	struct {
+		struct in6_addr src;
+		struct in6_addr dst;
+		__be32 len;
+		uint8_t zeros[3];
+		uint8_t nxt;
+	} pseudo = {
+		.src = ip6->ip6_src,
+		.dst = ip6->ip6_dst,
+		.len = htonl(udp_len),
+		.nxt = IPPROTO_UDP,
+	};
+	uint32_t sum = 0;
+
+	sum = bbdd_d_cksum_acc(sum, &pseudo, sizeof(pseudo));
+	sum = bbdd_d_cksum_acc(sum, udp, udp_len);
+	return bbdd_d_cksum_fold(sum);
+}
+
+static int bbdd_d_session_inject_pkt(const struct bbdd_d_session *dsess,
+				     uint32_t tx_ifindex, char **error)
+{
+	struct bfddp_control_packet bfd = {
+		.version_diag = 1 << 5,
+		.state_bits = STATE_DOWN << 6,
+		.detection_multiplier = dsess->detect_mult,
+		.length = sizeof(bfd),
+		.local_id = htonl(dsess->id),
+		.remote_id = 0,
+		.desired_tx = dsess->min_tx,
+		.required_rx = dsess->min_rx,
+		.required_echo_rx = 0,
+	};
+	union {
+		struct sockaddr    sa;
+		struct sockaddr_ll sll;
+	} dst_sa = {};
+	ssize_t rc;
+
+	dst_sa.sll.sll_family  = AF_PACKET;
+	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
+	dst_sa.sll.sll_halen   = ETH_ALEN;
+	memset(dst_sa.sll.sll_addr, 0xff, ETH_ALEN);
+
+	if (dsess->dst.sa.sa_family == AF_INET) {
+		struct {
+			struct iphdr ip;
+			struct udphdr udp;
+			struct bfddp_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin.sin_port;
+		pkt.udp.dest   = dsess->dst.sin.sin_port;
+		pkt.udp.len    = htons(udp_len);
+		pkt.udp.check  = 0; /* optional for IPv4 */
+
+		pkt.ip.version  = 4;
+		pkt.ip.ihl      = 5;
+		pkt.ip.tot_len  = htons(sizeof(pkt));
+		pkt.ip.ttl      = dsess->ttl;
+		pkt.ip.protocol = IPPROTO_UDP;
+		pkt.ip.saddr    = dsess->src.sin.sin_addr.s_addr;
+		pkt.ip.daddr    = dsess->dst.sin.sin_addr.s_addr;
+		pkt.ip.check    = bbdd_d_inet_cksum(&pkt.ip, sizeof(pkt.ip));
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
+
+		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	} else {
+		struct {
+			struct ip6_hdr ip6;
+			struct udphdr udp;
+			struct bfddp_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin6.sin6_port;
+		pkt.udp.dest   = dsess->dst.sin6.sin6_port;
+		pkt.udp.len    = htons(udp_len);
+
+		pkt.ip6.ip6_vfc  = 0x60; /* version 6 */
+		pkt.ip6.ip6_plen = htons(udp_len);
+		pkt.ip6.ip6_nxt  = IPPROTO_UDP;
+		pkt.ip6.ip6_hlim = dsess->ttl;
+		pkt.ip6.ip6_src  = dsess->src.sin6.sin6_addr;
+		pkt.ip6.ip6_dst  = dsess->dst.sin6.sin6_addr;
+		pkt.udp.check    = bbdd_d_udp6_cksum(&pkt.ip6, &pkt.udp, udp_len);
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
+		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	}
+
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "sendto(bfd_tx): %d %m", errno);
+		return -1;
+	}
+	return 0;
+}
+
 static int bbdd_d_session_set_mark(const struct bbdd_d_session *dsess,
 				   char **error)
 {
@@ -1148,11 +1284,15 @@ static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
-	return bbdd_bpf_session_update(bpf, dsess->id,
-				       dsess->ifindex, &dsess->src, &dsess->dst,
-				       tbid, flags,
-				       min_interval_ns, max_interval_ns,
-				       dsess->gen_id, error);
+	rc = bbdd_bpf_session_update(bpf, dsess->id,
+				     dsess->ifindex, &dsess->src, &dsess->dst,
+				     tbid, flags,
+				     min_interval_ns, max_interval_ns,
+				     dsess->gen_id, error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_d_session_inject_pkt(dsess, tx_ifindex, error);
 }
 
 static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
@@ -1160,7 +1300,17 @@ static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 					 uint32_t tx_ifindex,
 					 char **error)
 {
-	return bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex, error);
+	int rc;
+
+	rc = bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex, error);
+	if (rc)
+		goto bpf_session_delete;
+
+	return rc;
+
+bpf_session_delete:
+	bbdd_bpf_session_delete(bpf, dsess->id, NULL);
+	return rc;
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
@@ -1283,7 +1433,9 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
 				      struct bbdd_nl *nl,
-				      struct bbdd_sess_dir *sdir)
+				      struct bbdd_sess_dir *sdir,
+				      struct bbdd_bpf *bpf,
+				      uint32_t tx_ifindex)
 {
 	struct bbdd_c_session select;
 	struct bbdd_c_session change;
@@ -1504,11 +1656,14 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
 	else if (strcmp(method, "session-add") == 0)
-		bbdd_d_handle_session_add(peer, params_obj, id, nl, sdir, bpf, spa, tx_ifindex);
+		bbdd_d_handle_session_add(peer, params_obj, id, nl,
+					  sdir, bpf, spa, tx_ifindex);
 	else if (strcmp(method, "session-set") == 0)
-		bbdd_d_handle_session_set(peer, params_obj, id, nl, sdir);
+		bbdd_d_handle_session_set(peer, params_obj, id, nl,
+					  sdir, bpf, tx_ifindex);
 	else if (strcmp(method, "session-del") == 0)
-		bbdd_d_handle_session_del(peer, params_obj, id, nl, sdir, bpf, spa);
+		bbdd_d_handle_session_del(peer, params_obj, id, nl,
+					  sdir, bpf, spa);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
