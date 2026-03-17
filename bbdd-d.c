@@ -1095,15 +1095,32 @@ static void bbdd_d_session_close_sock(struct bbdd_d_session *dsess)
 	close(dsess->sock_fd);
 }
 
-static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
-					 const struct bbdd_d_session *dsess,
-					 char **error)
+static int bbdd_d_session_set_mark(const struct bbdd_d_session *dsess,
+				   char **error)
+{
+	uint32_t mark = dsess->gen_id;
+	int rc;
+
+	rc = setsockopt(dsess->sock_fd, SOL_SOCKET, SO_MARK,
+			&mark, sizeof(mark));
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
+		return -1;
+	}
+	return 0;
+}
+
+static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
+					    const struct bbdd_d_session *dsess,
+					    uint32_t tx_ifindex,
+					    char **error)
 {
 	uint64_t min_tx_ns = ntohl(dsess->min_tx) * BBDD_D_NS_PER_US;
 	uint64_t min_interval_ns;
 	uint64_t max_interval_ns;
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = 0;   // xxx
+	int rc;
 
 	// xxx: Note that the send interval needs to be deduced from the
 	// remote end values. For now, use local values.
@@ -1113,11 +1130,30 @@ static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 	else
 		max_interval_ns = min_tx_ns;
 
+	/* There are several things to reconfigure, and all of them have to work
+	 * or the session is broken. There's also no reliable way to roll back,
+	 * because rollbacks can also fail. Even if the standard allowed to do
+	 * something like add a new session with new id and then remove the old
+	 * one, when the removal fails, we've got two sessions and it's broken.
+	 * So just bail out on failure. */
+
+	rc = bbdd_d_session_set_mark(dsess, error);
+	if (rc != 0)
+		return rc;
+
 	return bbdd_bpf_session_update(bpf, dsess->id,
 				       dsess->ifindex, &dsess->src, &dsess->dst,
 				       tbid, flags,
 				       min_interval_ns, max_interval_ns,
 				       dsess->gen_id, error);
+}
+
+static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
+					 const struct bbdd_d_session *dsess,
+					 uint32_t tx_ifindex,
+					 char **error)
+{
+	return bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex, error);
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
