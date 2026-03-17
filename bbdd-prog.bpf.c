@@ -25,7 +25,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, __u32);
 	__type(value, struct bbdd_bfd_session_config);
-	__uint(max_entries, 1024);
+	__uint(max_entries, 16 * 1024);
 } bbdd_bpf_session_config_hash SEC(".maps");
 
 SEC("tc")
