@@ -23,17 +23,6 @@ enum { NS_PER_MS = 1 * 1000 * 1000 };
 volatile int bbdd_veth_tx_ifindex;
 struct bbdd_prog_stats bbdd_stats;
 
-struct bfd_control_packet {
-	__be16 vsf;	/* version, state, flags */
-	u8 detect_mult;
-	u8 length;
-	__be32 local_id;
-	__be32 remote_id;
-	__be32 desired_tx;
-	__be32 required_rx;
-	__be32 required_echo_rx;
-};
-
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, __u32);
@@ -44,12 +33,12 @@ struct {
 SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {
-	u8 bfd_buf[sizeof(struct bfd_control_packet)] = {};
+	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u8 iph_buf[sizeof(struct iphdr)] = {};
 	struct bbdd_bfd_session_config *sess;
 	struct bpf_fib_lookup params = {};
-	struct bfd_control_packet *bfd;
+	struct bbdd_bfd_control_packet *bfd;
 	struct bpf_dynptr p;
 	struct udphdr *udph;
 	struct iphdr *iph;

@@ -24,3 +24,17 @@ struct bbdd_bfd_session_config {
 	__u64 max_interval_ns;
 	__u32 gen_id;
 };
+
+/* A copy of subset of bfddp_packet.h that does not include system headers. */
+
+struct bbdd_bfd_control_packet {
+	uint8_t version_diag;
+	uint8_t state_bits;
+	uint8_t detection_multiplier;
+	uint8_t length;
+	__be32 local_id;
+	__be32 remote_id;
+	__be32 desired_tx;
+	__be32 required_rx;
+	__be32 required_echo_rx;
+};
