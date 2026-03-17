@@ -1333,12 +1333,18 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 		}
 
 		rc = bbdd_d_session_apply_c(dsess, &change, &error);
-		if (rc != 0)  {
+		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_ids;
 		}
 
-		// xxx apply the changes to BPF / looper
+		rc = bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
+						      &error);
+		if (rc != 0) {
+			bbdd_d_respond_interr(peer, id, &error);
+			goto free_ids;
+		}
+
 		set = true;
 	}
 
