@@ -27,6 +27,9 @@ struct bbdd_bfd_session_config {
 
 /* A copy of subset of bfddp_packet.h that does not include system headers. */
 
+#define BFD_SINGLE_HOP_PORT	3784
+#define BFD_MULTI_HOP_PORT	4784
+
 struct bbdd_bfd_control_packet {
 	uint8_t version_diag;
 	uint8_t state_bits;

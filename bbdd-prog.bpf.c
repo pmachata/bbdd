@@ -16,8 +16,6 @@ struct bbdd_prog_stats {
 #define TC_ACT_SHOT		2
 #define TC_ACT_REDIRECT		7
 
-#define BFD_CONTROL_DPORT_SHOP	3784
-
 enum { NS_PER_MS = 1 * 1000 * 1000 };
 
 volatile int bbdd_veth_tx_ifindex;
@@ -66,7 +64,8 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (!udph)
 		goto tx_not_bfd;
 
-	if (udph->dest != bpf_htons(BFD_CONTROL_DPORT_SHOP))
+	if (udph->dest != bpf_htons(BFD_SINGLE_HOP_PORT) &&
+	    udph->dest != bpf_htons(BFD_MULTI_HOP_PORT))
 		goto tx_not_bfd;
 
 	off += sizeof(*udph);
