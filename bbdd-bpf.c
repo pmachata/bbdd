@@ -220,7 +220,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				   &config, sizeof(config),
 				   BPF_ANY);
 	if (err) {
-		bbdd_util_fmterr(error, "bpf_map__update_elem: %s",
+		bbdd_util_fmterr(error, "Failed to insert / update session to BPF hash: %s",
 				 strerror(-err));
 		return -1;
 	}
