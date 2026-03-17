@@ -1050,8 +1050,6 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 	alloc->occ[i] &= ~(1L << f);
 }
 
-enum { BBDD_D_NS_PER_US = 1 * 1000 };
-
 static int bbdd_d_session_open_sock(struct bbdd_d_session *dsess,
 				    uint32_t tx_ifindex, char **error)
 {
@@ -1253,25 +1251,26 @@ static int bbdd_d_session_set_mark(const struct bbdd_d_session *dsess,
 	return 0;
 }
 
+enum { BBDD_D_NS_PER_US = 1 * 1000 };
+
 static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 					    const struct bbdd_d_session *dsess,
 					    uint32_t tx_ifindex,
 					    char **error)
 {
-	uint64_t min_tx_ns = ntohl(dsess->min_tx) * BBDD_D_NS_PER_US;
-	uint64_t min_interval_ns;
-	uint64_t max_interval_ns;
+	uint32_t min_interval_us;
+	uint32_t max_interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = 0;   // xxx
 	int rc;
 
 	// xxx: Note that the send interval needs to be deduced from the
 	// remote end values. For now, use local values.
-	min_interval_ns = min_tx_ns * 75 / 100;
+	min_interval_us = dsess->min_tx * 75 / 100;
 	if (dsess->detect_mult == 1)
-		max_interval_ns = min_tx_ns * 90 / 100;
+		max_interval_us = dsess->min_tx * 90 / 100;
 	else
-		max_interval_ns = min_tx_ns;
+		max_interval_us = dsess->min_tx;
 
 	/* There are several things to reconfigure, and all of them have to work
 	 * or the session is broken. There's also no reliable way to roll back,
@@ -1287,7 +1286,7 @@ static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	rc = bbdd_bpf_session_update(bpf, dsess->id,
 				     dsess->ifindex, &dsess->src, &dsess->dst,
 				     tbid, flags,
-				     min_interval_ns, max_interval_ns,
+				     min_interval_us, max_interval_us,
 				     dsess->gen_id, error);
 	if (rc != 0)
 		return rc;

@@ -171,8 +171,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_sockaddr *dst,
 			    uint32_t tbid,
 			    uint32_t flags,
-			    uint64_t min_interval_ns,
-			    uint64_t max_interval_ns,
+			    uint32_t min_interval_us,
+			    uint32_t max_interval_us,
 			    uint32_t gen_id,
 			    char **error)
 {
@@ -184,8 +184,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			.tbid    = tbid,
 		},
 		.bpf_fib_lookup_flags = flags,
-		.min_interval_ns = min_interval_ns,
-		.max_interval_ns = max_interval_ns,
+		.min_interval_us = min_interval_us,
+		.max_interval_us = max_interval_us,
 		.gen_id = gen_id,
 	};
 	int err;

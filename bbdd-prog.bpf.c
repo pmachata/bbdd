@@ -16,7 +16,8 @@ struct bbdd_prog_stats {
 #define TC_ACT_SHOT		2
 #define TC_ACT_REDIRECT		7
 
-enum { NS_PER_MS = 1 * 1000 * 1000 };
+enum { NS_PER_US = 1 * 1000 };
+static const u32 uint32_max = -1U;
 
 volatile int bbdd_veth_tx_ifindex;
 struct bbdd_prog_stats bbdd_stats;
@@ -40,6 +41,7 @@ int bbdd_tx(struct __sk_buff *skb)
 	struct bpf_dynptr p;
 	struct udphdr *udph;
 	struct iphdr *iph;
+	u64 interval_us;
 	int ret;
 	u32 off;
 	u32 id;
@@ -71,7 +73,7 @@ int bbdd_tx(struct __sk_buff *skb)
 	off += sizeof(*udph);
 	bfd = bpf_dynptr_slice(&p, off, bfd_buf, sizeof(bfd_buf));
 	if (!bfd)
-		goto out;
+		goto tx_not_bfd;
 
 	id = bpf_ntohl(bfd->local_id);
 	sess = bpf_map_lookup_elem(&bbdd_bpf_session_config_hash, &id);
@@ -85,8 +87,10 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (!skb->hash)
 		bpf_set_hash(skb, id);
 
-out:
-	skb->tstamp = bpf_ktime_get_ns() + 300 * NS_PER_MS;
+	interval_us = sess->max_interval_us - sess->min_interval_us;
+	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
+	interval_us += sess->min_interval_us;
+	skb->tstamp = bpf_ktime_get_ns() + interval_us * NS_PER_US;
 	return TC_ACT_OK;
 
 tx_not_bfd:

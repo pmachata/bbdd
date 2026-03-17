@@ -20,8 +20,8 @@
 struct bbdd_bfd_session_config {
 	struct bpf_fib_lookup fib_lookup;
 	__u32 bpf_fib_lookup_flags;
-	__u64 min_interval_ns;
-	__u64 max_interval_ns;
+	__u32 min_interval_us;
+	__u32 max_interval_us;
 	__u32 gen_id;
 };
 

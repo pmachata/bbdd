@@ -27,8 +27,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_sockaddr *dst,
 			    uint32_t tbid,
 			    uint32_t flags,
-			    uint64_t min_interval_ns,
-			    uint64_t max_interval_ns,
+			    uint32_t min_interval_ns,
+			    uint32_t max_interval_ns,
 			    uint32_t gen_id,
 			    char **error);
 
