@@ -47,14 +47,15 @@ int bbdd_tx(struct __sk_buff *skb)
 	u8 bfd_buf[sizeof(struct bfd_control_packet)] = {};
 	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u8 iph_buf[sizeof(struct iphdr)] = {};
+	struct bbdd_bfd_session_config *sess;
 	struct bpf_fib_lookup params = {};
 	struct bfd_control_packet *bfd;
 	struct bpf_dynptr p;
 	struct udphdr *udph;
 	struct iphdr *iph;
 	int ret;
-	u32 key;
 	u32 off;
+	u32 id;
 
 	/* Filtering */
 	if (skb->protocol != bpf_htons(ETH_P_IP))
@@ -84,9 +85,13 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (!bfd)
 		goto out;
 
-	key = bpf_ntohl(bfd->local_id);
+	id = bpf_ntohl(bfd->local_id);
+	sess = bpf_map_lookup_elem(&bbdd_bpf_session_config_hash, &id);
+	if (!sess)
+		goto tx_no_session;
+
 	if (!skb->hash)
-		bpf_set_hash(skb, key);
+		bpf_set_hash(skb, id);
 
 out:
 	skb->tstamp = bpf_ktime_get_ns() + 300 * NS_PER_MS;
@@ -94,6 +99,10 @@ out:
 
 tx_not_bfd:
 	__sync_fetch_and_add(&bbdd_stats.tx_not_bfd, 1);
+	return TC_ACT_SHOT;
+
+tx_no_session:
+	__sync_fetch_and_add(&bbdd_stats.tx_no_session, 1);
 	return TC_ACT_SHOT;
 }
 
