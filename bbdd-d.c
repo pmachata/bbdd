@@ -1355,6 +1355,57 @@ free_ids:
 	free(ids);
 }
 
+static int bbdd_d_handle_session_del_one_sess(struct bbdd_sess_dir *sdir,
+					      struct bbdd_d_sport_alloc *spa,
+					      uint32_t sess_id,
+					      char **error)
+{
+	struct bbdd_d_session *dsess;
+	uint16_t sport;
+
+	dsess = bbdd_sess_dir_get_session(sdir, sess_id);
+	if (dsess == NULL) {
+		bbdd_util_fmterr(error, "Failed to look up session %u", sess_id);
+		return -1;
+	}
+
+	sport = dsess->src.sin46.port;
+	bbdd_d_sport_put(spa, sport);
+
+	bbdd_d_session_close_sock(dsess);
+	bbdd_sess_dir_del_session(sdir, dsess);
+
+	return 0;
+}
+
+static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
+					 struct bbdd_bpf *bpf,
+					 struct bbdd_d_sport_alloc *spa,
+					 uint32_t sess_id,
+					 char **error)
+{
+	char *error1 = NULL;
+	char *error2 = NULL;
+	int rc1, rc2;
+
+	/* Clean up as much as possible, even when one step fails. */
+	rc1 = bbdd_d_handle_session_del_one_sess(sdir, spa, sess_id, &error1);
+	rc2 = bbdd_bpf_session_delete(bpf, sess_id, &error2);
+
+	if (rc1 < 0 || rc2 < 0) {
+		if (error1 != NULL) {
+			*error = error1;
+			free(error2);
+		} else {
+			*error = error2;
+		}
+
+		return -1;
+	}
+
+	return 0;
+}
+
 static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
@@ -1381,39 +1432,16 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 		goto free_ids;
 
 	for (size_t i = 0; i < nids; i++) {
-		struct bbdd_d_session *dsess;
-		char *error = NULL;
-		bool dsess_error = false;
-		uint16_t sport;
+		char *error;
 
-		rc = bbdd_bpf_session_delete(bpf, ids[i], &error);
-		if (rc < 0)
-			syslog(LOG_WARNING, "Failed to delete BPF leg of session: %s",
-			       error ?: "(unknown error)");
-
-		dsess = bbdd_sess_dir_get_session(sdir, ids[i]);
-		if (dsess) {
-			sport = dsess->src.sin46.port;
-			bbdd_d_session_close_sock(dsess);
-			bbdd_sess_dir_del_session(sdir, dsess);
-		} else {
-			dsess_error = true;
-#define FMT_ARGS "Failed to look up session %u", ids[i]
-			syslog(LOG_WARNING, FMT_ARGS);
-			if (error == NULL)
-				bbdd_util_fmterr(&error, FMT_ARGS);
-#undef FMT_ARGS
-		}
-
-		if (dsess_error || rc < 0) {
+		rc = bbdd_d_handle_session_del_one(sdir, bpf, spa, ids[i], &error);
+		if (rc < 0) {
 			if (error != NULL) {
 				free(last_error);
 				last_error = error;
 			}
 			num_errors++;
 		}
-
-		bbdd_d_sport_put(spa, sport);
 	}
 
 	if (num_errors) {
