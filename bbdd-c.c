@@ -352,7 +352,7 @@ static int bbdd_c_global_stats_get_jrpc(void)
 	const int id = 1;
 	int err;
 
-	request = bbdd_jrpc_new_request(id, "global-stats-get");
+	request = bbdd_jrpc_new_request(id, "global-diag-stats");
 	if (request == NULL)
 		return -1;
 

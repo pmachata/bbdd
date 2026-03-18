@@ -171,7 +171,7 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
-	result = bbdd_bpf_global_stats_json(bpf, &error);
+	result = bbdd_bpf_global_diag_stats_json(bpf, &error);
 	if (!result)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -1650,7 +1650,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 		bbdd_d_handle_stop(peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
-	else if (strcmp(method, "global-stats-get") == 0)
+	else if (strcmp(method, "global-diag-stats") == 0)
 		bbdd_d_handle_global_stats_get(bpf, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);

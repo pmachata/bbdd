@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 #pragma once
 
-#define BBDD_GLOBAL_STATS(FIELD)		\
+#define BBDD_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(tx_no_session)			\
 	FIELD(tx_not_bfd)			\
 	FIELD(rx_packet_too_small)		\

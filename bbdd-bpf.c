@@ -17,8 +17,8 @@
 #include "bbdd-util.h"
 
 #define FIELD(NAME) uint64_t NAME;
-struct bbdd_prog_stats {
-	BBDD_GLOBAL_STATS(FIELD)
+struct bbdd_global_diag_stats {
+	BBDD_GLOBAL_DIAG_STATS(FIELD)
 };
 #undef FIELD
 
@@ -247,11 +247,13 @@ static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 	free(attachment);
 }
 
-struct json_object *bbdd_bpf_global_stats_json(struct bbdd_bpf *bpf,
-					       char **error)
+struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
+						    char **error)
 {
-	struct bbdd_prog_stats *stats = &bpf->skel->bss->bbdd_stats;
+	struct bbdd_global_diag_stats *stats;
 	struct json_object *obj;
+
+	stats = &bpf->skel->bss->bbdd_global_diag_stats;
 
 	obj = json_object_new_object();
 	if (!obj) {
@@ -268,7 +270,7 @@ struct json_object *bbdd_bpf_global_stats_json(struct bbdd_bpf *bpf,
 			*error = NULL;					\
 		goto err;						\
 	}
-	BBDD_GLOBAL_STATS(FIELD)
+	BBDD_GLOBAL_DIAG_STATS(FIELD)
 #undef FIELD
 
 	return obj;

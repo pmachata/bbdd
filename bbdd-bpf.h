@@ -16,8 +16,8 @@ int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,
 int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 			    char **error);
 
-struct json_object *bbdd_bpf_global_stats_json(struct bbdd_bpf *bpf,
-					       char **error);
+struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
+						    char **error);
 
 /* Either instert a new session, or update parameters of the existing one. */
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,

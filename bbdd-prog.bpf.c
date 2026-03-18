@@ -5,8 +5,8 @@
 #include "bbdd-prog.h"
 
 #define FIELD(NAME) __u64 NAME;
-struct bbdd_prog_stats {
-	BBDD_GLOBAL_STATS(FIELD)
+struct bbdd_global_diag_stats {
+	BBDD_GLOBAL_DIAG_STATS(FIELD)
 };
 #undef FIELD
 
@@ -20,7 +20,7 @@ enum { NS_PER_US = 1 * 1000 };
 static const u32 uint32_max = -1U;
 
 volatile int bbdd_veth_tx_ifindex;
-struct bbdd_prog_stats bbdd_stats;
+struct bbdd_global_diag_stats bbdd_global_diag_stats;
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -94,11 +94,11 @@ int bbdd_tx(struct __sk_buff *skb)
 	return TC_ACT_OK;
 
 tx_not_bfd:
-	__sync_fetch_and_add(&bbdd_stats.tx_not_bfd, 1);
+	__sync_fetch_and_add(&bbdd_global_diag_stats.tx_not_bfd, 1);
 	return TC_ACT_SHOT;
 
 tx_no_session:
-	__sync_fetch_and_add(&bbdd_stats.tx_no_session, 1);
+	__sync_fetch_and_add(&bbdd_global_diag_stats.tx_no_session, 1);
 	return TC_ACT_SHOT;
 }
 
