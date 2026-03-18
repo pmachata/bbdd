@@ -1253,10 +1253,11 @@ static int bbdd_d_session_set_mark(const struct bbdd_d_session *dsess,
 
 enum { BBDD_D_NS_PER_US = 1 * 1000 };
 
-static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
-					    const struct bbdd_d_session *dsess,
-					    uint32_t tx_ifindex,
-					    char **error)
+static int
+__bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
+				   const struct bbdd_d_session *dsess,
+				   uint32_t tx_ifindex,
+				   bool add, char **error)
 {
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
@@ -1272,26 +1273,38 @@ static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	else
 		max_interval_us = dsess->min_tx;
 
-	/* There are several things to reconfigure, and all of them have to work
-	 * or the session is broken. There's also no reliable way to roll back,
-	 * because rollbacks can also fail. Even if the standard allowed to do
-	 * something like add a new session with new id and then remove the old
-	 * one, when the removal fails, we've got two sessions and it's broken.
-	 * So just bail out on failure. */
-
 	rc = bbdd_d_session_set_mark(dsess, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_bpf_session_update(bpf, dsess->id,
-				     dsess->ifindex, &dsess->src, &dsess->dst,
-				     tbid, flags,
-				     min_interval_us, max_interval_us,
-				     dsess->gen_id, error);
+#define ARGS	bpf, dsess->id, dsess->ifindex, &dsess->src, &dsess->dst, \
+		tbid, flags, min_interval_us, max_interval_us, dsess->gen_id, \
+		error
+
+	if (add)
+		rc = bbdd_bpf_session_add(ARGS);
+	else
+		rc = bbdd_bpf_session_update(ARGS);
 	if (rc != 0)
 		return rc;
+#undef ARGS
 
-	return bbdd_d_session_inject_pkt(dsess, tx_ifindex, error);
+	rc = bbdd_d_session_inject_pkt(dsess, tx_ifindex, error);
+	if (rc != 0)
+		goto del_session;
+
+	return 0;
+
+	/* There's no reliable way to roll back everything, and e.g. rolling
+	 * back the mark is pointless. Unless everything lines up just right,
+	 * the session is broken. Even if the standard allowed to do something
+	 * like add a new session with new id and then remove the old one, when
+	 * the removal fails, we've got two sessions and it's broken. The only
+	 * thing that we clean up is the session add. */
+del_session:
+	if (add)
+		bbdd_bpf_session_delete(bpf, dsess->id, NULL);
+	return rc;
 }
 
 static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
@@ -1299,17 +1312,17 @@ static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 					 uint32_t tx_ifindex,
 					 char **error)
 {
-	int rc;
+	return __bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
+						  true, error);
+}
 
-	rc = bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex, error);
-	if (rc)
-		goto bpf_session_delete;
-
-	return rc;
-
-bpf_session_delete:
-	bbdd_bpf_session_delete(bpf, dsess->id, NULL);
-	return rc;
+static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
+					    const struct bbdd_d_session *dsess,
+					    uint32_t tx_ifindex,
+					    char **error)
+{
+	return __bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
+						  false, error);
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,

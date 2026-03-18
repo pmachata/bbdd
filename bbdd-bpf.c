@@ -153,17 +153,17 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 	return bpf->tx != NULL ? 0 : -1;
 }
 
-int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    uint32_t lid,
-			    uint32_t ifindex,
-			    const struct bbdd_sockaddr *src,
-			    const struct bbdd_sockaddr *dst,
-			    uint32_t tbid,
-			    uint32_t flags,
-			    uint32_t min_interval_us,
-			    uint32_t max_interval_us,
-			    uint32_t gen_id,
-			    char **error)
+static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+				     uint32_t id,
+				     uint32_t /* xxx ifindex */,
+				     const struct bbdd_sockaddr *src,
+				     const struct bbdd_sockaddr *dst,
+				     uint32_t tbid,
+				     uint32_t flags,
+				     uint32_t min_interval_us,
+				     uint32_t max_interval_us,
+				     uint32_t gen_id,
+				     char **error)
 {
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
 	struct bbdd_bfd_session_config config = {
@@ -205,11 +205,11 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	}
 
 	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
-				   &lid, sizeof(lid),
+				   &id, sizeof(id),
 				   &config, sizeof(config),
 				   BPF_ANY);
 	if (err) {
-		bbdd_util_fmterr(error, "Failed to insert / update session to BPF hash: %s",
+		bbdd_util_fmterr(error, "Failed to insert / update BPF session config: %s",
 				 strerror(-err));
 		return -1;
 	}
@@ -217,16 +217,73 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	return 0;
 }
 
-int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid,
+int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+			    uint32_t id,
+			    uint32_t ifindex,
+			    const struct bbdd_sockaddr *src,
+			    const struct bbdd_sockaddr *dst,
+			    uint32_t tbid,
+			    uint32_t flags,
+			    uint32_t min_interval_us,
+			    uint32_t max_interval_us,
+			    uint32_t gen_id,
 			    char **error)
 {
+	struct bbdd_bfd_session_config config;
 	int err;
 
-	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
-				   &lid, sizeof(lid), 0);
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+				   &id, sizeof(id),
+				   &config, sizeof(config), 0);
+	if (err != 0) {
+		bbdd_util_fmterr(error, "Failed to update session %u: session not in hash",
+				 id);
+		return -1;
+	}
+
+	return __bbdd_bpf_session_update(bpf, id, ifindex, src, dst, tbid, flags,
+					 min_interval_us, max_interval_us,
+					 gen_id, error);
+}
+
+int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
+			 uint32_t id,
+			 uint32_t ifindex,
+			 const struct bbdd_sockaddr *src,
+			 const struct bbdd_sockaddr *dst,
+			 uint32_t tbid,
+			 uint32_t flags,
+			 uint32_t min_interval_us,
+			 uint32_t max_interval_us,
+			 uint32_t gen_id,
+			 char **error)
+{
+	struct bbdd_bfd_session_data data = {};
+	int err;
+
+	err = __bbdd_bpf_session_update(bpf, id, ifindex, src, dst, tbid, flags,
+					min_interval_us, max_interval_us,
+					gen_id, error);
 	if (err)
-		bbdd_util_fmterr(error, "session %u: bpf_map__delete_elem: %s",
-				 lid, strerror(-err));
+		return err;
+
+	return 0;
+}
+
+int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t id,
+			    char **error)
+{
+	int err1;
+	int err;
+
+	err1 = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+				    &id, sizeof(id), 0);
+	err = err1;
+
+	if (err)
+		bbdd_util_fmterr(error, "Failed to delete BPF session %u: %s",
+				 id, strerror(-err));
+
 	return err;
 }
 

@@ -19,7 +19,18 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 						    char **error);
 
-/* Either instert a new session, or update parameters of the existing one. */
+int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
+			 uint32_t id,
+			 uint32_t ifindex,
+			 const struct bbdd_sockaddr *src,
+			 const struct bbdd_sockaddr *dst,
+			 uint32_t tbid,
+			 uint32_t flags,
+			 uint32_t min_interval_us,
+			 uint32_t max_interval_us,
+			 uint32_t gen_id,
+			 char **error);
+
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    uint32_t id,
 			    uint32_t ifindex,
