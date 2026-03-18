@@ -23,6 +23,13 @@ struct {
 	__uint(max_entries, 16 * 1024);
 } bbdd_bpf_session_config_hash SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, __u32);
+	__type(value, struct bbdd_bfd_session_data);
+	__uint(max_entries, 16 * 1024);
+} bbdd_bpf_session_data_hash SEC(".maps");
+
 SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {

@@ -267,18 +267,36 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 	if (err)
 		return err;
 
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+				   &id, sizeof(id),
+				   &data, sizeof(data),
+				   BPF_ANY);
+	if (err) {
+		bbdd_util_fmterr(error, "Failed to insert / update BPF session data: %s",
+				 strerror(-err));
+		goto delete;
+	}
+
 	return 0;
+
+delete:
+	bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+			     &id, sizeof(id), 0);
+	return err;
 }
 
 int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t id,
 			    char **error)
 {
 	int err1;
+	int err2;
 	int err;
 
 	err1 = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
 				    &id, sizeof(id), 0);
-	err = err1;
+	err2 = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+				    &id, sizeof(id), 0);
+	err = err1 ?: err2;
 
 	if (err)
 		bbdd_util_fmterr(error, "Failed to delete BPF session %u: %s",

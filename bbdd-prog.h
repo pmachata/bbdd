@@ -17,11 +17,26 @@
 	FIELD(rx_ring_buffer_error)		\
 	/**/
 
-#define FIELD(NAME) __u64 NAME;
+#define BBDD_SESSION_DIAG_STATS(FIELD)		\
+	FIELD(no_neighbor)			\
+	FIELD(no_route)			        \
+	FIELD(dst_blackholed)		        \
+	FIELD(dst_unreachable)		        \
+	FIELD(dst_prohibited)		        \
+	FIELD(src_addr_unknown)		        \
+	FIELD(indev_no_forwarding)	        \
+	FIELD(req_encap)		        \
+	FIELD(req_fragmentation)	        \
+	FIELD(fail_cksum_update)	        \
+	FIELD(fail_redir)		        \
+	FIELD(loopback_filter)		        \
+	FIELD(wrong_gen_id)		        \
+	/**/
+
+#define STAT_FIELD(NAME) __u64 NAME;
 struct bbdd_prog_global_diag_stats {
-	BBDD_GLOBAL_DIAG_STATS(FIELD)
+	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
 };
-#undef FIELD
 
 struct bbdd_bfd_session_config {
 	struct bpf_fib_lookup fib_lookup;
@@ -30,6 +45,14 @@ struct bbdd_bfd_session_config {
 	__u32 max_interval_us;
 	__u32 gen_id;
 };
+
+struct bbdd_bfd_session_data {
+	struct {
+		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
+	} stats;
+};
+
+#undef STAT_FIELD
 
 /* A copy of subset of bfddp_packet.h that does not include system headers. */
 
