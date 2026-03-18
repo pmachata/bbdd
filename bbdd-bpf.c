@@ -63,8 +63,7 @@ struct bbdd_bpf *bbdd_bpf_create(char **error)
 
 	bpf = calloc(1, sizeof(*bpf));
 	if (bpf == NULL) {
-		if (asprintf(error, "calloc: %m") < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "calloc: %m");
 		return NULL;
 	}
 
@@ -72,8 +71,7 @@ struct bbdd_bpf *bbdd_bpf_create(char **error)
 
 	bpf->skel = bbdd_prog__open_and_load();
 	if (!bpf->skel) {
-		if (asprintf(error, "bbdd_prog__open_and_load: %m") < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bbdd_prog__open_and_load: %m");
 		goto free_bpf;
 	}
 
@@ -100,16 +98,14 @@ bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 
 	attachment = malloc(sizeof(*attachment));
 	if (!attachment) {
-		if (asprintf(error, "bbdd_bpf_attach: %m") < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bbdd_bpf_attach: %m");
 		return NULL;
 	}
 
 	err = bpf_tc_hook_create(&hook);
 	if (err) {
-		if (asprintf(error, "bpf_tc_hook_create(ifindex=%u): %s",
-			     ifindex, strerror(-err)) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bpf_tc_hook_create(ifindex=%u): %s",
+				 ifindex, strerror(-err));
 		goto free;
 	}
 
@@ -122,9 +118,8 @@ bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 
 	err = bpf_tc_attach(&hook, &opts);
 	if (err) {
-		if (asprintf(error, "bpf_tc_attach(ifindex=%u): %s",
-			     ifindex, strerror(-err)) < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "bpf_tc_attach(ifindex=%u): %s",
+				 ifindex, strerror(-err));
 		goto hook_destroy;
 	}
 
@@ -251,17 +246,14 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 
 	obj = json_object_new_object();
 	if (!obj) {
-		if (asprintf(error, "Failed to format global stats to JSON: %m") < 0)
-			*error = NULL;
+		bbdd_util_fmterr(error, "Failed to format global stats to JSON: %m");
 		return NULL;
 	}
 
 #define FIELD(NAME)							\
 	if (json_object_object_add(obj, #NAME,				\
 				   json_object_new_uint64(stats->NAME))) { \
-		if (asprintf(error,					\
-			     "Failed to format global stats to JSON: %m") < 0) \
-			*error = NULL;					\
+		bbdd_util_fmterr(error, "Failed to format global stats to JSON: %m"); \
 		goto err;						\
 	}
 	BBDD_GLOBAL_DIAG_STATS(FIELD)
