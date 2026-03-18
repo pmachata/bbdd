@@ -17,6 +17,12 @@
 	FIELD(rx_ring_buffer_error)		\
 	/**/
 
+#define FIELD(NAME) __u64 NAME;
+struct bbdd_prog_global_diag_stats {
+	BBDD_GLOBAL_DIAG_STATS(FIELD)
+};
+#undef FIELD
+
 struct bbdd_bfd_session_config {
 	struct bpf_fib_lookup fib_lookup;
 	__u32 bpf_fib_lookup_flags;
