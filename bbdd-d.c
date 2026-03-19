@@ -1664,7 +1664,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 		bbdd_d_handle_stop(peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
-	else if (strcmp(method, "global-diag-stats") == 0)
+	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(bpf, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
