@@ -317,6 +317,22 @@ static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 	free(attachment);
 }
 
+static void bbdd_bpf_stat_fmterr(char **error)
+{
+	bbdd_util_fmterr(error, "Failed to format stats to JSON: %m");
+}
+
+static int bbdd_bpf_add_stat(struct json_object *obj,
+			     const char *name, uint64_t value,
+			     char **error)
+{
+	int rc;
+	rc = json_object_object_add(obj, name, json_object_new_uint64(value));
+	if (rc)
+		bbdd_bpf_stat_fmterr(error);
+	return rc;
+}
+
 struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 						    char **error)
 {
@@ -327,16 +343,14 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 
 	obj = json_object_new_object();
 	if (!obj) {
-		bbdd_util_fmterr(error, "Failed to format global stats to JSON: %m");
+		bbdd_bpf_stat_fmterr(error);
 		return NULL;
 	}
 
-#define FIELD(NAME)							\
-	if (json_object_object_add(obj, #NAME,				\
-				   json_object_new_uint64(stats->NAME))) { \
-		bbdd_util_fmterr(error, "Failed to format global stats to JSON: %m"); \
-		goto err;						\
-	}
+#define FIELD(NAME)						\
+	if (bbdd_bpf_add_stat(obj, #NAME, stats->NAME, error))	\
+		goto err;
+
 	BBDD_GLOBAL_DIAG_STATS(FIELD)
 #undef FIELD
 
