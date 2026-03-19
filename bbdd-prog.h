@@ -18,16 +18,18 @@
 	/**/
 
 #define BBDD_SESSION_DIAG_STATS(FIELD)		\
-	FIELD(no_neighbor)			\
-	FIELD(no_route)			        \
 	FIELD(dst_blackholed)		        \
 	FIELD(dst_unreachable)		        \
 	FIELD(dst_prohibited)		        \
-	FIELD(src_addr_unknown)		        \
 	FIELD(indev_no_forwarding)	        \
 	FIELD(req_encap)		        \
+	FIELD(no_neighbor)			\
 	FIELD(req_fragmentation)	        \
+	FIELD(no_src_addr)		        \
+	FIELD(not_forwarded)		        \
+	FIELD(fail_lookup)		        \
 	FIELD(fail_cksum_update)	        \
+	FIELD(fail_update)		        \
 	FIELD(fail_redir)		        \
 	FIELD(loopback_filter)		        \
 	FIELD(wrong_gen_id)		        \

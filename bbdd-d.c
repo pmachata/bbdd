@@ -1277,7 +1277,8 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
-#define ARGS	bpf, dsess->id, dsess->ifindex, &dsess->src, &dsess->dst, \
+#define ARGS	bpf, tx_ifindex,					\
+		dsess->id, dsess->ifindex, &dsess->src, &dsess->dst,	\
 		tbid, flags, min_interval_us, max_interval_us, dsess->gen_id, \
 		error
 
