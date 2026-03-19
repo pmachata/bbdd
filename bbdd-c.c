@@ -1305,7 +1305,7 @@ int bbdd_c_session(int argc, char **argv)
 		return -1;
 	}
 
-	if (bulk.seen && bulk.value) {
+	if (bulk.seen) {
 		switch (command) {
 		case bbdd_c_session_command_del:
 		case bbdd_c_session_command_set:
