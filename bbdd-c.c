@@ -894,18 +894,14 @@ free_sessions:
 	return -1;
 }
 
-static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
-					    struct bbdd_c_session **sessions,
-					    struct bbdd_c_session_state **states,
-					    size_t *num_sessions,
-					    char **error)
+static int
+bbdd_c_response_extract_sessions(struct json_object *obj,
+				 struct json_object **ret_sessions_arr,
+				 char **error)
 {
-	/* Result for query with "get_tables" method is supposed to look
-	 * like:
+	/* This extracts result in the following form:
 	 *
-	 * { "sessions": [ SESS, ... ] }
-	 *
-	 * With each SESS a session object.
+	 * { "sessions": [ OBJ, ... ] }
 	 */
 	enum {
 		pol_sessions,
@@ -915,6 +911,7 @@ static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
 				   .required = true },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	struct json_object *sessions_arr;
 	bool seen[ARRAY_SIZE(policy)] = {};
 	int err;
 
@@ -923,7 +920,30 @@ static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
 	if (err != 0)
 		return err;
 
-	return bbdd_c_session_show_jrpc_dissect_sessions(values[pol_sessions],
+	sessions_arr = values[pol_sessions];
+
+	err = bbdd_jrpc_validate_array(sessions_arr, json_type_object, error);
+	if (err != 0)
+		return err;
+
+	*ret_sessions_arr = sessions_arr;
+	return 0;
+}
+
+static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
+					    struct bbdd_c_session **sessions,
+					    struct bbdd_c_session_state **states,
+					    size_t *num_sessions,
+					    char **error)
+{
+	struct json_object *sessions_arr;
+	int err;
+
+	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_session_show_jrpc_dissect_sessions(sessions_arr,
 							 sessions, states,
 							 num_sessions, error);
 }
