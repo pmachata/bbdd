@@ -322,6 +322,15 @@ static void bbdd_c_global_stats_help(void)
 	);
 }
 
+static void bbdd_c_print_stats_obj(struct json_object *obj)
+{
+	json_object_object_foreach(obj, key, val) {
+		if (json_object_get_type(val) != json_type_int)
+			continue;
+		printf("\t%s: %" PRIu64 "\n", key, json_object_get_uint64(val));
+	}
+}
+
 static int bbdd_c_global_stats_get_jrpc_result(struct json_object *response,
 					       const int id)
 {
@@ -334,11 +343,8 @@ static int bbdd_c_global_stats_get_jrpc_result(struct json_object *response,
 	if (bbdd_c_result_show_json(result))
 		goto put_result;
 
-	json_object_object_foreach(result, key, val) {
-		if (json_object_get_type(val) != json_type_int)
-			continue;
-		printf("%s: %" PRIu64 "\n", key, json_object_get_uint64(val));
-	}
+	printf("global:\n");
+	bbdd_c_print_stats_obj(result);
 
 put_result:
 	json_object_put(result);
