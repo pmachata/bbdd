@@ -1577,6 +1577,126 @@ static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 	return 0;
 }
 
+static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
+						struct json_object *id,
+						struct bbdd_bpf *bpf,
+						uint32_t *ids,
+						size_t nids)
+{
+	struct json_object *obj;
+	struct json_object *array;
+	struct json_object *result_obj;
+	struct json_object *entry_obj;
+	struct json_object *stats_obj;
+	char *error = NULL;
+	int rc;
+
+	/* The response is as follows:
+	 *
+	 * {
+	 *     "id": ...,
+	 *     "result": {
+	 *         "sessions": [ SESS, ... ]
+	 *     }
+	 * }
+	 *
+	 * Where individual SESS objects are formatted as follows:
+	 *
+	 * SESS ::= {
+	 *     "id": INT,
+	 *     "stats": STATS,
+	 * }
+	 */
+
+	obj = bbdd_jrpc_new_object(id);
+	if (obj == NULL)
+		return;
+
+	result_obj = json_object_new_object();
+	if (result_obj == NULL)
+		goto put_obj;
+
+	array = json_object_new_array();
+	if (array == NULL)
+		goto put_result_obj;
+
+	for (size_t i = 0; i < nids; i++) {
+		uint32_t sess_id = ids[i];
+
+		stats_obj = bbdd_bpf_session_diag_stats_json(bpf, sess_id,
+							     &error);
+		if (stats_obj == NULL)
+			goto put_array;
+
+		entry_obj = json_object_new_object();
+		if (entry_obj == NULL)
+			goto put_stats_obj;
+
+		rc = json_object_object_add(entry_obj, "id",
+					    json_object_new_uint64(sess_id));
+		if (rc != 0)
+			goto put_entry_obj;
+
+		rc = json_object_object_add(entry_obj, "stats", stats_obj);
+		if (rc != 0)
+			goto put_entry_obj;
+		stats_obj = NULL;
+
+		if (json_object_array_add(array, entry_obj) != 0)
+			goto put_entry_obj;
+		entry_obj = NULL;
+	}
+
+	if (json_object_object_add(result_obj, "sessions", array))
+		goto put_array;
+	array = NULL;
+
+	if (json_object_object_add(obj, "result", result_obj))
+		goto put_array;
+	result_obj = NULL;
+
+	bbdd_jrpc_send(peer, obj);
+	json_object_put(obj);
+	return;
+
+put_entry_obj:
+	json_object_put(entry_obj);
+put_stats_obj:
+	json_object_put(stats_obj);
+put_array:
+	json_object_put(array);
+put_result_obj:
+	json_object_put(result_obj);
+put_obj:
+	json_object_put(obj);
+	if (error)
+		bbdd_d_respond_interr(peer, id, &error);
+	else
+		bbdd_d_respond_memerr(peer, id);
+}
+
+static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
+					     struct json_object *params_obj,
+					     struct json_object *id,
+					     struct bbdd_nl *nl,
+					     struct bbdd_sess_dir *sdir,
+					     struct bbdd_bpf *bpf)
+{
+	struct bbdd_c_session sess;
+	uint32_t *ids;
+	size_t nids;
+	int rc;
+
+	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+					  &sess, NULL, NULL, nl, sdir,
+					  &ids, &nids);
+	if (rc < 0)
+		return;
+
+	bbdd_d_handle_session_stats_diag_do(peer, id, bpf, ids, nids);
+	free(ids);
+}
+
 static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
@@ -1677,6 +1797,9 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 	else if (strcmp(method, "session-del") == 0)
 		bbdd_d_handle_session_del(peer, params_obj, id, nl,
 					  sdir, bpf, spa);
+	else if (strcmp(method, "session-stats-diag") == 0)
+		bbdd_d_handle_session_stats_diag(peer, params_obj, id, nl,
+						 sdir, bpf);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }

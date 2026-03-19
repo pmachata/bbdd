@@ -361,6 +361,44 @@ err:
 	return NULL;
 }
 
+struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
+						     uint32_t id,
+						     char **error)
+{
+	struct bbdd_bfd_session_data data;
+	struct json_object *obj;
+	int err;
+
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+				   &id, sizeof(id),
+				   &data, sizeof(data), 0);
+	if (err) {
+		bbdd_util_fmterr(error,
+				 "Failed to look up BPF session data for id %u: %s",
+				 id, strerror(-err));
+		return NULL;
+	}
+
+	obj = json_object_new_object();
+	if (!obj) {
+		bbdd_bpf_stat_fmterr(error);
+		return NULL;
+	}
+
+#define FIELD(NAME)							\
+	if (bbdd_bpf_add_stat(obj, #NAME, data.stats.NAME, error))	\
+		goto err;
+
+	BBDD_SESSION_DIAG_STATS(FIELD)
+#undef FIELD
+
+	return obj;
+
+err:
+	json_object_put(obj);
+	return NULL;
+}
+
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
 	if (bpf->rx)

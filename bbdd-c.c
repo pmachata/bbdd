@@ -403,6 +403,7 @@ static struct bbdd_c_session_command {
 	const bool allow_query;
 	const bool allow_change;
 	const char *const rpc;
+	const char *const rpc_diag;
 	int (*show)(const struct json_object *, const char *method, int id);
 } const bbdd_c_session_commands[] = {
 	{
@@ -432,6 +433,14 @@ static struct bbdd_c_session_command {
 		.rpc = "session-show",
 		.show = bbdd_c_session_show_jrpc_result,
 	},
+	{
+		.name = "stats",
+		.allow_diag = true,
+		.allow_query = true,
+		.rpc = "session-stats",
+		.rpc_diag = "session-stats-diag",
+		.show = bbdd_c_session_stats_jrpc_result,
+	},
 };
 
 enum {
@@ -445,8 +454,10 @@ static void bbdd_c_session_help(void)
 		"	bbdd session [ QUERY-PARAMS ] [bulk] set [ SET-PARAMS ]\n"
 		"	bbdd session [ QUERY-PARAMS ] [bulk] del\n"
 		"	bbdd session [ QUERY-PARAMS ] show\n"
+		"	bbdd session [ QUERY-PARAMS ] [diag] stats\n"
 		"\n"
 		"       bulk		-- request is allowed to impact >1 session\n"
+		"       diag		-- request diagnostic stats instead of operational ones\n"
 		"\n"
 		"where	QUERY-PARAMS := PARAMS	-- parameters for session select\n"
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
@@ -1080,6 +1091,81 @@ put_result:
 	return 0;
 }
 
+static int bbdd_c_session_stats_dissect_one(struct json_object *obj,
+					    char **error)
+{
+	enum {
+		pol_id,
+		pol_stats,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_id]    = { .key = "id",    .type = json_type_int,
+				.required = true },
+		[pol_stats] = { .key = "stats", .type = json_type_object,
+				.required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	printf("id %" PRIu32 ":\n",
+	       (uint32_t)json_object_get_uint64(values[pol_id]));
+	bbdd_c_print_stats_obj(values[pol_stats]);
+	return 0;
+}
+
+static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
+					       char **error)
+{
+	struct json_object *sessions_arr;
+	int err;
+
+	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (err != 0)
+		return err;
+
+	for (size_t i = 0; i < json_object_array_length(sessions_arr); i++) {
+		struct json_object *session_obj =
+			json_object_array_get_idx(sessions_arr, i);
+
+		err = bbdd_c_session_stats_dissect_one(session_obj, error);
+		if (err != 0)
+			return err;
+	}
+
+	return 0;
+}
+
+static int bbdd_c_session_stats_jrpc_result(const struct json_object *response,
+					    const char *, const int id)
+{
+	struct json_object *result;
+	char *error = NULL;
+	int err = 0;
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+					    &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	err = bbdd_c_session_stats_dissect_result(result, &error);
+	if (err != 0) {
+		fprintf(stderr, "%s\n", error);
+		free(error);
+	}
+
+put_result:
+	json_object_put(result);
+	return err;
+}
+
 static int bbdd_c_enomem(void)
 {
 	fprintf(stderr, "Failed to form RPC request: %m");
@@ -1089,7 +1175,8 @@ static int bbdd_c_enomem(void)
 static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 			       const struct bbdd_c_session *select,
 			       const struct bbdd_c_session *change,
-			       struct bbdd_c_session_flag bulk)
+			       struct bbdd_c_session_flag bulk,
+			       struct bbdd_c_session_flag diag)
 {
 	struct json_object *select_obj = NULL;
 	struct json_object *change_obj = NULL;
@@ -1114,7 +1201,10 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 		}
 	}
 
-	method = command->rpc;
+	if (diag.seen && diag.value)
+		method = command->rpc_diag;
+	else
+		method = command->rpc;
 
 	assert(method != NULL);
 
@@ -1315,8 +1405,10 @@ int bbdd_c_session(int argc, char **argv)
 						 sess->ifname,
 						 &sess->ifname_seen)) ||
 
-		    (!seen_command &&
-		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk)))) {
+		    (command == NULL &&
+		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk))) ||
+		    (command == NULL &&
+		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "diag", &diag)))) {
 			if (rc > 0)
 				continue;
 			return rc;
@@ -1335,10 +1427,15 @@ int bbdd_c_session(int argc, char **argv)
 			command->name);
 		return -1;
 	}
+	if (diag.seen && !command->allow_diag) {
+		fprintf(stderr, "`diag' not supported for `%s'.\n",
+			command->name);
+		return -1;
+	}
 
 	if (bbdd_c_session_check_params(&select) < 0 ||
 	    bbdd_c_session_check_params(&change) < 0)
 		return -1;
 
-	return bbdd_c_session_jrpc(command, &select, &change, bulk);
+	return bbdd_c_session_jrpc(command, &select, &change, bulk, diag);
 }
