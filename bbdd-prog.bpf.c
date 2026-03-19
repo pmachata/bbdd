@@ -104,7 +104,7 @@ int bbdd_tx(struct __sk_buff *skb)
 	/* FIB lookup */
 	params = config->fib_lookup;
 	params.tot_len = bpf_ntohs(iph->tot_len);
-	ret = bpf_fib_lookup(skb, &params, sizeof(params), 0);
+	ret = bpf_fib_lookup(skb, &params, sizeof(params), BPF_FIB_LOOKUP_SRC);
 	if (ret < 0) {
 		BUMP(data->stats.fail_lookup);
 		goto out;
@@ -152,6 +152,22 @@ int bbdd_tx(struct __sk_buff *skb)
 	__builtin_memcpy(eth->h_dest, params.dmac, ETH_ALEN);
 	if (eth == (void *) eth_buf) {
 		ret = bpf_dynptr_write(&p, 0, eth_buf, sizeof(eth_buf), 0);
+		if (ret) {
+			BUMP(data->stats.fail_update);
+			goto out;
+		}
+	}
+
+	off = sizeof(eth_buf);
+	iph = bpf_dynptr_slice_rdwr(&p, off, iph_buf, sizeof(iph_buf));
+	if (!iph) {
+		BUMP(data->stats.fail_update);
+		goto out;
+	}
+
+	iph->saddr = params.ipv4_src;
+	if (iph == (void *) iph_buf) {
+		ret = bpf_dynptr_write(&p, off, iph_buf, sizeof(iph_buf), 0);
 		if (ret) {
 			BUMP(data->stats.fail_update);
 			goto out;
