@@ -61,7 +61,7 @@ int bbdd_jrpc_dissect_request(struct json_object *obj,
 			      const char **method,
 			      struct json_object **params,
 			      char **error);
-int bbdd_jrpc_dissect_response(struct json_object *obj,
+int bbdd_jrpc_dissect_response(const struct json_object *obj,
 			       struct json_object **id,
 			       struct json_object **result,
 			       bool *is_error,

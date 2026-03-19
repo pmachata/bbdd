@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -45,7 +46,7 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 		fprintf(stderr, "Error %" PRId64 ": %s\n", code, message);
 }
 
-static bool bbdd_c_response_extract_result(struct json_object *j,
+static bool bbdd_c_response_extract_result(const struct json_object *j,
 					   int expect_id,
 					   enum json_type result_type,
 					   struct json_object **ret_result)
@@ -386,11 +387,55 @@ int bbdd_c_global_stats(int argc, char **argv)
 	return bbdd_c_global_stats_get_jrpc();
 }
 
-enum bbdd_c_session_command {
-	bbdd_c_session_command_add,
-	bbdd_c_session_command_set,
-	bbdd_c_session_command_del,
-	bbdd_c_session_command_show,
+static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
+					  const char *method,
+					  const int id); // xxx
+static int bbdd_c_session_show_jrpc_result(const struct json_object *response,
+					   const char *method,
+					   const int id); // xxx
+static int bbdd_c_session_stats_jrpc_result(const struct json_object *response,
+					    const char *method,
+					    const int id); // xxx
+static struct bbdd_c_session_command {
+	const char *const name;
+	const bool allow_bulk;
+	const bool allow_diag;
+	const bool allow_query;
+	const bool allow_change;
+	const char *const rpc;
+	int (*show)(const struct json_object *, const char *method, int id);
+} const bbdd_c_session_commands[] = {
+	{
+		.name = "add",
+		.allow_change = true,
+		.rpc = "session-add",
+		.show = bbdd_c_session_act_jrpc_result,
+	},
+	{
+		.name = "set",
+		.allow_bulk = true,
+		.allow_query = true,
+		.allow_change = true,
+		.rpc = "session-set",
+		.show = bbdd_c_session_act_jrpc_result,
+	},
+	{
+		.name = "del",
+		.allow_bulk = true,
+		.allow_query = true,
+		.rpc = "session-del",
+		.show = bbdd_c_session_act_jrpc_result,
+	},
+	{
+		.name = "show",
+		.allow_query = true,
+		.rpc = "session-show",
+		.show = bbdd_c_session_show_jrpc_result,
+	},
+};
+
+enum {
+	bbdd_c_session_ncommands = ARRAY_SIZE(bbdd_c_session_commands),
 };
 
 static void bbdd_c_session_help(void)
@@ -954,8 +999,8 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	printf("\n");
 }
 
-static int bbdd_c_session_show_jrpc_result(struct json_object *response,
-					   const int id)
+static int bbdd_c_session_show_jrpc_result(const struct json_object *response,
+					   const char *, const int id)
 {
 	struct json_object *result;
 	struct bbdd_c_session *sessions;
@@ -993,7 +1038,7 @@ put_result:
 	return 0;
 }
 
-static int bbdd_c_session_act_jrpc_result(struct json_object *response,
+static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
 					  const char *method,
 					  const int id)
 
@@ -1021,13 +1066,13 @@ static int bbdd_c_enomem(void)
 	return -ENOMEM;
 }
 
-static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
+static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 			       const struct bbdd_c_session *select,
 			       const struct bbdd_c_session *change,
 			       struct bbdd_c_session_flag bulk)
 {
-	struct json_object *select_obj;
-	struct json_object *change_obj;
+	struct json_object *select_obj = NULL;
+	struct json_object *change_obj = NULL;
 	struct json_object *params_obj;
 	struct json_object *response;
 	struct json_object *request;
@@ -1035,43 +1080,23 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 	const int id = 1;
 	int err;
 
-	switch (command) {
-	case bbdd_c_session_command_add:
-		method = "session-add";
-		select_obj = NULL;
-		change_obj = bbdd_c_jrpc_session_obj(change);
-		if (change_obj == NULL)
-			return -1;
-		break;
-
-	case bbdd_c_session_command_set:
-		method = "session-set";
+	if (command->allow_query) {
 		select_obj = bbdd_c_jrpc_session_obj(select);
 		if (select_obj == NULL)
 			return -1;
+	}
+
+	if (command->allow_change) {
 		change_obj = bbdd_c_jrpc_session_obj(change);
 		if (change_obj == NULL) {
 			err = -ENOMEM;
 			goto put_select;
 		}
-		break;
-
-	case bbdd_c_session_command_del:
-		method = "session-del";
-		select_obj = bbdd_c_jrpc_session_obj(select);
-		change_obj = NULL;
-		if (select_obj == NULL)
-			return -1;
-		break;
-
-	case bbdd_c_session_command_show:
-		method = "session-show";
-		select_obj = bbdd_c_jrpc_session_obj(select);
-		change_obj = NULL;
-		if (select_obj == NULL)
-			return -1;
-		break;
 	}
+
+	method = command->rpc;
+
+	assert(method != NULL);
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL) {
@@ -1117,10 +1142,7 @@ static int bbdd_c_session_jrpc(enum bbdd_c_session_command command,
 		goto put_request;
 	}
 
-	if (command == bbdd_c_session_command_show)
-		err = bbdd_c_session_show_jrpc_result(response, id);
-	else
-		err = bbdd_c_session_act_jrpc_result(response, method, id);
+	err = command->show(response, method, id);
 	if (err)
 		goto put_response;
 
@@ -1168,70 +1190,54 @@ int bbdd_c_session(int argc, char **argv)
 	struct bbdd_c_session select = {};
 	struct bbdd_c_session change = {};
 	struct bbdd_c_session *sess = &select;
-	const char *command_str = NULL;
 	bool seen_arg = false;
-	bool seen_command = false;
 	struct bbdd_c_session_flag bulk = {};
-	enum bbdd_c_session_command command;
+	struct bbdd_c_session_flag diag = {};
+	const struct bbdd_c_session_command *command = NULL;
 	int rc;
 
 	while (argc > 0) {
-		if (strcmp(*argv, "add") == 0) {
-			if (seen_command) {
-			seen_command:
+		bool arg_was_command = false;
+		for (int i = 0; i < bbdd_c_session_ncommands; i++) {
+			const struct bbdd_c_session_command *command2 =
+						    &bbdd_c_session_commands[i];
+			if (strcmp(*argv, command2->name) != 0)
+				continue;
+			if (command != NULL) {
 				fprintf(stderr, "`%s' seen when a command `%s' was already given\n",
-					*argv, command_str);
+					*argv, command->name);
 				return -1;
 			}
-			command_str = *argv;
-			if (seen_arg) {
-				fprintf(stderr, "`add' used with session query parameters\n");
+
+			command = command2;
+			arg_was_command = true;
+
+			if (!command->allow_query && seen_arg) {
+				fprintf(stderr, "`%s' used with session query parameters\n",
+					command->name);
 				return -1;
 			}
+
+			if (command->allow_change)
+				sess = &change;
+			else
+				sess = NULL;
+
 			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_add;
-			seen_command = true;
-			sess = &change;
+			break;
+		}
+
+		if (arg_was_command)
 			continue;
 
-		} else if (strcmp(*argv, "set") == 0) {
-			if (seen_command)
-				goto seen_command;
-			command_str = *argv;
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_set;
-			seen_command = true;
-			sess = &change;
-			continue;
-
-		} else if (strcmp(*argv, "del") == 0) {
-			if (seen_command)
-				goto seen_command;
-			command_str = *argv;
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_del;
-			seen_command = true;
-			sess = NULL;
-			continue;
-
-		} else if (strcmp(*argv, "show") == 0) {
-			if (seen_command)
-				goto seen_command;
-			command_str = *argv;
-			NEXT_ARG_FWD();
-			command = bbdd_c_session_command_show;
-			seen_command = true;
-			sess = NULL;
-			continue;
-
-		} else if (strcmp(*argv, "help") == 0) {
+		if (strcmp(*argv, "help") == 0) {
 			bbdd_c_session_help();
 			return 0;
 		}
 
 		if (sess == NULL) {
 			fprintf(stderr, "`%s' used with session change parameters\n",
-				command_str);
+				command->name);
 			return -1;
 		}
 
@@ -1300,23 +1306,14 @@ int bbdd_c_session(int argc, char **argv)
 		return -1;
 	}
 
-	if (!seen_command) {
+	if (command == NULL) {
 		fprintf(stderr, "No command given.\n");
 		return -1;
 	}
-
-	if (bulk.seen) {
-		switch (command) {
-		case bbdd_c_session_command_del:
-		case bbdd_c_session_command_set:
-			break;
-		case bbdd_c_session_command_add:
-			fprintf(stderr, "`add' does not support bulk operations\n");
-			return -1;
-		case bbdd_c_session_command_show:
-			fprintf(stderr, "`show' is implicitly bulk\n");
-			return -1;
-		}
+	if (bulk.seen && !command->allow_bulk) {
+		fprintf(stderr, "`bulk' not supported for `%s'.\n",
+			command->name);
+		return -1;
 	}
 
 	if (bbdd_c_session_check_params(&select) < 0 ||
