@@ -1135,13 +1135,19 @@ bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag)
 	return bbdd_c_session_flag_names[flag];
 }
 
+static int bbdd_c_enomem(void)
+{
+	fprintf(stderr, "Failed to form RPC request: %m");
+	return -ENOMEM;
+}
+
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 {
 	struct json_object *params_obj;
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL)
-		return NULL;
+		goto err;
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++) {
 		const char *flag_name = bbdd_c_session_flag_names[i];
@@ -1187,13 +1193,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 
 put_params_obj:
 	json_object_put(params_obj);
+err:
+	bbdd_c_enomem();
 	return NULL;
-}
-
-static int bbdd_c_enomem(void)
-{
-	fprintf(stderr, "Failed to form RPC request: %m");
-	return -ENOMEM;
 }
 
 static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
