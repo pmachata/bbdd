@@ -318,8 +318,8 @@ int bbdd_c_stop(int argc, char **argv)
 static void bbdd_c_global_stats_help(void)
 {
 	fprintf(stderr,
-		"Usage: bbdd global-stats\n"
-		"\n"
+		"Usage: bbdd global diag stats\n"
+		"       diag		-- request diagnostic stats instead of operational ones\n"
 	);
 }
 
@@ -376,16 +376,6 @@ put_request:
 	return err;
 }
 
-int bbdd_c_global_stats(int argc, char **argv)
-{
-	int err;
-
-	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_global_stats_help);
-	if (err != 0)
-		return err;
-
-	return bbdd_c_global_stats_get_jrpc();
-}
 
 static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
 					  const char *method,
@@ -571,6 +561,49 @@ bbdd_c_parse_kw_flag(int *up_argc, char ***up_argv,
 incomplete_command:
 	fprintf(stderr, "Command line is not complete. Try option \"help\"\n");
 	return -1;
+}
+
+int bbdd_c_global(int argc, char **argv)
+{
+	struct bbdd_c_session_flag diag = {};
+	bool seen_stats = false;
+	int rc;
+
+	while (argc > 0) {
+		if (strcmp(*argv, "stats") == 0) {
+			if (seen_stats) {
+				fprintf(stderr, "Duplicate `stats'.\n");
+				return -1;
+			}
+			NEXT_ARG_FWD();
+			seen_stats = true;
+			continue;
+		} else if (strcmp(*argv, "help") == 0) {
+			bbdd_c_global_stats_help();
+			return 0;
+		}
+
+		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "diag", &diag))) {
+			if (rc > 0)
+				continue;
+			return rc;
+		}
+
+		fprintf(stderr, "What is \"%s\"?\n", *argv);
+		return -1;
+	}
+
+	if (!seen_stats) {
+		fprintf(stderr, "No command given.\n");
+		return -1;
+	}
+
+	if (!diag.seen || !diag.value) {
+		fprintf(stderr, "Only `diag' stats are currently supported.\n");
+		return -1;
+	}
+
+	return bbdd_c_global_stats_get_jrpc();
 }
 
 static int bbdd_c_parse_u8(const char *str, void *ret, const char *what)

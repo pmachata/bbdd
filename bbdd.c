@@ -24,7 +24,7 @@ static int bbdd_help(void)
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
 	     "                    -V | --version | --sockdir <DIR> | --json ]\n"
-	     "	     COMMAND := { start | stop | ping | session | global-stats }\n"
+	     "	     COMMAND := { start | stop | ping | session | global }\n"
 	     );
 	return 0;
 }
@@ -45,9 +45,9 @@ static int bbdd_cmd(int argc, char **argv)
 	} else if (strcmp(*argv, "session") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_session(argc, argv);
-	} else if (strcmp(*argv, "global-stats") == 0) {
+	} else if (strcmp(*argv, "global") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_global_stats(argc, argv);
+		return bbdd_c_global(argc, argv);
 	}
 
 	fprintf(stderr, "Unknown command \"%s\"\n", *argv);
