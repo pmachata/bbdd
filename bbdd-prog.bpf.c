@@ -5,6 +5,7 @@
 #include "bbdd-prog.h"
 
 #define ETH_P_IP	0x0800          /* Internet Protocol packet */
+#define ETH_P_IPV6	0x86DD          /* IPv6 over bluebook */
 #define ETH_ALEN	6
 
 #define TC_ACT_OK		0
@@ -31,45 +32,129 @@ struct {
 	__uint(max_entries, 16 * 1024);
 } bbdd_bpf_session_data_hash SEC(".maps");
 
+static bool bbdd_tx_validate_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+{
+	u8 iph_buf[sizeof(struct iphdr)];
+	struct iphdr *iph;
+
+	iph = bpf_dynptr_slice(p, *off, iph_buf, sizeof(iph_buf));
+	if (!iph)
+		return false;
+	if (iph->protocol != IPPROTO_UDP)
+		return false;
+
+	*tot_len = bpf_ntohs(iph->tot_len);
+	*off += sizeof(struct iphdr);
+	return true;
+}
+
+static bool bbdd_tx_update_ipv4(struct bpf_dynptr *p,
+				struct bpf_fib_lookup *params)
+{
+	u8 iph_buf[sizeof(struct iphdr)];
+	u32 off = sizeof(struct ethhdr);
+	struct iphdr *iph;
+	int ret;
+
+	iph = bpf_dynptr_slice_rdwr(p, off, iph_buf, sizeof(iph_buf));
+	if (!iph)
+		return false;
+
+	iph->saddr = params->ipv4_src;
+	if (iph == (void *) iph_buf) {
+		ret = bpf_dynptr_write(p, off, iph_buf, sizeof(iph_buf), 0);
+		if (ret)
+			return false;
+	}
+
+	return true;
+}
+
+static bool bbdd_tx_validate_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+{
+	u8 ip6h_buf[sizeof(struct ipv6hdr)];
+	struct ipv6hdr *ip6h;
+
+	ip6h = bpf_dynptr_slice(p, *off, ip6h_buf, sizeof(ip6h_buf));
+	if (!ip6h)
+		return false;
+	if (ip6h->nexthdr != IPPROTO_UDP)
+		return false;
+
+	*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
+	*off += sizeof(struct ipv6hdr);
+	return true;
+}
+
+static bool bbdd_tx_update_ipv6(struct bpf_dynptr *p,
+				struct bpf_fib_lookup *params)
+{
+	u8 ip6h_buf[sizeof(struct ipv6hdr)];
+	u32 off = sizeof(struct ethhdr);
+	struct ipv6hdr *ip6h;
+	int ret;
+
+	ip6h = bpf_dynptr_slice_rdwr(p, off, ip6h_buf, sizeof(ip6h_buf));
+	if (!ip6h)
+		return false;
+	__builtin_memcpy(ip6h->saddr.in6_u.u6_addr32, params->ipv6_src,
+			    sizeof(params->ipv6_src));
+	if (ip6h == (void *) ip6h_buf) {
+		ret = bpf_dynptr_write(p, off, ip6h_buf, sizeof(ip6h_buf), 0);
+		if (ret)
+			return false;
+	}
+
+	return true;
+}
+
 SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u8 eth_buf[sizeof(struct ethhdr)] = {};
-	u8 iph_buf[sizeof(struct iphdr)] = {};
+	union {
+		u8 ip[sizeof(struct iphdr)];
+		u8 ip6[sizeof(struct ipv6hdr)];
+	} ipbuf = {};
 	struct bbdd_bfd_control_packet *bfd;
 	struct udphdr *udph;
 	struct ethhdr *eth;
-	struct iphdr *iph; // xxx ipv6
+	struct ipv6hdr *ip6h;
+	struct iphdr *iph;
 
 	struct bpf_dynptr p;
 	u32 off;
+	u16 proto;
 
 	struct bbdd_bfd_session_config *config;
 	struct bbdd_bfd_session_data *data;
 	struct bpf_fib_lookup params;
 	u64 interval_us;
+	u16 tot_len;
 	u32 id;
 
 	int ret;
 
 	/* Filtering */
-	if (skb->protocol != bpf_htons(ETH_P_IP))
+	proto = skb->protocol;
+	if (proto != bpf_htons(ETH_P_IP) &&
+	    proto != bpf_htons(ETH_P_IPV6))
 		goto tx_not_bfd;
 
 	if (bpf_dynptr_from_skb(skb, 0, &p))
 		goto tx_not_bfd;
 
 	off = sizeof(struct ethhdr);
-	iph = bpf_dynptr_slice(&p, off, iph_buf, sizeof(iph_buf));
-	if (!iph)
-		goto tx_not_bfd;
+	if (proto == bpf_htons(ETH_P_IP)) {
+		if (!bbdd_tx_validate_ipv4(&p, &off, &tot_len))
+			goto tx_not_bfd;
+	} else {
+		if (!bbdd_tx_validate_ipv6(&p, &off, &tot_len))
+			goto tx_not_bfd;
+	}
 
-	if (iph->protocol != IPPROTO_UDP)
-		goto tx_not_bfd;
-
-	off += sizeof(struct iphdr);
 	udph = bpf_dynptr_slice(&p, off, udph_buf, sizeof(udph_buf));
 	if (!udph)
 		goto tx_not_bfd;
@@ -103,7 +188,7 @@ int bbdd_tx(struct __sk_buff *skb)
 
 	/* FIB lookup */
 	params = config->fib_lookup;
-	params.tot_len = bpf_ntohs(iph->tot_len);
+	params.tot_len = tot_len;
 	ret = bpf_fib_lookup(skb, &params, sizeof(params), BPF_FIB_LOOKUP_SRC);
 	if (ret < 0) {
 		BUMP(data->stats.fail_lookup);
@@ -158,17 +243,13 @@ int bbdd_tx(struct __sk_buff *skb)
 		}
 	}
 
-	off = sizeof(eth_buf);
-	iph = bpf_dynptr_slice_rdwr(&p, off, iph_buf, sizeof(iph_buf));
-	if (!iph) {
-		BUMP(data->stats.fail_update);
-		goto out;
-	}
-
-	iph->saddr = params.ipv4_src;
-	if (iph == (void *) iph_buf) {
-		ret = bpf_dynptr_write(&p, off, iph_buf, sizeof(iph_buf), 0);
-		if (ret) {
+	if (proto == bpf_htons(ETH_P_IP)) {
+		if (!bbdd_tx_update_ipv4(&p, &params)) {
+			BUMP(data->stats.fail_update);
+			goto out;
+		}
+	} else {
+		if (!bbdd_tx_update_ipv6(&p, &params)) {
 			BUMP(data->stats.fail_update);
 			goto out;
 		}
