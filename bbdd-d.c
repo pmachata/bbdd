@@ -437,17 +437,17 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	}
 
 	if (seen[pol_select] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
-					    error) &&
-	    ((select->ifindex_seen || select->ifname_seen) &&
-	     bbdd_d_session_validate_interface(select, nl, error) < 0))
+	    (bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
+					     error) != 0 ||
+	     ((select->ifindex_seen || select->ifname_seen) &&
+	      bbdd_d_session_validate_interface(select, nl, error) != 0)))
 		return -1;
 
 	if (seen[pol_change] &&
-	    bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
-					    error) &&
-	    ((change->ifindex_seen || change->ifname_seen) &&
-	     bbdd_d_session_validate_interface(change, nl, error) < 0))
+	    (bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
+					     error) != 0 ||
+	     ((change->ifindex_seen || change->ifname_seen) &&
+	      bbdd_d_session_validate_interface(change, nl, error) < 0)))
 		return -1;
 
 	if (seen[pol_bulk])
@@ -506,8 +506,10 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 		bbdd_d_sockaddr_ntop(&dsess->dst.sa,
 				     csess->dst, sizeof(csess->dst));
 
-	if (dsess->ifindex != 0)
+	if (dsess->ifindex != 0) {
 		if_indextoname(dsess->ifindex, csess->ifname);
+		csess->ifname_seen = 1;
+	}
 
 #define ASSIGN(FIELD) do {			\
 		csess->FIELD = dsess->FIELD;	\
