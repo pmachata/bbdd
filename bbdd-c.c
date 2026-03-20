@@ -379,13 +379,433 @@ put_request:
 
 static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
 					  const char *method,
-					  const int id); // xxx
+					  const int id)
+
+{
+	struct json_object *result;
+
+	if (!bbdd_c_response_extract_result(response, id,
+					   json_type_null, &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "`%s' was handled by the daemon\n", method);
+
+put_result:
+	json_object_put(result);
+	return 0;
+}
+
+static int
+bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
+				      struct bbdd_c_session_state_end *state_end,
+				      char **error)
+{
+	enum {
+		pol_state,
+		pol_diag,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_state] = { .key = "state", .type = json_type_string,
+				.required = true},
+		[pol_diag] = { .key = "diag", .type = json_type_string,
+			       .required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	const char *state_str;
+	const char *diag_str;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	state_str = json_object_get_string(values[pol_state]);
+	rc = bbdd_d_bfd_state_from_str(state_str, &state_end->state);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "Invalid session state `%s'",
+				 state_str);
+		return rc;
+	}
+
+	diag_str = json_object_get_string(values[pol_diag]);
+	rc = bbdd_d_bfd_diag_from_str(diag_str, &state_end->diag);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "Invalid session diag `%s'",
+				 diag_str);
+		return rc;
+	}
+
+	return 0;
+}
+
+static int
+bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
+				  struct bbdd_c_session_state *state,
+				  char **error)
+{
+	enum {
+		pol_local,
+		pol_remote,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_local] = { .key = "local", .type = json_type_object,
+				.required = true},
+		[pol_remote] = { .key = "remote", .type = json_type_object,
+				 .required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_local],
+						   &state->local, error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_remote],
+						   &state->remote, error);
+	if (rc != 0)
+		return rc;
+
+	return 0;
+}
+
+static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
+					    struct bbdd_c_session *sess,
+					    struct bbdd_c_session_state *state,
+					    char **error)
+{
+	enum {
+		pol_data,
+		pol_state,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_data] = { .key = "data", .type = json_type_object,
+			       .required = true},
+		[pol_state] = { .key = "state", .type = json_type_object,
+				.required = true},
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess, error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_jrpc_dissect_session_state(values[pol_state], state,
+					       error);
+	if (rc != 0)
+		return rc;
+
+	return 0;
+}
+
+static int
+bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
+					  struct bbdd_c_session **psessions,
+					  struct bbdd_c_session_state **pstates,
+					  size_t *pnum_sessions,
+					  char **error)
+{
+	size_t sess_array_len = json_object_array_length(sess_array);
+	struct bbdd_c_session *sessions;
+	struct bbdd_c_session_state *states;
+
+	if (bbdd_jrpc_validate_array(sess_array, json_type_object,
+				     error) != 0)
+		return -1;
+
+	sessions = calloc(sess_array_len, sizeof(*sessions));
+	if (sessions == NULL) {
+		bbdd_util_fmterr(error, "Couldn't allocate sessions: %m");
+		return -1;
+	}
+
+	states = calloc(sess_array_len, sizeof(*states));
+	if (states == NULL) {
+		bbdd_util_fmterr(error, "Couldn't allocate session states: %m");
+		goto free_sessions;
+	}
+
+	for (size_t i = 0; i < sess_array_len; i++) {
+		struct json_object *sess_obj =
+			json_object_array_get_idx(sess_array, i);
+		struct bbdd_c_session *session = &sessions[i];
+		struct bbdd_c_session_state *state = &states[i];
+		int err;
+
+		err = bbdd_c_jrpc_dissect_session_list(sess_obj, session,
+						       state, error);
+		if (err != 0)
+			goto free_sessions;
+	}
+
+	*psessions = sessions;
+	*pstates = states;
+	*pnum_sessions = sess_array_len;
+	return 0;
+
+free_sessions:
+	free(sessions);
+	return -1;
+}
+
+static int
+bbdd_c_response_extract_sessions(struct json_object *obj,
+				 struct json_object **ret_sessions_arr,
+				 char **error)
+{
+	/* This extracts result in the following form:
+	 *
+	 * { "sessions": [ OBJ, ... ] }
+	 */
+	enum {
+		pol_sessions,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_sessions] = { .key = "sessions", .type = json_type_array,
+				   .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	struct json_object *sessions_arr;
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int err;
+
+	err = bbdd_jrpc_dissect(obj, policy, seen, values,
+				ARRAY_SIZE(policy), error);
+	if (err != 0)
+		return err;
+
+	sessions_arr = values[pol_sessions];
+
+	err = bbdd_jrpc_validate_array(sessions_arr, json_type_object, error);
+	if (err != 0)
+		return err;
+
+	*ret_sessions_arr = sessions_arr;
+	return 0;
+}
+
+static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
+					    struct bbdd_c_session **sessions,
+					    struct bbdd_c_session_state **states,
+					    size_t *num_sessions,
+					    char **error)
+{
+	struct json_object *sessions_arr;
+	int err;
+
+	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_session_show_jrpc_dissect_sessions(sessions_arr,
+							 sessions, states,
+							 num_sessions, error);
+}
+
+static void
+bbdd_c_session_show_state_end(struct bbdd_c_session_state_end *end)
+{
+	printf("state %s diag %s ",
+	       bbdd_d_bfd_state_to_str(end->state),
+	       bbdd_d_bfd_diag_to_str(end->diag));
+}
+
+static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
+				    struct bbdd_c_session_state *state)
+{
+	bool seen = false;
+	if (sess->id_seen) {
+		printf("id %u ", sess->id);
+		seen = true;
+	}
+	if (sess->src_af) {
+		printf("src %s ", sess->src);
+		seen = true;
+	}
+	if (sess->dst_af) {
+		printf("dst %s ", sess->dst);
+		seen = true;
+	}
+	if (sess->min_tx_seen) {
+		printf("min_tx %u ", sess->min_tx);
+		seen = true;
+	}
+	if (sess->min_rx_seen) {
+		printf("min_rx %u ", sess->min_rx);
+		seen = true;
+	}
+	if (sess->min_echo_tx_seen) {
+		printf("min_echo_tx %u ", sess->min_echo_tx_seen);
+		seen = true;
+	}
+	if (sess->min_echo_rx_seen) {
+		printf("min_echo_rx %u ", sess->min_echo_rx);
+		seen = true;
+	}
+	if (sess->hold_time_seen) {
+		printf("hold_time %u ", sess->hold_time);
+		seen = true;
+	}
+	if (sess->ttl_seen) {
+		printf("ttl %u ", sess->ttl);
+		seen = true;
+	}
+	if (sess->detect_mult_seen) {
+		printf("detect-mult %u ", sess->detect_mult);
+		seen = true;
+	}
+	if (sess->ifindex_seen) {
+		printf("ifindex %u ", sess->ifindex);
+		seen = true;
+	}
+	if (sess->ifname_seen) {
+		printf("ifname %s ", sess->ifname);
+		seen = true;
+	}
+
+	if (!seen)
+		printf("(session without data)");
+
+	printf(": local ");
+	bbdd_c_session_show_state_end(&state->local);
+	printf("remote ");
+	bbdd_c_session_show_state_end(&state->remote);
+	printf("\n");
+}
+
 static int bbdd_c_session_show_jrpc_result(const struct json_object *response,
-					   const char *method,
-					   const int id); // xxx
+					   const char *, const int id)
+{
+	struct json_object *result;
+	struct bbdd_c_session *sessions;
+	struct bbdd_c_session_state *states;
+	size_t num_sessions;
+	char *error;
+	int err;
+
+	if (!bbdd_c_response_extract_result(response, id,
+					    json_type_object, &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result)) {
+		err = 0;
+		goto put_result;
+	}
+
+	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
+					       &num_sessions, &error);
+	if (err != 0) {
+		fprintf(stderr, "Invalid session object: %s\n", error);
+		free(error);
+		goto put_result;
+	}
+
+	for (size_t i = 0; i < num_sessions; i++)
+		bbdd_c_session_show_one(&sessions[i], &states[i]);
+	if (num_sessions == 0 && bbdd_env.verbosity > 0)
+		printf("(no sessions)\n");
+	free(sessions);
+	free(states);
+
+put_result:
+	json_object_put(result);
+	return 0;
+}
+
+static int bbdd_c_session_stats_dissect_one(struct json_object *obj,
+					    char **error)
+{
+	enum {
+		pol_id,
+		pol_stats,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_id]    = { .key = "id",    .type = json_type_int,
+				.required = true },
+		[pol_stats] = { .key = "stats", .type = json_type_object,
+				.required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	printf("id %" PRIu32 ":\n",
+	       (uint32_t)json_object_get_uint64(values[pol_id]));
+	bbdd_c_print_stats_obj(values[pol_stats]);
+	return 0;
+}
+
+static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
+					       char **error)
+{
+	struct json_object *sessions_arr;
+	int err;
+
+	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (err != 0)
+		return err;
+
+	for (size_t i = 0; i < json_object_array_length(sessions_arr); i++) {
+		struct json_object *session_obj =
+			json_object_array_get_idx(sessions_arr, i);
+
+		err = bbdd_c_session_stats_dissect_one(session_obj, error);
+		if (err != 0)
+			return err;
+	}
+
+	return 0;
+}
+
 static int bbdd_c_session_stats_jrpc_result(const struct json_object *response,
-					    const char *method,
-					    const int id); // xxx
+					    const char *, const int id)
+{
+	struct json_object *result;
+	char *error = NULL;
+	int err = 0;
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+					    &result))
+		return -1;
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	err = bbdd_c_session_stats_dissect_result(result, &error);
+	if (err != 0) {
+		fprintf(stderr, "%s\n", error);
+		free(error);
+	}
+
+put_result:
+	json_object_put(result);
+	return err;
+}
+
 static struct bbdd_c_session_command {
 	const char *const name;
 	const bool allow_bulk;
@@ -768,435 +1188,6 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 put_params_obj:
 	json_object_put(params_obj);
 	return NULL;
-}
-
-static int
-bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
-				      struct bbdd_c_session_state_end *state_end,
-				      char **error)
-{
-	enum {
-		pol_state,
-		pol_diag,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_state] = { .key = "state", .type = json_type_string,
-				.required = true},
-		[pol_diag] = { .key = "diag", .type = json_type_string,
-			       .required = true},
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	bool seen[ARRAY_SIZE(policy)] = {};
-	const char *state_str;
-	const char *diag_str;
-	int rc;
-
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
-			       error);
-	if (rc != 0)
-		return rc;
-
-	state_str = json_object_get_string(values[pol_state]);
-	rc = bbdd_d_bfd_state_from_str(state_str, &state_end->state);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Invalid session state `%s'",
-				 state_str);
-		return rc;
-	}
-
-	diag_str = json_object_get_string(values[pol_diag]);
-	rc = bbdd_d_bfd_diag_from_str(diag_str, &state_end->diag);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Invalid session diag `%s'",
-				 diag_str);
-		return rc;
-	}
-
-	return 0;
-}
-
-static int
-bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
-				  struct bbdd_c_session_state *state,
-				  char **error)
-{
-	enum {
-		pol_local,
-		pol_remote,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_local] = { .key = "local", .type = json_type_object,
-				.required = true},
-		[pol_remote] = { .key = "remote", .type = json_type_object,
-				 .required = true},
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	bool seen[ARRAY_SIZE(policy)] = {};
-	int rc;
-
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
-			       error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_local],
-						   &state->local, error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_remote],
-						   &state->remote, error);
-	if (rc != 0)
-		return rc;
-
-	return 0;
-}
-
-static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
-					    struct bbdd_c_session *sess,
-					    struct bbdd_c_session_state *state,
-					    char **error)
-{
-	enum {
-		pol_data,
-		pol_state,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_data] = { .key = "data", .type = json_type_object,
-			       .required = true},
-		[pol_state] = { .key = "state", .type = json_type_object,
-				.required = true},
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	bool seen[ARRAY_SIZE(policy)] = {};
-	int rc;
-
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
-			       error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess, error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_c_jrpc_dissect_session_state(values[pol_state], state,
-					       error);
-	if (rc != 0)
-		return rc;
-
-	return 0;
-}
-
-static int
-bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
-					  struct bbdd_c_session **psessions,
-					  struct bbdd_c_session_state **pstates,
-					  size_t *pnum_sessions,
-					  char **error)
-{
-	size_t sess_array_len = json_object_array_length(sess_array);
-	struct bbdd_c_session *sessions;
-	struct bbdd_c_session_state *states;
-
-	if (bbdd_jrpc_validate_array(sess_array, json_type_object,
-				     error) != 0)
-		return -1;
-
-	sessions = calloc(sess_array_len, sizeof(*sessions));
-	if (sessions == NULL) {
-		bbdd_util_fmterr(error, "Couldn't allocate sessions: %m");
-		return -1;
-	}
-
-	states = calloc(sess_array_len, sizeof(*states));
-	if (states == NULL) {
-		bbdd_util_fmterr(error, "Couldn't allocate session states: %m");
-		goto free_sessions;
-	}
-
-	for (size_t i = 0; i < sess_array_len; i++) {
-		struct json_object *sess_obj =
-			json_object_array_get_idx(sess_array, i);
-		struct bbdd_c_session *session = &sessions[i];
-		struct bbdd_c_session_state *state = &states[i];
-		int err;
-
-		err = bbdd_c_jrpc_dissect_session_list(sess_obj, session,
-						       state, error);
-		if (err != 0)
-			goto free_sessions;
-	}
-
-	*psessions = sessions;
-	*pstates = states;
-	*pnum_sessions = sess_array_len;
-	return 0;
-
-free_sessions:
-	free(sessions);
-	return -1;
-}
-
-static int
-bbdd_c_response_extract_sessions(struct json_object *obj,
-				 struct json_object **ret_sessions_arr,
-				 char **error)
-{
-	/* This extracts result in the following form:
-	 *
-	 * { "sessions": [ OBJ, ... ] }
-	 */
-	enum {
-		pol_sessions,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_sessions] = { .key = "sessions", .type = json_type_array,
-				   .required = true },
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	struct json_object *sessions_arr;
-	bool seen[ARRAY_SIZE(policy)] = {};
-	int err;
-
-	err = bbdd_jrpc_dissect(obj, policy, seen, values,
-				ARRAY_SIZE(policy), error);
-	if (err != 0)
-		return err;
-
-	sessions_arr = values[pol_sessions];
-
-	err = bbdd_jrpc_validate_array(sessions_arr, json_type_object, error);
-	if (err != 0)
-		return err;
-
-	*ret_sessions_arr = sessions_arr;
-	return 0;
-}
-
-static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
-					    struct bbdd_c_session **sessions,
-					    struct bbdd_c_session_state **states,
-					    size_t *num_sessions,
-					    char **error)
-{
-	struct json_object *sessions_arr;
-	int err;
-
-	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
-	if (err != 0)
-		return err;
-
-	return bbdd_c_session_show_jrpc_dissect_sessions(sessions_arr,
-							 sessions, states,
-							 num_sessions, error);
-}
-
-static void
-bbdd_c_session_show_state_end(struct bbdd_c_session_state_end *end)
-{
-	printf("state %s diag %s ",
-	       bbdd_d_bfd_state_to_str(end->state),
-	       bbdd_d_bfd_diag_to_str(end->diag));
-}
-
-static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
-				    struct bbdd_c_session_state *state)
-{
-	bool seen = false;
-	if (sess->id_seen) {
-		printf("id %u ", sess->id);
-		seen = true;
-	}
-	if (sess->src_af) {
-		printf("src %s ", sess->src);
-		seen = true;
-	}
-	if (sess->dst_af) {
-		printf("dst %s ", sess->dst);
-		seen = true;
-	}
-	if (sess->min_tx_seen) {
-		printf("min_tx %u ", sess->min_tx);
-		seen = true;
-	}
-	if (sess->min_rx_seen) {
-		printf("min_rx %u ", sess->min_rx);
-		seen = true;
-	}
-	if (sess->min_echo_tx_seen) {
-		printf("min_echo_tx %u ", sess->min_echo_tx_seen);
-		seen = true;
-	}
-	if (sess->min_echo_rx_seen) {
-		printf("min_echo_rx %u ", sess->min_echo_rx);
-		seen = true;
-	}
-	if (sess->hold_time_seen) {
-		printf("hold_time %u ", sess->hold_time);
-		seen = true;
-	}
-	if (sess->ttl_seen) {
-		printf("ttl %u ", sess->ttl);
-		seen = true;
-	}
-	if (sess->detect_mult_seen) {
-		printf("detect-mult %u ", sess->detect_mult);
-		seen = true;
-	}
-	if (sess->ifindex_seen) {
-		printf("ifindex %u ", sess->ifindex);
-		seen = true;
-	}
-	if (sess->ifname_seen) {
-		printf("ifname %s ", sess->ifname);
-		seen = true;
-	}
-
-	if (!seen)
-		printf("(session without data)");
-
-	printf(": local ");
-	bbdd_c_session_show_state_end(&state->local);
-	printf("remote ");
-	bbdd_c_session_show_state_end(&state->remote);
-	printf("\n");
-}
-
-static int bbdd_c_session_show_jrpc_result(const struct json_object *response,
-					   const char *, const int id)
-{
-	struct json_object *result;
-	struct bbdd_c_session *sessions;
-	struct bbdd_c_session_state *states;
-	size_t num_sessions;
-	char *error;
-	int err;
-
-	if (!bbdd_c_response_extract_result(response, id,
-					    json_type_object, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
-	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
-					       &num_sessions, &error);
-	if (err != 0) {
-		fprintf(stderr, "Invalid session object: %s\n", error);
-		free(error);
-		goto put_result;
-	}
-
-	for (size_t i = 0; i < num_sessions; i++)
-		bbdd_c_session_show_one(&sessions[i], &states[i]);
-	if (num_sessions == 0 && bbdd_env.verbosity > 0)
-		printf("(no sessions)\n");
-	free(sessions);
-	free(states);
-
-put_result:
-	json_object_put(result);
-	return 0;
-}
-
-static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
-					  const char *method,
-					  const int id)
-
-{
-	struct json_object *result;
-
-	if (!bbdd_c_response_extract_result(response, id,
-					   json_type_null, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "`%s' was handled by the daemon\n", method);
-
-put_result:
-	json_object_put(result);
-	return 0;
-}
-
-static int bbdd_c_session_stats_dissect_one(struct json_object *obj,
-					    char **error)
-{
-	enum {
-		pol_id,
-		pol_stats,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_id]    = { .key = "id",    .type = json_type_int,
-				.required = true },
-		[pol_stats] = { .key = "stats", .type = json_type_object,
-				.required = true },
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	bool seen[ARRAY_SIZE(policy)] = {};
-	int rc;
-
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
-			       error);
-	if (rc != 0)
-		return rc;
-
-	printf("id %" PRIu32 ":\n",
-	       (uint32_t)json_object_get_uint64(values[pol_id]));
-	bbdd_c_print_stats_obj(values[pol_stats]);
-	return 0;
-}
-
-static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
-					       char **error)
-{
-	struct json_object *sessions_arr;
-	int err;
-
-	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
-	if (err != 0)
-		return err;
-
-	for (size_t i = 0; i < json_object_array_length(sessions_arr); i++) {
-		struct json_object *session_obj =
-			json_object_array_get_idx(sessions_arr, i);
-
-		err = bbdd_c_session_stats_dissect_one(session_obj, error);
-		if (err != 0)
-			return err;
-	}
-
-	return 0;
-}
-
-static int bbdd_c_session_stats_jrpc_result(const struct json_object *response,
-					    const char *, const int id)
-{
-	struct json_object *result;
-	char *error = NULL;
-	int err = 0;
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
-
-	err = bbdd_c_session_stats_dissect_result(result, &error);
-	if (err != 0) {
-		fprintf(stderr, "%s\n", error);
-		free(error);
-	}
-
-put_result:
-	json_object_put(result);
-	return err;
 }
 
 static int bbdd_c_enomem(void)
