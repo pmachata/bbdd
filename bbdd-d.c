@@ -868,9 +868,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	else
 		dsess->dst.sin46.port = htons(BFD_SINGLE_HOP_PORT);
 
-	// xxx this skips ifname, I don't think we need to care about it?
-	// it gets converted to ifindex. But check this.
-
 #define ASSIGN(FIELD) do {						\
 		if (csess->FIELD ## _seen)				\
 			dsess->FIELD = csess->FIELD;			\
@@ -884,6 +881,11 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(hold_time);
 	ASSIGN(ttl);
 	ASSIGN(detect_mult);
+
+	/* Interface is given as ifindex and ifname by the RPC, but at this
+	 * point, both have been validated to match each other, and ifindex has
+	 * been backfilled from ifname if not given. So we only need to care
+	 * about ifindex. */
 	ASSIGN(ifindex);
 
 #undef ASSIGN
