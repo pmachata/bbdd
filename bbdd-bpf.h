@@ -24,7 +24,6 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 						     char **error);
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 uint32_t veth_tx_ifindex,
 			 uint32_t id,
 			 uint32_t ifindex,
 			 const struct bbdd_sockaddr *src,
@@ -37,7 +36,6 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 			 char **error);
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    uint32_t veth_tx_ifindex,
 			    uint32_t id,
 			    uint32_t ifindex,
 			    const struct bbdd_sockaddr *src,

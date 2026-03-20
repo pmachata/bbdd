@@ -1258,13 +1258,14 @@ enum { BBDD_D_NS_PER_US = 1 * 1000 };
 static int
 __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 				   const struct bbdd_d_session *dsess,
-				   uint32_t tx_ifindex,
+				   uint32_t veth_tx_ifindex,
 				   bool add, char **error)
 {
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = 0;   // xxx
+	uint32_t fwd_ifindex;
 	int rc;
 
 	// xxx: Note that the send interval needs to be deduced from the
@@ -1279,8 +1280,9 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
-#define ARGS	bpf, tx_ifindex,					\
-		dsess->id, dsess->ifindex, &dsess->src, &dsess->dst,	\
+	fwd_ifindex = dsess->ifindex ?: veth_tx_ifindex;
+
+#define ARGS	bpf, dsess->id, fwd_ifindex, &dsess->src, &dsess->dst,	\
 		tbid, flags, min_interval_us, max_interval_us, dsess->gen_id, \
 		error
 
@@ -1292,7 +1294,7 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 		return rc;
 #undef ARGS
 
-	rc = bbdd_d_session_inject_pkt(dsess, tx_ifindex, error);
+	rc = bbdd_d_session_inject_pkt(dsess, veth_tx_ifindex, error);
 	if (rc != 0)
 		goto del_session;
 
@@ -1312,19 +1314,19 @@ del_session:
 
 static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
 					 const struct bbdd_d_session *dsess,
-					 uint32_t tx_ifindex,
+					 uint32_t veth_tx_ifindex,
 					 char **error)
 {
-	return __bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
+	return __bbdd_d_handle_session_update_bpf(bpf, dsess, veth_tx_ifindex,
 						  true, error);
 }
 
 static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 					    const struct bbdd_d_session *dsess,
-					    uint32_t tx_ifindex,
+					    uint32_t veth_tx_ifindex,
 					    char **error)
 {
-	return __bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
+	return __bbdd_d_handle_session_update_bpf(bpf, dsess, veth_tx_ifindex,
 						  false, error);
 }
 
@@ -1335,7 +1337,7 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf,
 				      struct bbdd_d_sport_alloc *spa,
-				      uint32_t tx_ifindex)
+				      uint32_t veth_tx_ifindex)
 {
 	struct bbdd_c_session csess;
 	struct bbdd_d_session *dsess;
@@ -1375,11 +1377,11 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	rc = bbdd_d_session_open_sock(dsess, tx_ifindex, &error);
+	rc = bbdd_d_session_open_sock(dsess, veth_tx_ifindex, &error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, tx_ifindex, &error);
+	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, veth_tx_ifindex, &error);
 	if (rc != 0)
 		goto close_sock;
 
@@ -1775,7 +1777,7 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
 				 struct bbdd_d_sport_alloc *spa,
-				 uint32_t tx_ifindex,
+				 uint32_t veth_tx_ifindex,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1792,10 +1794,10 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_d_handle_session_add(peer, params_obj, id, nl,
-					  sdir, bpf, spa, tx_ifindex);
+					  sdir, bpf, spa, veth_tx_ifindex);
 	else if (strcmp(method, "session-set") == 0)
 		bbdd_d_handle_session_set(peer, params_obj, id, nl,
-					  sdir, bpf, tx_ifindex);
+					  sdir, bpf, veth_tx_ifindex);
 	else if (strcmp(method, "session-del") == 0)
 		bbdd_d_handle_session_del(peer, params_obj, id, nl,
 					  sdir, bpf, spa);
@@ -1809,7 +1811,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
-				uint32_t tx_ifindex,
+				uint32_t veth_tx_ifindex,
 				struct bbdd_sock *ctl,
 				struct bbdd_nl *nl)
 {
@@ -1842,7 +1844,7 @@ static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(sdir, bpf, spa, tx_ifindex,
+	bbdd_d_handle_method(sdir, bpf, spa, veth_tx_ifindex,
 			     &peer, method, params, id, nl);
 
 put_req_obj:
@@ -1857,7 +1859,7 @@ struct bbdd_context {
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
-	uint32_t tx_ifindex;
+	uint32_t veth_tx_ifindex;
 };
 
 static void bbdd_d_ctl_recv(struct events_ctx *ec,
@@ -1869,8 +1871,8 @@ static void bbdd_d_ctl_recv(struct events_ctx *ec,
 	if (revents & (POLLERR | POLLHUP | POLLNVAL))
 		bfddp_errx(1, "poll returned bad value");
 
-	bbdd_d_ctl_activity(bbdd->sdir, bbdd->bpf, &bbdd->spa, bbdd->tx_ifindex,
-			    &bbdd->ctl, bbdd->nl);
+	bbdd_d_ctl_activity(bbdd->sdir, bbdd->bpf, &bbdd->spa,
+			    bbdd->veth_tx_ifindex, &bbdd->ctl, bbdd->nl);
 
 	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
 }
@@ -2217,7 +2219,7 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 		goto bpf_destroy;
 	}
 
-	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.tx_ifindex,
+	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.veth_tx_ifindex,
 				     &error);
 	if (err) {
 		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);

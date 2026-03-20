@@ -154,9 +154,8 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 }
 
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-				     uint32_t veth_tx_ifindex,
 				     uint32_t id,
-				     uint32_t /* xxx ifindex */,
+				     uint32_t ifindex,
 				     const struct bbdd_sockaddr *src,
 				     const struct bbdd_sockaddr *dst,
 				     uint32_t tbid,
@@ -173,7 +172,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			.l4_protocol = IPPROTO_UDP,
 			.sport = src->sin46.port,
 			.dport = dst->sin46.port,
-			.ifindex = veth_tx_ifindex,
+			.ifindex = ifindex,
 			.tbid = tbid,
 			.mark = gen_id,
 		},
@@ -220,7 +219,6 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 }
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    uint32_t veth_tx_ifindex,
 			    uint32_t id,
 			    uint32_t ifindex,
 			    const struct bbdd_sockaddr *src,
@@ -244,14 +242,13 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	return __bbdd_bpf_session_update(bpf, veth_tx_ifindex,
+	return __bbdd_bpf_session_update(bpf,
 					 id, ifindex, src, dst, tbid, flags,
 					 min_interval_us, max_interval_us,
 					 gen_id, error);
 }
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 uint32_t veth_tx_ifindex,
 			 uint32_t id,
 			 uint32_t ifindex,
 			 const struct bbdd_sockaddr *src,
@@ -266,7 +263,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 	struct bbdd_bfd_session_data data = {};
 	int err;
 
-	err = __bbdd_bpf_session_update(bpf, veth_tx_ifindex,
+	err = __bbdd_bpf_session_update(bpf,
 					id, ifindex, src, dst, tbid, flags,
 					min_interval_us, max_interval_us,
 					gen_id, error);
