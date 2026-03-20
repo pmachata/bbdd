@@ -139,7 +139,7 @@ struct bbdd_d_session {
 	uint8_t detect_mult;
 	uint32_t ifindex;
 
-	struct bbdd_c_session_state_end state;
+	struct bbdd_c_session_state state;
 
 	uint32_t gen_id;
 	int sock_fd;

@@ -534,7 +534,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 #undef ASSIGN_NON0
 #undef ASSIGN
 
-	*state = (struct bbdd_c_session_state) {}; // xxx
+	*state = dsess->state;
 }
 
 static const char *bbdd_d_strtab_val_to_str(int value, const char **tab,
