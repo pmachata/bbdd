@@ -249,6 +249,7 @@ int bbdd_tx(struct __sk_buff *skb)
 			BUMP(data->stats.req_encap);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
+			// xxx ping userspace to resolve the neighbor
 			BUMP(data->stats.no_neighbor);
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:

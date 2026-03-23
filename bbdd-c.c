@@ -400,33 +400,52 @@ put_result:
 }
 
 static int
-bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
-				      struct bbdd_c_session_state_end *state_end,
-				      char **error)
+__bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
+				   struct bbdd_d_session_data *data,
+				   bool state_only, char **error)
 {
 	enum {
+		/* State-only policy. */
 		pol_state,
 		pol_diag,
+		polsize_state_only,
+
+		/* Rest of the complete policy. */
+		pol_detect_mult = polsize_state_only,
+		pol_min_tx_us,
+		pol_min_rx_us,
+		pol_min_echo_rx,
+		polsize_full,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		[pol_state] = { .key = "state", .type = json_type_string,
-				.required = true},
+				.required = true },
 		[pol_diag] = { .key = "diag", .type = json_type_string,
-			       .required = true},
+			       .required = true },
+		[pol_detect_mult] = { .key = "detect_mult",
+				      .type = json_type_int, .required = true },
+		[pol_min_tx_us] = { .key = "min_tx_us",
+				    .type = json_type_int, .required = true },
+		[pol_min_rx_us] = { .key = "min_rx_us",
+				    .type = json_type_int, .required = true },
+		[pol_min_echo_rx] = { .key = "min_echo_rx",
+				      .type = json_type_int, .required = true },
 	};
+	const size_t polsize = state_only ? polsize_state_only : polsize_full;
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
 	const char *state_str;
 	const char *diag_str;
 	int rc;
 
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
-			       error);
-	if (rc != 0)
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, polsize, error);
+	if (rc != 0) {
+		fprintf(stderr, "state_only %d polsize %zd\n", state_only, polsize);
 		return rc;
+	}
 
 	state_str = json_object_get_string(values[pol_state]);
-	rc = bbdd_d_bfd_state_from_str(state_str, &state_end->state);
+	rc = bbdd_d_bfd_state_from_str(state_str, &data->state.state);
 	if (rc < 0) {
 		bbdd_util_fmterr(error, "Invalid session state `%s'",
 				 state_str);
@@ -434,15 +453,58 @@ bbdd_c_jrpc_dissect_session_state_end(struct json_object *obj,
 	}
 
 	diag_str = json_object_get_string(values[pol_diag]);
-	rc = bbdd_d_bfd_diag_from_str(diag_str, &state_end->diag);
+	rc = bbdd_d_bfd_diag_from_str(diag_str, &data->state.diag);
 	if (rc < 0) {
 		bbdd_util_fmterr(error, "Invalid session diag `%s'",
 				 diag_str);
 		return rc;
 	}
 
+#define __DISSECT(NAME, CB) do {					\
+		if (seen[pol_ ## NAME]) {				\
+			if (CB(values[pol_ ## NAME], &data->NAME, error) < 0) \
+				return -1;				\
+		}							\
+	} while (0)
+#define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
+#define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
+
+	DISSECT_U8(detect_mult);
+	DISSECT_U32(min_tx_us);
+	DISSECT_U32(min_rx_us);
+	DISSECT_U32(min_echo_rx);
+
+#undef DISSECT_U8
+#undef DISSECT_U32
+#undef __DISSECT
+
 	return 0;
 }
+
+static int
+bbdd_c_jrpc_dissect_session_state_remote(struct json_object *obj,
+					 struct bbdd_d_session_data *remote,
+					 char **error)
+{
+	return __bbdd_c_jrpc_dissect_session_data(obj, remote, false, error);
+}
+
+static int
+bbdd_c_jrpc_dissect_session_state_local(struct json_object *obj,
+					struct bbdd_d_session_state_end *local,
+					char **error)
+{
+	struct bbdd_d_session_data data;
+	int rc;
+
+	rc = __bbdd_c_jrpc_dissect_session_data(obj, &data, true, error);
+	if (rc != 0)
+		return rc;
+
+	*local = data.state;
+	return 0;
+}
+
 
 static int
 bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
@@ -468,13 +530,13 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_local],
-						   &state->local, error);
+	rc = bbdd_c_jrpc_dissect_session_state_local(values[pol_local],
+						     &state->local, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_c_jrpc_dissect_session_state_end(values[pol_remote],
-						   &state->remote, error);
+	rc = bbdd_c_jrpc_dissect_session_state_remote(values[pol_remote],
+						      &state->remote, error);
 	if (rc != 0)
 		return rc;
 
@@ -622,11 +684,21 @@ static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
 }
 
 static void
-bbdd_c_session_show_state_end(struct bbdd_c_session_state_end *end)
+bbdd_c_session_show_state_end(const struct bbdd_d_session_state_end *end)
 {
 	printf("state %s diag %s ",
 	       bbdd_d_bfd_state_to_str(end->state),
 	       bbdd_d_bfd_diag_to_str(end->diag));
+}
+
+static void
+bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
+{
+	printf("detect-mult %u ", data->detect_mult);
+	printf("min_tx %u us ", data->min_tx_us);
+	printf("min_rx %u us ", data->min_rx_us);
+	printf("min_echo_rx %u ", data->min_echo_rx);
+	bbdd_c_session_show_state_end(&data->state);
 }
 
 static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
@@ -645,16 +717,12 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		printf("dst %s ", sess->dst);
 		seen = true;
 	}
-	if (sess->min_tx_seen) {
-		printf("min_tx %u ", sess->min_tx);
+	if (sess->min_tx_us_seen) {
+		printf("min_tx %u us ", sess->min_tx_us);
 		seen = true;
 	}
-	if (sess->min_rx_seen) {
-		printf("min_rx %u ", sess->min_rx);
-		seen = true;
-	}
-	if (sess->min_echo_tx_seen) {
-		printf("min_echo_tx %u ", sess->min_echo_tx_seen);
+	if (sess->min_rx_us_seen) {
+		printf("min_rx_us %u ", sess->min_rx_us);
 		seen = true;
 	}
 	if (sess->min_echo_rx_seen) {
@@ -688,7 +756,7 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	printf(": local ");
 	bbdd_c_session_show_state_end(&state->local);
 	printf("remote ");
-	bbdd_c_session_show_state_end(&state->remote);
+	bbdd_c_session_show_data(&state->remote);
 	printf("\n");
 }
 
@@ -1166,13 +1234,10 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	     bbdd_jrpc_append_str(params_obj, "dst", sess->dst)) ||
 	    (sess->id_seen &&
 	     bbdd_jrpc_append_int(params_obj, "id", sess->id)) ||
-	    (sess->min_tx_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_tx", sess->min_tx)) ||
-	    (sess->min_rx_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_rx", sess->min_rx)) ||
-	    (sess->min_echo_tx_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_echo_tx",
-				  sess->min_echo_tx)) ||
+	    (sess->min_tx_us_seen &&
+	     bbdd_jrpc_append_int(params_obj, "min_tx_us", sess->min_tx_us)) ||
+	    (sess->min_rx_us_seen &&
+	     bbdd_jrpc_append_int(params_obj, "min_rx_us", sess->min_rx_us)) ||
 	    (sess->min_echo_rx_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_echo_rx",
 				  sess->min_echo_rx)) ||
@@ -1402,14 +1467,11 @@ int bbdd_c_session(int argc, char **argv)
 					      &sess->id,
 					      &sess->id_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
-					      &sess->min_tx,
-					      &sess->min_tx_seen)) ||
+					      &sess->min_tx_us,
+					      &sess->min_tx_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-rx",
-					      &sess->min_rx,
-					      &sess->min_rx_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-tx",
-					      &sess->min_echo_tx,
-					      &sess->min_echo_tx_seen)) ||
+					      &sess->min_rx_us,
+					      &sess->min_rx_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-rx",
 					      &sess->min_echo_rx,
 					      &sess->min_echo_rx_seen)) ||

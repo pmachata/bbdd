@@ -89,22 +89,14 @@ struct bbdd_c_session {
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
 	uint32_t id;			int id_seen;
-	uint32_t min_tx;		int min_tx_seen;
-	uint32_t min_rx;		int min_rx_seen;
-	uint32_t min_echo_tx;		int min_echo_tx_seen;
+	uint32_t min_tx_us;		int min_tx_us_seen;
+	uint32_t min_rx_us;		int min_rx_us_seen;
 	uint32_t min_echo_rx;		int min_echo_rx_seen;
 	uint32_t hold_time;		int hold_time_seen;
 	uint8_t ttl;			int ttl_seen;
 	uint8_t detect_mult;		int detect_mult_seen;
 	uint32_t ifindex;		int ifindex_seen;
 	char ifname[IFNAMSIZ];		int ifname_seen;
-};
-
-struct bbdd_c_session_state {
-	struct bbdd_c_session_state_end {
-		enum bfd_state_value state;
-		enum bfd_diagnostic_value diag;
-	} local, remote;
 };
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
@@ -124,23 +116,45 @@ struct bbdd_d_session_flags {
 
 #undef BBDD_C_SESSION_EXPAND_FIELD
 
+struct bbdd_d_session_state_end {
+	enum bfd_state_value state;
+	enum bfd_diagnostic_value diag;
+};
+
+struct bbdd_d_session_data {
+	uint8_t detect_mult;
+	uint32_t min_tx_us;
+	uint32_t min_rx_us;
+	uint32_t min_echo_rx;
+	struct bbdd_d_session_state_end state;
+};
+
+/* For carrying state information decoded from RPC. Most local session-specific
+ * information is carried in bbdd_c_session. This contains the state & diag bits
+ * for local session, and known remote session configuration. */
+struct bbdd_c_session_state {
+	struct bbdd_d_session_state_end local;
+	struct bbdd_d_session_data remote;
+};
+
 struct bbdd_d_session {
-	struct bbdd_d_session_flags flags;
+	/* Local session configuration. */
 	uint32_t id;
+
+	struct bbdd_d_session_flags flags;
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
 
-	uint32_t min_tx;
-	uint32_t min_rx;
-	uint32_t min_echo_tx;
-	uint32_t min_echo_rx;
 	uint32_t hold_time;
 	uint8_t ttl;
-	uint8_t detect_mult;
 	uint32_t ifindex;
 
-	struct bbdd_c_session_state state;
+	struct bbdd_d_session_data local;
 
+	/* Remote session data. */
+	struct bbdd_d_session_data remote;
+
+	/* Additional per-session parameters. */
 	uint32_t gen_id;
 	int sock_fd;
 };

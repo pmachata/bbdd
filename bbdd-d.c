@@ -277,9 +277,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		pol_src,
 		pol_dst,
 
-		pol_min_tx,
-		pol_min_rx,
-		pol_min_echo_tx,
+		pol_min_tx_us,
+		pol_min_rx_us,
 		pol_min_echo_rx,
 
 		pol_hold_time,
@@ -297,10 +296,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_src] = { .key = "src", .type = json_type_string },
 		[pol_dst] = { .key = "dst", .type = json_type_string },
 
-		[pol_min_tx] = { .key = "min_tx", .type = json_type_int },
-		[pol_min_rx] = { .key = "min_rx", .type = json_type_int },
-		[pol_min_echo_tx] = { .key = "min_echo_tx",
-				      .type = json_type_int },
+		[pol_min_tx_us] = { .key = "min_tx_us", .type = json_type_int },
+		[pol_min_rx_us] = { .key = "min_rx_us", .type = json_type_int },
 		[pol_min_echo_rx] = { .key = "min_echo_rx",
 				      .type = json_type_int },
 
@@ -377,9 +374,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
 
 	DISSECT_U32_NON0(id);
-	DISSECT_U32(min_tx);
-	DISSECT_U32(min_rx);
-	DISSECT_U32(min_echo_tx);
+	DISSECT_U32(min_tx_us);
+	DISSECT_U32(min_rx_us);
 	DISSECT_U32(min_echo_rx);
 	DISSECT_U32(hold_time);
 	DISSECT_U8(ttl);
@@ -489,8 +485,7 @@ static void bbdd_d_sockaddr_ntop(socklen_t size;
 }
 
 static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
-				struct bbdd_c_session *csess,
-				struct bbdd_c_session_state *state)
+				struct bbdd_c_session *csess)
 {
 	*csess = (struct bbdd_c_session){};
 
@@ -511,30 +506,28 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 		csess->ifname_seen = 1;
 	}
 
-#define ASSIGN(FIELD) do {			\
-		csess->FIELD = dsess->FIELD;	\
-		csess->FIELD ## _seen = 1;	\
+#define ASSIGN(CFIELD, DFIELD) do {		\
+		csess->CFIELD = dsess->DFIELD;	\
+		csess->CFIELD ## _seen = 1;	\
 	} while (0)
 
-#define ASSIGN_NON0(FIELD) do {			\
-		if (dsess->FIELD)		\
-			ASSIGN(FIELD);		\
+#define ASSIGN_NON0(CFIELD, DFIELD) do {	\
+		if (dsess->DFIELD)		\
+			ASSIGN(CFIELD, DFIELD);	\
 	} while (0)
 
-	ASSIGN(id);
-	ASSIGN_NON0(min_tx);
-	ASSIGN_NON0(min_rx);
-	ASSIGN_NON0(min_echo_tx);
-	ASSIGN_NON0(min_echo_rx);
-	ASSIGN_NON0(hold_time);
-	ASSIGN_NON0(ttl);
-	ASSIGN_NON0(detect_mult);
-	ASSIGN_NON0(ifindex);
+	ASSIGN(id, id);
+	ASSIGN_NON0(hold_time, hold_time);
+	ASSIGN_NON0(ttl, ttl);
+	ASSIGN_NON0(ifindex, ifindex);
+
+	ASSIGN_NON0(min_tx_us, local.min_tx_us);
+	ASSIGN_NON0(min_rx_us, local.min_rx_us);
+	ASSIGN_NON0(min_echo_rx, local.min_echo_rx);
+	ASSIGN_NON0(detect_mult, local.detect_mult);
 
 #undef ASSIGN_NON0
 #undef ASSIGN
-
-	*state = dsess->state;
 }
 
 static const char *bbdd_d_strtab_val_to_str(int value, const char **tab,
@@ -636,8 +629,20 @@ static int bbdd_d_jrpc_session_state_attach_diag(struct json_object *obj,
 	return bbdd_jrpc_append_str(obj, "diag", str);
 }
 
+static int
+bbdd_d_jrpc_session_attach_state_end(struct json_object *entry_obj,
+				     const struct bbdd_d_session_state_end *state)
+{
+	if (bbdd_d_jrpc_session_state_attach_state(entry_obj,
+						   state->state) != 0 ||
+	    bbdd_d_jrpc_session_state_attach_diag(entry_obj,
+						  state->diag) != 0)
+		return -1;
+	return 0;
+}
+
 static struct json_object *
-bbdd_d_jrpc_session_state_end(struct bbdd_c_session_state_end *state)
+bbdd_d_jrpc_session_state_local(const struct bbdd_d_session_state_end *state)
 {
 	struct json_object *entry_obj;
 
@@ -651,8 +656,7 @@ bbdd_d_jrpc_session_state_end(struct bbdd_c_session_state_end *state)
 	if (entry_obj == NULL)
 		return NULL;
 
-	if (bbdd_d_jrpc_session_state_attach_state(entry_obj, state->state) ||
-	    bbdd_d_jrpc_session_state_attach_diag(entry_obj, state->diag))
+	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, state))
 		goto put_entry_obj;
 
 	return entry_obj;
@@ -663,7 +667,46 @@ put_entry_obj:
 }
 
 static struct json_object *
-bbdd_d_jrpc_session_state_obj(struct bbdd_c_session_state *state)
+bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
+{
+	struct json_object *entry_obj;
+
+	/* STATE_END ::= {
+	 *     "state": STRING,
+	 *     "diag": STRING,
+	 *     "detect_mult": INT,
+	 *     "min_tx_us": INT,
+	 *     "min_rx_us": INT,
+	 *     "min_echo_rx": INT,
+	 * }
+	 */
+
+	entry_obj = json_object_new_object();
+	if (entry_obj == NULL)
+		return NULL;
+
+	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, &remote->state))
+		goto put_entry_obj;
+
+	if (bbdd_jrpc_append_int(entry_obj, "detect_mult",
+				 remote->detect_mult) != 0 ||
+	    bbdd_jrpc_append_int(entry_obj, "min_tx_us",
+				 remote->min_tx_us) != 0 ||
+	    bbdd_jrpc_append_int(entry_obj, "min_rx_us",
+				 remote->min_rx_us) != 0 ||
+	    bbdd_jrpc_append_int(entry_obj, "min_echo_rx",
+				 remote->min_echo_rx) != 0)
+		goto put_entry_obj;
+
+	return entry_obj;
+
+put_entry_obj:
+	json_object_put(entry_obj);
+	return NULL;
+}
+
+static struct json_object *
+bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess)
 {
 	struct json_object *entry_obj;
 	struct json_object *local_obj;
@@ -679,11 +722,11 @@ bbdd_d_jrpc_session_state_obj(struct bbdd_c_session_state *state)
 	if (entry_obj == NULL)
 		return NULL;
 
-	local_obj = bbdd_d_jrpc_session_state_end(&state->local);
+	local_obj = bbdd_d_jrpc_session_state_local(&dsess->local.state);
 	if (local_obj == NULL)
 		goto put_entry_obj;
 
-	remote_obj = bbdd_d_jrpc_session_state_end(&state->remote);
+	remote_obj = bbdd_d_jrpc_session_state_remote(&dsess->remote);
 	if (remote_obj == NULL)
 		goto put_local_obj;
 
@@ -762,7 +805,6 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	for (size_t i = 0; i < nids; i++) {
 		struct bbdd_d_session *dsess;
 		struct bbdd_c_session sess;
-		struct bbdd_c_session_state state;
 
 		dsess = bbdd_sess_dir_get_session(sdir, ids[i]);
 		if (dsess == NULL)
@@ -770,13 +812,13 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 		dumped = true;
 
-		bbdd_d_session_to_c(dsess, &sess, &state);
+		bbdd_d_session_to_c(dsess, &sess);
 
 		entry_obj = json_object_new_object();
 		if (entry_obj == NULL)
 			goto put_array;
 
-		state_obj = bbdd_d_jrpc_session_state_obj(&state);
+		state_obj = bbdd_d_jrpc_session_state_obj(dsess);
 		if (state_obj == NULL)
 			goto put_entry_obj;
 
@@ -868,27 +910,41 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	else
 		dsess->dst.sin46.port = htons(BFD_SINGLE_HOP_PORT);
 
-#define ASSIGN(FIELD) do {						\
-		if (csess->FIELD ## _seen)				\
-			dsess->FIELD = csess->FIELD;			\
+#define ASSIGN(DFIELD, CFIELD) do {					\
+		if (csess->CFIELD ## _seen)				\
+			dsess->DFIELD = csess->CFIELD;			\
 	} while (0)
 
-	ASSIGN(id);
-	ASSIGN(min_tx);
-	ASSIGN(min_rx);
-	ASSIGN(min_echo_tx);
-	ASSIGN(min_echo_rx);
-	ASSIGN(hold_time);
-	ASSIGN(ttl);
-	ASSIGN(detect_mult);
+	ASSIGN(id, id);
+	ASSIGN(local.detect_mult, detect_mult);
+	ASSIGN(local.min_tx_us, min_tx_us);
+	ASSIGN(local.min_rx_us, min_rx_us);
+	ASSIGN(local.min_echo_rx, min_echo_rx);
+	ASSIGN(hold_time, hold_time);
+	ASSIGN(ttl, ttl);
 
 	/* Interface is given as ifindex and ifname by the RPC, but at this
 	 * point, both have been validated to match each other, and ifindex has
 	 * been backfilled from ifname if not given. So we only need to care
 	 * about ifindex. */
-	ASSIGN(ifindex);
+	ASSIGN(ifindex, ifindex);
 
 #undef ASSIGN
+
+	if (dsess->flags.shutdown) {
+		dsess->local.state.state = STATE_ADMINDOWN;
+		dsess->local.state.diag = DIAG_ADMIN_DOWN;
+	} else {
+		// xxx Need to implement state machine for proper management of
+		// these states.
+		dsess->local.state.state = STATE_INIT;
+		dsess->local.state.diag = DIAG_NOTHING;
+	}
+
+	// xxx for now, apply for remote endpoint the same configuration as the
+	// local one so that we can test packet timing before Rx is in place.
+	fprintf(stderr, "xxx warning: overriding session remote configuration\n");
+	dsess->remote = dsess->local;
 
 	dsess->gen_id++;
 	return 0;
@@ -952,20 +1008,19 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	 * human-readable netdevice name across JRPC. Instead just match
 	 * on ifindex, which should be primed from ifname if necessary. */
 
-#define FIELD(NAME) do {						\
-		if (query->NAME ## _seen && query->NAME != dsess->NAME)	\
+#define FIELD(DNAME, CNAME) do {					\
+		if (query->CNAME ## _seen && query->CNAME != dsess->DNAME) \
 			return 0;					\
 	} while (0)
 
-	FIELD(id);
-	FIELD(min_tx);
-	FIELD(min_rx);
-	FIELD(min_echo_tx);
-	FIELD(min_echo_rx);
-	FIELD(hold_time);
-	FIELD(ttl);
-	FIELD(detect_mult);
-	FIELD(ifindex);
+	FIELD(id, id);
+	FIELD(local.min_tx_us, min_tx_us);
+	FIELD(local.min_rx_us, min_rx_us);
+	FIELD(local.min_echo_rx, min_echo_rx);
+	FIELD(hold_time, hold_time);
+	FIELD(ttl, ttl);
+	FIELD(local.detect_mult, detect_mult);
+	FIELD(ifindex, ifindex);
 #undef FIELD
 
 	return 1;
@@ -1158,15 +1213,16 @@ static uint16_t bbdd_d_udp6_cksum(const struct ip6_hdr *ip6,
 static int bbdd_d_session_inject_pkt(const struct bbdd_d_session *dsess,
 				     uint32_t tx_ifindex, char **error)
 {
+	enum { v1 = 1 };
 	struct bfddp_control_packet bfd = {
-		.version_diag = 1 << 5,
-		.state_bits = STATE_DOWN << 6,
-		.detection_multiplier = dsess->detect_mult,
+		.version_diag = (v1 << 5) | (uint8_t) dsess->local.state.diag,
+		.state_bits = (uint8_t) dsess->local.state.state << 6,
+		.detection_multiplier = dsess->local.detect_mult,
 		.length = sizeof(bfd),
 		.local_id = htonl(dsess->id),
-		.remote_id = 0,
-		.desired_tx = dsess->min_tx,
-		.required_rx = dsess->min_rx,
+		.remote_id = htonl(0x45e2784b), // xxx
+		.desired_tx = htonl(dsess->local.min_tx_us),
+		.required_rx = htonl(dsess->local.min_rx_us),
 		.required_echo_rx = 0,
 	};
 	union {
@@ -1270,13 +1326,11 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	uint32_t fwd_ifindex;
 	int rc;
 
-	// xxx: Note that the send interval needs to be deduced from the
-	// remote end values. For now, use local values.
-	min_interval_us = dsess->min_tx * 75 / 100;
-	if (dsess->detect_mult == 1)
-		max_interval_us = dsess->min_tx * 90 / 100;
+	min_interval_us = dsess->remote.min_tx_us * 75 / 100;
+	if (dsess->local.detect_mult == 1)
+		max_interval_us = dsess->remote.min_tx_us * 90 / 100;
 	else
-		max_interval_us = dsess->min_tx;
+		max_interval_us = dsess->remote.min_tx_us;
 
 	rc = bbdd_d_session_set_mark(dsess, error);
 	if (rc != 0)
