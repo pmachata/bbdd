@@ -48,26 +48,41 @@ static bool bbdd_tx_validate_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 	return true;
 }
 
-static bool bbdd_tx_update_ipv4(struct bpf_dynptr *p,
+static bool bbdd_tx_update_ipv4(struct __sk_buff *skb, struct bpf_dynptr *p,
 				struct bpf_fib_lookup *params)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
-	u32 off = sizeof(struct ethhdr);
+	u32 ip_off = sizeof(struct ethhdr);
 	struct iphdr *iph;
+	__be32 old_saddr;
 	int ret;
 
-	iph = bpf_dynptr_slice_rdwr(p, off, iph_buf, sizeof(iph_buf));
+	iph = bpf_dynptr_slice_rdwr(p, ip_off, iph_buf, sizeof(iph_buf));
 	if (!iph)
 		return false;
 
+	old_saddr = iph->saddr;
 	iph->saddr = params->ipv4_src;
 	if (iph == (void *) iph_buf) {
-		ret = bpf_dynptr_write(p, off, iph_buf, sizeof(iph_buf), 0);
+		ret = bpf_dynptr_write(p, ip_off, iph_buf, sizeof(iph_buf), 0);
 		if (ret)
 			return false;
 	}
 
-	return true;
+	ret = bpf_l3_csum_replace(skb, ip_off + offsetof(struct iphdr, check),
+				  old_saddr, params->ipv4_src, sizeof(__be32));
+	if (ret)
+		return false;
+
+	/* BPF_F_MARK_MANGLED_0 skips the update when the checksum field is 0,
+	 * which is the IPv4 UDP "checksum disabled" convention. */
+	ret = bpf_l4_csum_replace(skb,
+				  ip_off + sizeof(struct iphdr) +
+				  offsetof(struct udphdr, check),
+				  old_saddr, params->ipv4_src,
+				  BPF_F_MARK_MANGLED_0 | BPF_F_PSEUDO_HDR |
+				  sizeof(__be32));
+	return !ret;
 }
 
 static bool bbdd_tx_validate_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
@@ -86,24 +101,45 @@ static bool bbdd_tx_validate_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 	return true;
 }
 
-static bool bbdd_tx_update_ipv6(struct bpf_dynptr *p,
+static bool bbdd_tx_update_ipv6(struct __sk_buff *skb, struct bpf_dynptr *p,
 				struct bpf_fib_lookup *params)
 {
 	u8 ip6h_buf[sizeof(struct ipv6hdr)];
-	u32 off = sizeof(struct ethhdr);
+	u32 ip6_off = sizeof(struct ethhdr);
+	u32 udp_csum_off = ip6_off + sizeof(struct ipv6hdr) +
+			   offsetof(struct udphdr, check);
 	struct ipv6hdr *ip6h;
+	__be32 old_src[4];
 	int ret;
 
-	ip6h = bpf_dynptr_slice_rdwr(p, off, ip6h_buf, sizeof(ip6h_buf));
+	ip6h = bpf_dynptr_slice_rdwr(p, ip6_off, ip6h_buf, sizeof(ip6h_buf));
 	if (!ip6h)
 		return false;
+
+	__builtin_memcpy(old_src, ip6h->saddr.in6_u.u6_addr32, sizeof(old_src));
 	__builtin_memcpy(ip6h->saddr.in6_u.u6_addr32, params->ipv6_src,
-			    sizeof(params->ipv6_src));
+			 sizeof(params->ipv6_src));
 	if (ip6h == (void *) ip6h_buf) {
-		ret = bpf_dynptr_write(p, off, ip6h_buf, sizeof(ip6h_buf), 0);
+		ret = bpf_dynptr_write(p, ip6_off, ip6h_buf, sizeof(ip6h_buf), 0);
 		if (ret)
 			return false;
 	}
+
+	/* IPv6 has no IP header checksum. Update the UDP checksum
+	 * incrementally for each 4-byte word of the changed source address. */
+	if (bpf_l4_csum_replace(skb, udp_csum_off,
+				old_src[0], params->ipv6_src[0],
+				BPF_F_PSEUDO_HDR | sizeof(__be32)) ||
+	    bpf_l4_csum_replace(skb, udp_csum_off,
+				old_src[1], params->ipv6_src[1],
+				BPF_F_PSEUDO_HDR | sizeof(__be32)) ||
+	    bpf_l4_csum_replace(skb, udp_csum_off,
+				old_src[2], params->ipv6_src[2],
+				BPF_F_PSEUDO_HDR | sizeof(__be32)) ||
+	    bpf_l4_csum_replace(skb, udp_csum_off,
+				old_src[3], params->ipv6_src[3],
+				BPF_F_PSEUDO_HDR | sizeof(__be32)))
+		return false;
 
 	return true;
 }
@@ -244,12 +280,12 @@ int bbdd_tx(struct __sk_buff *skb)
 	}
 
 	if (proto == bpf_htons(ETH_P_IP)) {
-		if (!bbdd_tx_update_ipv4(&p, &params)) {
+		if (!bbdd_tx_update_ipv4(skb, &p, &params)) {
 			BUMP(data->stats.fail_update);
 			goto out;
 		}
 	} else {
-		if (!bbdd_tx_update_ipv6(&p, &params)) {
+		if (!bbdd_tx_update_ipv6(skb, &p, &params)) {
 			BUMP(data->stats.fail_update);
 			goto out;
 		}
