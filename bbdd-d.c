@@ -272,7 +272,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	enum {
 		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POL_IX)
 
-		pol_id,
+		pol_descr,
 
 		pol_src,
 		pol_dst,
@@ -291,7 +291,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	struct bbdd_jrpc_policy policy[] = {
 		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
 
-		[pol_id] =  { .key = "id", .type = json_type_int },
+		[pol_descr] = { .key = "descr", .type = json_type_int },
 
 		[pol_src] = { .key = "src", .type = json_type_string },
 		[pol_dst] = { .key = "dst", .type = json_type_string },
@@ -373,7 +373,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
 #define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
 
-	DISSECT_U32_NON0(id);
+	DISSECT_U32_NON0(descr);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
 	DISSECT_U32(min_echo_rx);
@@ -516,7 +516,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 			ASSIGN(CFIELD, DFIELD);	\
 	} while (0)
 
-	ASSIGN(id, id);
+	ASSIGN(descr, local.descr);
 	ASSIGN_NON0(hold_time, hold_time);
 	ASSIGN_NON0(ttl, ttl);
 	ASSIGN_NON0(ifindex, ifindex);
@@ -688,7 +688,9 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, &remote->state))
 		goto put_entry_obj;
 
-	if (bbdd_jrpc_append_int(entry_obj, "detect_mult",
+	if (bbdd_jrpc_append_int(entry_obj, "descr",
+				 remote->descr) != 0 ||
+	    bbdd_jrpc_append_int(entry_obj, "detect_mult",
 				 remote->detect_mult) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_tx_us",
 				 remote->min_tx_us) != 0 ||
@@ -754,8 +756,8 @@ put_entry_obj:
 static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
-					  uint32_t *ids,
-					  size_t nids)
+					  uint32_t *descrs,
+					  size_t ndescrs)
 {
 	struct json_object *obj;
 	struct json_object *result_obj;
@@ -802,11 +804,11 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 		goto put_result_obj;
 
 	dumped = false;
-	for (size_t i = 0; i < nids; i++) {
+	for (size_t i = 0; i < ndescrs; i++) {
 		struct bbdd_d_session *dsess;
 		struct bbdd_c_session sess;
 
-		dsess = bbdd_sess_dir_get_session(sdir, ids[i]);
+		dsess = bbdd_sess_dir_get_session(sdir, descrs[i]);
 		if (dsess == NULL)
 			continue;
 
@@ -841,7 +843,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 		entry_obj = NULL;
 	}
 
-	if (nids > 0 && !dumped) {
+	if (ndescrs > 0 && !dumped) {
 		/* Not sure this can actually happen. */
 		__bbdd_d_respond_invalid_params(peer, id,
 						"All matching sessions went away mid request");
@@ -915,7 +917,7 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			dsess->DFIELD = csess->CFIELD;			\
 	} while (0)
 
-	ASSIGN(id, id);
+	ASSIGN(local.descr, descr);
 	ASSIGN(local.detect_mult, detect_mult);
 	ASSIGN(local.min_tx_us, min_tx_us);
 	ASSIGN(local.min_rx_us, min_rx_us);
@@ -945,6 +947,8 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	// local one so that we can test packet timing before Rx is in place.
 	fprintf(stderr, "xxx warning: overriding session remote configuration\n");
 	dsess->remote = dsess->local;
+
+	dsess->remote.descr = 0x45e2784b; // xxx for testing
 
 	dsess->gen_id++;
 	return 0;
@@ -1013,7 +1017,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 			return 0;					\
 	} while (0)
 
-	FIELD(id, id);
+	FIELD(local.descr, descr);
 	FIELD(local.min_tx_us, min_tx_us);
 	FIELD(local.min_rx_us, min_rx_us);
 	FIELD(local.min_echo_rx, min_echo_rx);
@@ -1028,12 +1032,12 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 
 static int bbdd_d_select_sessions(struct bbdd_sess_dir *sdir,
 				  const struct bbdd_c_session *query,
-				  uint32_t **p_ids,
-				  size_t *p_nids,
+				  uint32_t **p_descrs,
+				  size_t *p_ndescrs,
 				  char **error)
 {
-	uint32_t *ids = NULL;
-	size_t nids = 0;
+	uint32_t *descrs = NULL;
+	size_t ndescrs = 0;
 	size_t cap = 0;
 	int rc;
 
@@ -1045,25 +1049,25 @@ static int bbdd_d_select_sessions(struct bbdd_sess_dir *sdir,
 		if (rc == 0)
 			continue;
 
-		if (nids >= cap) {
-			uint32_t *new_ids;
+		if (ndescrs >= cap) {
+			uint32_t *new_descrs;
 
 			cap = (cap == 0) ? 8 : cap * 2;
-			new_ids = realloc(ids, cap * sizeof(*ids));
-			if (new_ids == NULL)
+			new_descrs = realloc(descrs, cap * sizeof(*descrs));
+			if (new_descrs == NULL)
 				goto oom;
-			ids = new_ids;
+			descrs = new_descrs;
 		}
-		ids[nids++] = dsess->id;
+		descrs[ndescrs++] = dsess->local.descr;
 	}
-	*p_ids = ids;
-	*p_nids = nids;
+	*p_descrs = descrs;
+	*p_ndescrs = ndescrs;
 	return 0;
 
 oom:
 	errno = -ENOMEM;
 	bbdd_util_fmterr(error, "%m");
-	free(ids);
+	free(descrs);
 	return -1;
 }
 
@@ -1219,8 +1223,8 @@ static int bbdd_d_session_inject_pkt(const struct bbdd_d_session *dsess,
 		.state_bits = (uint8_t) dsess->local.state.state << 6,
 		.detection_multiplier = dsess->local.detect_mult,
 		.length = sizeof(bfd),
-		.local_id = htonl(dsess->id),
-		.remote_id = htonl(0x45e2784b), // xxx
+		.local_id = htonl(dsess->local.descr),
+		.remote_id = htonl(dsess->remote.descr),
 		.desired_tx = htonl(dsess->local.min_tx_us),
 		.required_rx = htonl(dsess->local.min_rx_us),
 		.required_echo_rx = 0,
@@ -1338,8 +1342,9 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 
 	fwd_ifindex = dsess->ifindex ?: veth_tx_ifindex;
 
-#define ARGS	bpf, dsess->id, fwd_ifindex, &dsess->src, &dsess->dst,	\
-		tbid, flags, min_interval_us, max_interval_us, dsess->gen_id, \
+#define ARGS	bpf, dsess->local.descr, fwd_ifindex,			\
+		&dsess->src, &dsess->dst, tbid, flags,			\
+		min_interval_us, max_interval_us, dsess->gen_id,	\
 		error
 
 	if (add)
@@ -1364,7 +1369,7 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	 * thing that we clean up is the session add. */
 del_session:
 	if (add)
-		bbdd_bpf_session_delete(bpf, dsess->id, NULL);
+		bbdd_bpf_session_delete(bpf, dsess->local.descr, NULL);
 	return rc;
 }
 
@@ -1406,11 +1411,11 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
-	/* Note: id is validated to be non-zero in dissection. */
-	if (!csess.id_seen) {
-		csess.id = bfd_session_gen_discriminator();
-		csess.id_seen = true;
-	} else if (bbdd_sess_dir_has_session(sdir, csess.id)) {
+	/* Note: descr is validated to be non-zero in dissection. */
+	if (!csess.descr_seen) {
+		csess.descr = bfd_session_gen_discriminator();
+		csess.descr_seen = true;
+	} else if (bbdd_sess_dir_has_session(sdir, csess.descr)) {
 		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
 	}
 
@@ -1420,7 +1425,7 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 		goto out;
 	}
 
-	dsess = bbdd_sess_dir_add_session(sdir, csess.id);
+	dsess = bbdd_sess_dir_add_session(sdir, csess.descr);
 	if (dsess == NULL) {
 		bbdd_util_fmterr(&error, "%m");
 		goto put_port;
@@ -1462,8 +1467,8 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 					bool *bulk,
 					struct bbdd_nl *nl,
 					struct bbdd_sess_dir *sdir,
-					uint32_t **ids,
-					size_t *nids)
+					uint32_t **descrs,
+					size_t *ndescrs)
 {
 	char *error;
 	int rc;
@@ -1475,7 +1480,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 		return -1;
 	}
 
-	rc = bbdd_d_select_sessions(sdir, select, ids, nids, &error);
+	rc = bbdd_d_select_sessions(sdir, select, descrs, ndescrs, &error);
 	if (rc) {
 		bbdd_d_respond_interr(peer, id, &error);
 		return -1;
@@ -1487,14 +1492,14 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 					    struct json_object *id,
 					    bool bulk,
-					    size_t nids)
+					    size_t ndescrs)
 {
-	if (nids == 0) {
+	if (ndescrs == 0) {
 		__bbdd_d_respond_invalid_params(peer, id,
 						"The set request matches no session");
 		return -1;
 	}
-	if (nids > 1 && !bulk) {
+	if (ndescrs > 1 && !bulk) {
 		__bbdd_d_respond_invalid_params(peer, id,
 						"Non-bulk set request matches more than one session");
 		return -1;
@@ -1514,8 +1519,8 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 	struct bbdd_c_session change;
 	bool bulk;
 	bool set = false;
-	uint32_t *ids;
-	size_t nids;
+	uint32_t *descrs;
+	size_t ndescrs;
 	char *error;
 	int af = 0;
 	int rc;
@@ -1523,51 +1528,51 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &select, &change, &bulk,
 					  nl, sdir,
-					  &ids, &nids);
+					  &descrs, &ndescrs);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, nids);
+	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, ndescrs);
 	if (rc < 0)
-		goto free_ids;
+		goto free_descrs;
 
 	if (change.src_af != 0)
 		af = change.src_af;
 	else if (change.dst_af != 0)
 		af = change.dst_af;
 
-	for (size_t i = 0; i < nids; i++) {
+	for (size_t i = 0; i < ndescrs; i++) {
 		struct bbdd_d_session *dsess;
 
-		dsess = bbdd_sess_dir_get_session(sdir, ids[i]);
+		dsess = bbdd_sess_dir_get_session(sdir, descrs[i]);
 		if (dsess == NULL)
 			continue;
 
 		if (af != 0 && af != dsess->dst.sin46.family) {
 			bbdd_util_fmterr(&error, "Session protocol change requested for id %d",
-					 dsess->id);
+					 dsess->local.descr);
 			bbdd_d_respond_invalid_params(peer, id, &error);
-			goto free_ids;
+			goto free_descrs;
 		}
 
-		if (change.id_seen && change.id != dsess->id) {
-			bbdd_util_fmterr(&error, "Cannot change session ID from %d to %d",
-					 dsess->id, change.id);
+		if (change.descr_seen && change.descr != dsess->local.descr) {
+			bbdd_util_fmterr(&error, "Cannot change session descriptor from %d to %d",
+					 dsess->local.descr, change.descr);
 			bbdd_d_respond_invalid_params(peer, id, &error);
-			goto free_ids;
+			goto free_descrs;
 		}
 
 		rc = bbdd_d_session_apply_c(dsess, &change, &error);
 		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
-			goto free_ids;
+			goto free_descrs;
 		}
 
 		rc = bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
 						      &error);
 		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
-			goto free_ids;
+			goto free_descrs;
 		}
 
 		set = true;
@@ -1577,26 +1582,26 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 		/* Not sure this can actually happen. */
 		__bbdd_d_respond_invalid_params(peer, id,
 						"All matching sessions went away mid request");
-		goto free_ids;
+		goto free_descrs;
 	}
 
 	bbdd_d_respond_empty(peer, id);
 
-free_ids:
-	free(ids);
+free_descrs:
+	free(descrs);
 }
 
 static int bbdd_d_handle_session_del_one_sess(struct bbdd_sess_dir *sdir,
 					      struct bbdd_d_sport_alloc *spa,
-					      uint32_t sess_id,
+					      uint32_t descr,
 					      char **error)
 {
 	struct bbdd_d_session *dsess;
 	uint16_t sport;
 
-	dsess = bbdd_sess_dir_get_session(sdir, sess_id);
+	dsess = bbdd_sess_dir_get_session(sdir, descr);
 	if (dsess == NULL) {
-		bbdd_util_fmterr(error, "Failed to look up session %u", sess_id);
+		bbdd_util_fmterr(error, "Failed to look up session %u", descr);
 		return -1;
 	}
 
@@ -1612,7 +1617,7 @@ static int bbdd_d_handle_session_del_one_sess(struct bbdd_sess_dir *sdir,
 static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 					 struct bbdd_bpf *bpf,
 					 struct bbdd_d_sport_alloc *spa,
-					 uint32_t sess_id,
+					 uint32_t descr,
 					 char **error)
 {
 	char *error1 = NULL;
@@ -1620,8 +1625,8 @@ static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 	int rc1, rc2;
 
 	/* Clean up as much as possible, even when one step fails. */
-	rc1 = bbdd_d_handle_session_del_one_sess(sdir, spa, sess_id, &error1);
-	rc2 = bbdd_bpf_session_delete(bpf, sess_id, &error2);
+	rc1 = bbdd_d_handle_session_del_one_sess(sdir, spa, descr, &error1);
+	rc2 = bbdd_bpf_session_delete(bpf, descr, &error2);
 
 	if (rc1 < 0 || rc2 < 0) {
 		if (error1 != NULL) {
@@ -1640,8 +1645,8 @@ static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
 						struct json_object *id,
 						struct bbdd_bpf *bpf,
-						uint32_t *ids,
-						size_t nids)
+						uint32_t *descrs,
+						size_t ndescrs)
 {
 	struct json_object *obj;
 	struct json_object *array;
@@ -1663,7 +1668,7 @@ static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
 	 * Where individual SESS objects are formatted as follows:
 	 *
 	 * SESS ::= {
-	 *     "id": INT,
+	 *     "descr": INT,
 	 *     "stats": STATS,
 	 * }
 	 */
@@ -1680,10 +1685,10 @@ static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
 	if (array == NULL)
 		goto put_result_obj;
 
-	for (size_t i = 0; i < nids; i++) {
-		uint32_t sess_id = ids[i];
+	for (size_t i = 0; i < ndescrs; i++) {
+		uint32_t descr = descrs[i];
 
-		stats_obj = bbdd_bpf_session_diag_stats_json(bpf, sess_id,
+		stats_obj = bbdd_bpf_session_diag_stats_json(bpf, descr,
 							     &error);
 		if (stats_obj == NULL)
 			goto put_array;
@@ -1692,8 +1697,8 @@ static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
 		if (entry_obj == NULL)
 			goto put_stats_obj;
 
-		rc = json_object_object_add(entry_obj, "id",
-					    json_object_new_uint64(sess_id));
+		rc = json_object_object_add(entry_obj, "descr",
+					    json_object_new_uint64(descr));
 		if (rc != 0)
 			goto put_entry_obj;
 
@@ -1743,18 +1748,18 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
 					     struct bbdd_bpf *bpf)
 {
 	struct bbdd_c_session sess;
-	uint32_t *ids;
-	size_t nids;
+	uint32_t *descrs;
+	size_t ndescrs;
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &sess, NULL, NULL, nl, sdir,
-					  &ids, &nids);
+					  &descrs, &ndescrs);
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_diag_do(peer, id, bpf, ids, nids);
-	free(ids);
+	bbdd_d_handle_session_stats_diag_do(peer, id, bpf, descrs, ndescrs);
+	free(descrs);
 }
 
 static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
@@ -1766,26 +1771,28 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 				      struct bbdd_d_sport_alloc *spa)
 {
 	struct bbdd_c_session sess;
-	uint32_t *ids;
-	size_t nids;
+	uint32_t *descrs;
+	size_t ndescrs;
 	bool bulk;
 	int rc;
 	char *last_error = NULL;
 	size_t num_errors = 0;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &bulk, nl, sdir, &ids, &nids);
+					  &sess, NULL, &bulk, nl, sdir,
+					  &descrs, &ndescrs);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, nids);
+	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, ndescrs);
 	if (rc < 0)
-		goto free_ids;
+		goto free_descrs;
 
-	for (size_t i = 0; i < nids; i++) {
+	for (size_t i = 0; i < ndescrs; i++) {
 		char *error;
 
-		rc = bbdd_d_handle_session_del_one(sdir, bpf, spa, ids[i], &error);
+		rc = bbdd_d_handle_session_del_one(sdir, bpf, spa, descrs[i],
+						   &error);
 		if (rc < 0) {
 			if (error != NULL) {
 				free(last_error);
@@ -1798,16 +1805,16 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 	if (num_errors) {
 		bbdd_d_respond_interr_fmt(peer, id,
 					  "%zu/%zu sessions failed to delete. Last recorded error: `%s'",
-					  num_errors, nids,
+					  num_errors, ndescrs,
 					  last_error ?: "(unknown error)");
 		free(last_error);
-		goto free_ids;
+		goto free_descrs;
 	}
 
 	bbdd_d_respond_empty(peer, id);
 
-free_ids:
-	free(ids);
+free_descrs:
+	free(descrs);
 }
 
 static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
@@ -1817,17 +1824,17 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 				       struct bbdd_sess_dir *sdir)
 {
 	struct bbdd_c_session sess;
-	uint32_t *ids;
-	size_t nids;
+	uint32_t *descrs;
+	size_t ndescrs;
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &sess, NULL, NULL, nl, sdir,
-					  &ids, &nids);
+					  &descrs, &ndescrs);
 	if (rc < 0)
 		return;
 
-	return bbdd_d_handle_session_show_do(peer, id, sdir, ids, nids);
+	return bbdd_d_handle_session_show_do(peer, id, sdir, descrs, ndescrs);
 }
 
 static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,

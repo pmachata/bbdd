@@ -88,7 +88,7 @@ struct bbdd_c_session {
 	struct bbdd_c_session_flags flags;
 	char src[INET6_ADDRSTRLEN];	int src_af;
 	char dst[INET6_ADDRSTRLEN];	int dst_af;
-	uint32_t id;			int id_seen;
+	uint32_t descr;			int descr_seen;
 	uint32_t min_tx_us;		int min_tx_us_seen;
 	uint32_t min_rx_us;		int min_rx_us_seen;
 	uint32_t min_echo_rx;		int min_echo_rx_seen;
@@ -122,6 +122,7 @@ struct bbdd_d_session_state_end {
 };
 
 struct bbdd_d_session_data {
+	uint32_t descr;
 	uint8_t detect_mult;
 	uint32_t min_tx_us;
 	uint32_t min_rx_us;
@@ -139,8 +140,6 @@ struct bbdd_c_session_state {
 
 struct bbdd_d_session {
 	/* Local session configuration. */
-	uint32_t id;
-
 	struct bbdd_d_session_flags flags;
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
