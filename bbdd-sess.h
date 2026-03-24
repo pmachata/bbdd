@@ -11,8 +11,9 @@ struct bbdd_sess_dir;
 struct bbdd_sess_dir *bbdd_sess_dir_create(void);
 void bbdd_sess_dir_destroy(struct bbdd_sess_dir *sdir);
 
-struct bbdd_d_session *
-bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir, uint32_t descr);
+uint32_t bbdd_sess_get_unique_descr(struct bbdd_sess_dir *sdir);
+struct bbdd_d_session *bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir,
+						 uint32_t descr);
 
 void bbdd_sess_dir_del_session(struct bbdd_sess_dir *sdir,
 			       struct bbdd_d_session *sess);

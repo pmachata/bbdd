@@ -27,6 +27,7 @@
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
+#include "bbdd-poll.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
@@ -143,7 +144,8 @@ put_obj:
 	bbdd_d_respond_memerr(peer, id);
 }
 
-static void bbdd_d_handle_stop(struct bbdd_sock *peer,
+static void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
+			       struct bbdd_sock *peer,
 			       struct json_object *params_obj,
 			       struct json_object *id)
 {
@@ -154,7 +156,7 @@ static void bbdd_d_handle_stop(struct bbdd_sock *peer,
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
-	bfdd_request_terminate();
+	bbdd_poll_request_quit(pctx);
 	bbdd_d_respond_empty(peer, id);
 }
 
@@ -1422,7 +1424,7 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 
 	/* Note: descr is validated to be non-zero in dissection. */
 	if (!csess.descr_seen) {
-		csess.descr = bfd_session_gen_discriminator();
+		csess.descr = bbdd_sess_get_unique_descr(sdir);
 		csess.descr_seen = true;
 	} else if (bbdd_sess_dir_has_session(sdir, csess.descr)) {
 		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
@@ -1846,7 +1848,8 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 	return bbdd_d_handle_session_show_do(peer, id, sdir, descrs, ndescrs);
 }
 
-static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
+static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
+				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
 				 struct bbdd_d_sport_alloc *spa,
 				 uint32_t veth_tx_ifindex,
@@ -1857,7 +1860,7 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 				 struct bbdd_nl *nl)
 {
 	if (strcmp(method, "stop") == 0)
-		bbdd_d_handle_stop(peer, params_obj, id);
+		bbdd_d_handle_stop(pctx, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "global-stats-diag") == 0)
@@ -1880,7 +1883,8 @@ static void bbdd_d_handle_method(struct bbdd_sess_dir *sdir,
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
+static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
+				struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
 				uint32_t veth_tx_ifindex,
@@ -1916,7 +1920,7 @@ static void bbdd_d_ctl_activity(struct bbdd_sess_dir *sdir,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(sdir, bpf, spa, veth_tx_ifindex,
+	bbdd_d_handle_method(pctx, sdir, bpf, spa, veth_tx_ifindex,
 			     &peer, method, params, id, nl);
 
 put_req_obj:
@@ -1934,19 +1938,13 @@ struct bbdd_context {
 	uint32_t veth_tx_ifindex;
 };
 
-static void bbdd_d_ctl_recv(struct events_ctx *ec,
-			    __attribute__((unused)) int sock,
-			    short revents, void *arg)
+static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, void *arg, char **)
 {
 	struct bbdd_context *bbdd = arg;
 
-	if (revents & (POLLERR | POLLHUP | POLLNVAL))
-		bfddp_errx(1, "poll returned bad value");
-
-	bbdd_d_ctl_activity(bbdd->sdir, bbdd->bpf, &bbdd->spa,
+	bbdd_d_ctl_activity(pctx, bbdd->sdir, bbdd->bpf, &bbdd->spa,
 			    bbdd->veth_tx_ifindex, &bbdd->ctl, bbdd->nl);
-
-	events_ctx_add_fd(ec, sock, POLLIN, bbdd_d_ctl_recv, arg);
+	return 0;
 }
 
 static int bbdd_d_raise_nofile(void)
@@ -2252,30 +2250,25 @@ close:
 	return -1;
 }
 
-static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
+static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
-	struct bfddp_ctx *bctx;
-	struct events_ctx *ec;
+	struct bbdd_poll_ctx *pctx;
 	struct bbdd_sock rx_socks[bbdd_d_rx_nsockets];
 	char *error;
 	int err;
+
+	// xxx need to handle dplane_sa
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
 	if (bbdd_d_raise_nofile() < 0)
 		goto closelog;
 
-	bctx = bfddp_new(0, 0);
-	if (bctx == NULL) {
-		fprintf(stderr, "Failed to create BFDdp context: %m\n");
-		goto closelog;
-	}
-
 	bbdd.nl = bbdd_nl_create();
 	if (bbdd.nl == NULL) {
 		fprintf(stderr, "Failed to open netlink socket: %m\n");
-		goto bfddp_free;
+		goto closelog;
 	}
 
 	bbdd.bpf = bbdd_bpf_create(&error);
@@ -2301,30 +2294,33 @@ static int bbdd_d_do_start(struct bbdd_sockaddr *dplane_sa)
 
 	err = bbdd_d_rx_sockets_open(rx_socks, &error);
 	if (err) {
-		fprintf(stderr, "Failed to open BFD RX sockets: %s\n",
-			error);
-		free(error);
+		bbdd_util_printerr(err, &error, "Failed to open BFD RX sockets");
 		goto fini_veth;
 	}
 
-	ec = events_ctx_new(64);
-	if (ec == NULL) {
-		fprintf(stderr, "Failed to create event context: %m\n");
-		goto close_sockets;
-	}
+	pctx = bbdd_poll_init();
+	if (pctx == NULL)
+		goto rx_sockets_close;
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
-	if (err)
-		goto ctx_free;
+	if (err != 0)
+		goto poll_fini;
 
-	events_ctx_add_fd(ec, bbdd.ctl.fd, POLLIN, bbdd_d_ctl_recv, &bbdd);
+	err = bbdd_poll_push_fd(pctx, bbdd.ctl.fd, POLLIN,
+				bbdd_d_ctl_recv, &bbdd, &error);
+	if (err != 0) {
+		bbdd_util_printerr(err, &error, "Failed to register socket for events");
+		goto sock_close_d;
+	}
 
-	err = bfddp_start(bctx, ec, dplane_sa);
+	err = bbdd_poll_loop(pctx, &error);
+	bbdd_util_printerr(err, &error, NULL);
 
+sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
-ctx_free:
-	events_ctx_free(&ec);
-close_sockets:
+poll_fini:
+	bbdd_poll_fini(pctx);
+rx_sockets_close:
 	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
@@ -2334,8 +2330,6 @@ bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
-bfddp_free:
-	bfddp_free(bctx);
 closelog:
 	closelog();
 	return err;

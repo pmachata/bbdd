@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include "bbdd-poll.h"
+
+#include <errno.h>
+#include <poll.h>
+#include <stdlib.h>
+
+#include "bbdd-util.h"
+
+struct bbdd_poll_cb {
+	int (*fn)(struct bbdd_poll_ctx *, void *, char **);
+	void *data;
+};
+
+struct bbdd_poll_ctx {
+	struct pollfd *fds;
+	struct bbdd_poll_cb *cbs;
+	size_t num;
+	bool should_quit;
+};
+
+void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx)
+{
+	ctx->should_quit = true;
+}
+
+struct bbdd_poll_ctx *bbdd_poll_init(void)
+{
+	struct bbdd_poll_ctx *pctx;
+
+	pctx = malloc(sizeof(*pctx));
+	if (pctx == NULL)
+		return NULL;
+	*pctx = (struct bbdd_poll_ctx){};
+	return pctx;
+}
+
+void bbdd_poll_fini(struct bbdd_poll_ctx *pctx)
+{
+	free(pctx->fds);
+	free(pctx->cbs);
+	free(pctx);
+}
+
+int bbdd_poll_push_fd(struct bbdd_poll_ctx *pctx,
+		      int fd, short events,
+		      int (*fn)(struct bbdd_poll_ctx *, void *, char **),
+		      void *data, char **error)
+{
+	struct bbdd_poll_cb *new_cbs;
+	struct pollfd *new_fds;
+	struct pollfd pollfd = {
+		.fd = fd,
+		.events = events,
+	};
+	struct bbdd_poll_cb cb = {
+		.fn = fn,
+		.data = data,
+	};
+	size_t new_n = pctx->num + 1;
+
+	new_fds = realloc(pctx->fds, sizeof(*new_fds) * new_n);
+	if (new_fds == NULL)
+		goto error;
+
+	new_cbs = realloc(pctx->cbs, sizeof(*new_cbs) * new_n);
+	if (new_cbs == NULL)
+		goto new_fds;
+
+	pctx->fds = new_fds;
+	pctx->cbs = new_cbs;
+	pctx->fds[pctx->num] = pollfd;
+	pctx->cbs[pctx->num] = cb;
+	pctx->num++;
+	return 0;
+
+new_fds:
+	free(new_fds);
+error:
+	bbdd_util_fmterr(error, "%m");
+	return -1;
+}
+
+int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
+{
+	int err = 0;
+
+	while (!pctx->should_quit) {
+		int nfds;
+
+		nfds = poll(pctx->fds, pctx->num, -1);
+		if (nfds < 0 && errno != EINTR) {
+			bbdd_util_fmterr(error, "Failed to poll: %m");
+			err = nfds;
+			goto out;
+		}
+		if (nfds == 0)
+			continue;
+		for (size_t i = 0; i < pctx->num; i++) {
+			struct pollfd *pollfd = &pctx->fds[i];
+
+			if (pollfd->revents & (POLLERR | POLLHUP |
+					       POLLNVAL)) {
+				bbdd_util_fmterr(error, "Problem on pollfd #%zd: %m",
+						 i);
+				err = -1;
+				goto out;
+			}
+			if (pollfd->revents & pollfd->events) {
+				struct bbdd_poll_cb *cb = &pctx->cbs[i];
+
+				err = cb->fn(pctx, cb->data, error);
+				if (err)
+					goto out;
+			}
+		}
+	}
+
+out:
+	return err;
+}

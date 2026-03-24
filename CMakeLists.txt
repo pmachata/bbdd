@@ -15,6 +15,7 @@ add_executable(
   bbdd-d.c
   bbdd-jrpc.c
   bbdd-nl.c
+  bbdd-poll.c
   bbdd-sess.c
   bbdd-sock.c
   bbdd-util.c

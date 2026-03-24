@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <uthash.h>
+#include <sys/random.h>
 
 #include "bbdd.h"
 
@@ -41,6 +42,30 @@ void bbdd_sess_dir_destroy(struct bbdd_sess_dir *sdir)
 		free(entry);
 	}
 	free(sdir);
+}
+
+static uint32_t bbdd_sess_rand_u32(void)
+{
+	uint32_t buf;
+	ssize_t err;
+
+	do {
+		err = getrandom(&buf, sizeof(buf), 0);
+	} while (err != sizeof(buf));
+
+	return buf;
+}
+
+uint32_t bbdd_sess_get_unique_descr(struct bbdd_sess_dir *sdir)
+{
+	uint32_t descr;
+
+	do {
+		descr = bbdd_sess_rand_u32();
+	} while (descr != 0 &&
+		 bbdd_sess_dir_get_session(sdir, descr) != NULL);
+
+	return descr;
 }
 
 struct bbdd_d_session *
