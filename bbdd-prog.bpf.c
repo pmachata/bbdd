@@ -225,7 +225,8 @@ int bbdd_tx(struct __sk_buff *skb)
 	/* FIB lookup */
 	params = config->fib_lookup;
 	params.tot_len = tot_len;
-	ret = bpf_fib_lookup(skb, &params, sizeof(params), BPF_FIB_LOOKUP_SRC);
+	ret = bpf_fib_lookup(skb, &params, sizeof(params),
+			     config->bpf_fib_lookup_flags);
 	if (ret < 0) {
 		BUMP(data->stats.fail_lookup);
 		goto out;

@@ -17,6 +17,7 @@
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
 #include <netpacket/packet.h>
+#include <bpf/libbpf.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
 #include <json-c/json_util.h>
@@ -1326,7 +1327,7 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
-	uint32_t flags = 0;   // xxx
+	uint32_t flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
 	int rc;
 
@@ -1340,7 +1341,15 @@ __bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
-	fwd_ifindex = dsess->ifindex ?: veth_tx_ifindex;
+	if (tbid != 0)
+		flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
+
+	if (dsess->ifindex != 0) {
+		fwd_ifindex = dsess->ifindex;
+		flags |= BPF_FIB_LOOKUP_OUTPUT;
+	} else {
+		fwd_ifindex = veth_tx_ifindex;
+	}
 
 #define ARGS	bpf, dsess->local.descr, fwd_ifindex,			\
 		&dsess->src, &dsess->dst, tbid, flags,			\
