@@ -32,6 +32,31 @@ struct {
 	__uint(max_entries, 16 * 1024);
 } bbdd_bpf_session_data_hash SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 256 * 1024);
+} bbdd_bpf_rb SEC(".maps");
+
+static void bbdd_tx_notify_no_neighbor(u16 proto,
+				       const struct bpf_fib_lookup *params)
+{
+	struct bbdd_bpf_rb_elem_tx_no_neighbor *elem;
+
+	elem = bpf_ringbuf_reserve(&bbdd_bpf_rb, sizeof(*elem), 0);
+	if (!elem)
+		return;
+
+	elem->head.type = BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR;
+	elem->ifindex = params->ifindex;
+	elem->ethtype = bpf_ntohs(proto);
+	if (proto == bpf_htons(ETH_P_IP))
+		elem->addr.addr[0] = params->ipv4_dst;
+	else
+		__builtin_memcpy(elem->addr.addr, params->ipv6_dst,
+				 sizeof(elem->addr.addr));
+	bpf_ringbuf_submit(elem, 0);
+}
+
 static bool bbdd_tx_validate_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
@@ -250,7 +275,7 @@ int bbdd_tx(struct __sk_buff *skb)
 			BUMP(data->stats.req_encap);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
-			// xxx ping userspace to resolve the neighbor
+			bbdd_tx_notify_no_neighbor(proto, &params);
 			BUMP(data->stats.no_neighbor);
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:

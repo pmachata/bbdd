@@ -72,3 +72,46 @@ struct bbdd_bfd_control_packet {
 	__be32 required_rx;
 	__be32 required_echo_rx;
 };
+
+enum bbdd_bpf_rb_elem_type {
+	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
+	BBDD_BPF_RB_ELEM_RX_UNK_DISCR,
+	BBDD_BPF_RB_ELEM_RX_UNX_PACKET,
+	BBDD_BPF_RB_ELEM_RX_TIMEOUT,
+};
+
+struct bbdd_bpf_addr {
+	__u32 addr[4];
+};
+
+struct bbdd_bpf_rb_elem_head {
+	enum bbdd_bpf_rb_elem_type type;
+};
+
+struct bbdd_bpf_rb_elem_tx_no_neighbor {
+	struct bbdd_bpf_rb_elem_head head;
+	int ifindex;
+	int ethtype;
+	struct bbdd_bpf_addr addr;
+};
+
+struct bbdd_bpf_rb_elem_rx_unk_discr {
+	struct bbdd_bpf_rb_elem_head head;
+	int ifindex;
+	int ethtype;
+	__u16 dport; // xxx or sport?
+	__u8 ttl;
+	struct bbdd_bpf_addr saddr;
+	struct bbdd_bpf_addr daddr;
+	struct bbdd_bfd_control_packet packet;
+};
+
+struct bbdd_bpf_rb_elem_rx_unx_packet {
+	struct bbdd_bpf_rb_elem_head head;
+	struct bbdd_bfd_control_packet packet;
+};
+
+struct bbdd_bpf_rb_elem_rx_timeout {
+	struct bbdd_bpf_rb_elem_head head;
+	__u32 discr;
+};

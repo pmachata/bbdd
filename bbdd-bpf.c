@@ -3,11 +3,14 @@
 
 #include "bbdd-bpf.h"
 
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <arpa/inet.h>
+#include <linux/if_ether.h>
 
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
@@ -26,10 +29,18 @@ struct bbdd_bpf_attachment {
 	struct bpf_tc_opts opts;
 };
 
+/* Interface between bbdd_bpf_rb_recv() and bbdd_bpf_rb_handle(). */
+struct bbdd_bpf_rb_context {
+	struct bbdd_bpf *bpf;
+	struct ring_buffer *rb;
+	char **error;
+};
+
 struct bbdd_bpf {
 	struct bbdd_prog *skel;
 	struct bbdd_bpf_attachment *rx;
 	struct bbdd_bpf_attachment *tx;
+	struct bbdd_bpf_rb_context *rb_ctx;
 };
 
 static int bbdd_bpf_print(enum libbpf_print_level level,
@@ -57,7 +68,113 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 	return 0;
 }
 
-struct bbdd_bpf *bbdd_bpf_create(char **error)
+static int
+bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem,
+			       char **error)
+{
+	char addr_str[INET6_ADDRSTRLEN];
+	int af;
+
+	switch (elem->ethtype) {
+	case ETH_P_IP:
+		af = AF_INET;
+		break;
+	case ETH_P_IPV6:
+		af = AF_INET6;
+		break;
+	default:
+		/* The BPF really shouldn't be sending us this. */
+		bbdd_util_fmterr(error, "BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR: Invalid ethtype `%d'",
+				 elem->ethtype);
+		return -EPROTO;
+	}
+
+	inet_ntop(af, elem->addr.addr, addr_str, sizeof(addr_str));
+	fprintf(stderr, "no neighbor: ifindex %d %s\n",
+		elem->ifindex, addr_str);
+	return 0;
+}
+
+static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
+{
+	struct bbdd_bpf_rb_context *rb_ctx = ctx;
+	const struct bbdd_bpf_rb_elem_head *head = data;
+
+	switch (head->type) {
+	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
+		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->error);
+	case BBDD_BPF_RB_ELEM_RX_UNK_DISCR:
+	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
+	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
+		break;
+	}
+	return 0;
+}
+
+static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, void *data, char **error)
+{
+	struct bbdd_bpf_rb_context *rb_ctx = data;
+	int ret;
+
+	rb_ctx->error = error;
+	ret = ring_buffer__consume(rb_ctx->rb);
+	if (ret < 0) {
+		bbdd_util_fmterr(error, "ring_buffer__consume: %s",
+				 strerror(-ret));
+		return -1;
+	}
+	rb_ctx->error = NULL;
+
+	return 0;
+}
+
+static struct bbdd_bpf_rb_context *
+bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
+		 char **error)
+{
+	struct bbdd_bpf_rb_context *rb_ctx;
+	struct ring_buffer *rb;
+	int rb_fd;
+	int err;
+
+	rb_ctx = malloc(sizeof(*rb_ctx));
+	if (rb_ctx == NULL) {
+		bbdd_util_fmterr(error, "bbdd_bpf_rb_setup: %m");
+		return NULL;
+	}
+
+	rb = ring_buffer__new(bpf_map__fd(skel->maps.bbdd_bpf_rb),
+			      bbdd_bpf_rb_handle, rb_ctx, NULL);
+	if (!rb) {
+		bbdd_util_fmterr(error, "ring_buffer__new: %m");
+		goto free_ctx;
+	}
+
+	rb_fd = ring_buffer__epoll_fd(rb);
+	err = bbdd_poll_push_fd(pctx, rb_fd, POLLIN, bbdd_bpf_rb_recv, rb_ctx,
+				error);
+	if (err != 0)
+		goto free_ring_buffer;
+
+	*rb_ctx = (struct bbdd_bpf_rb_context) {
+		.rb = rb,
+	};
+	return rb_ctx;
+
+free_ring_buffer:
+	ring_buffer__free(rb);
+free_ctx:
+	free(rb_ctx);
+	return NULL;
+}
+
+static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
+{
+	ring_buffer__free(rb_ctx->rb);
+	free(rb_ctx);
+}
+
+struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx, char **error)
 {
 	struct bbdd_bpf *bpf;
 
@@ -75,11 +192,35 @@ struct bbdd_bpf *bbdd_bpf_create(char **error)
 		goto free_bpf;
 	}
 
+	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, error);
+	if (bpf->rb_ctx == NULL)
+		goto destroy_prog;
+	bpf->rb_ctx->bpf = bpf;
+
 	return bpf;
 
+destroy_prog:
+	bbdd_prog__destroy(bpf->skel);
 free_bpf:
 	free(bpf);
 	return NULL;
+}
+
+static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
+{
+	bpf_tc_detach(&attachment->hook, &attachment->opts);
+	free(attachment);
+}
+
+void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
+{
+	if (bpf->rx)
+		bbdd_bpf_detach(bpf->rx);
+	if (bpf->tx)
+		bbdd_bpf_detach(bpf->tx);
+	bbdd_bpf_rb_fini(bpf->rb_ctx);
+	bbdd_prog__destroy(bpf->skel);
+	free(bpf);
 }
 
 static struct bbdd_bpf_attachment *
@@ -308,12 +449,6 @@ int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t id,
 	return err;
 }
 
-static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
-{
-	bpf_tc_detach(&attachment->hook, &attachment->opts);
-	free(attachment);
-}
-
 static void bbdd_bpf_stat_fmterr(char **error)
 {
 	bbdd_util_fmterr(error, "Failed to format stats to JSON: %m");
@@ -394,14 +529,4 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 err:
 	json_object_put(obj);
 	return NULL;
-}
-
-void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
-{
-	if (bpf->rx)
-		bbdd_bpf_detach(bpf->rx);
-	if (bpf->tx)
-		bbdd_bpf_detach(bpf->tx);
-	bbdd_prog__destroy(bpf->skel);
-	free(bpf);
 }

@@ -2271,11 +2271,15 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto closelog;
 	}
 
-	bbdd.bpf = bbdd_bpf_create(&error);
+	pctx = bbdd_poll_init();
+	if (pctx == NULL)
+		goto nl_destroy;
+
+	bbdd.bpf = bbdd_bpf_create(pctx, &error);
 	if (bbdd.bpf == NULL) {
 		fprintf(stderr, "Failed to initialize BPF: %s\n", error);
 		free(error);
-		goto nl_destroy;
+		goto poll_fini;
 	}
 
 	bbdd.sdir = bbdd_sess_dir_create();
@@ -2298,13 +2302,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto fini_veth;
 	}
 
-	pctx = bbdd_poll_init();
-	if (pctx == NULL)
-		goto rx_sockets_close;
-
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
 	if (err != 0)
-		goto poll_fini;
+		goto rx_sockets_close;
 
 	err = bbdd_poll_push_fd(pctx, bbdd.ctl.fd, POLLIN,
 				bbdd_d_ctl_recv, &bbdd, &error);
@@ -2318,8 +2318,6 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 
 sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
-poll_fini:
-	bbdd_poll_fini(pctx);
 rx_sockets_close:
 	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
@@ -2328,6 +2326,8 @@ sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
+poll_fini:
+	bbdd_poll_fini(pctx);
 nl_destroy:
 	bbdd_nl_destroy(bbdd.nl);
 closelog:
