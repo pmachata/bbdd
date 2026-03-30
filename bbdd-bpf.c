@@ -16,6 +16,7 @@
 #include <json-c/json_object.h>
 
 #include "bbdd.h"
+#include "bbdd-nl.h"
 #include "bbdd-prog.h"
 #include "bbdd-util.h"
 
@@ -33,6 +34,7 @@ struct bbdd_bpf_attachment {
 struct bbdd_bpf_rb_context {
 	struct bbdd_bpf *bpf;
 	struct ring_buffer *rb;
+	struct bbdd_nl *nl;
 	char **error;
 };
 
@@ -70,29 +72,31 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 
 static int
 bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem,
-			       char **error)
+			       struct bbdd_nl *nl, char **error)
 {
-	char addr_str[INET6_ADDRSTRLEN];
-	int af;
+	struct bbdd_sockaddr addr = {};
 
 	switch (elem->ethtype) {
 	case ETH_P_IP:
-		af = AF_INET;
+		addr.sa.sa_family = AF_INET;
+		memcpy(&addr.sin.sin_addr, elem->addr.addr,
+		       sizeof(addr.sin.sin_addr));
+		addr.len = sizeof(addr.sin);
 		break;
 	case ETH_P_IPV6:
-		af = AF_INET6;
+		addr.sa.sa_family = AF_INET6;
+		memcpy(&addr.sin6.sin6_addr, elem->addr.addr,
+		       sizeof(addr.sin6.sin6_addr));
+		addr.len = sizeof(addr.sin6);
 		break;
 	default:
-		/* The BPF really shouldn't be sending us this. */
-		bbdd_util_fmterr(error, "BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR: Invalid ethtype `%d'",
-				 elem->ethtype);
+		bbdd_util_fmterr(error,
+				 "BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR: "
+				 "invalid ethtype %d", elem->ethtype);
 		return -EPROTO;
 	}
 
-	inet_ntop(af, elem->addr.addr, addr_str, sizeof(addr_str));
-	fprintf(stderr, "no neighbor: ifindex %d %s\n",
-		elem->ifindex, addr_str);
-	return 0;
+	return bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, error);
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
@@ -102,7 +106,7 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
-		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->error);
+		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl, rb_ctx->error);
 	case BBDD_BPF_RB_ELEM_RX_UNK_DISCR:
 	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
@@ -130,7 +134,7 @@ static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, void *data, char **error)
 
 static struct bbdd_bpf_rb_context *
 bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
-		 char **error)
+		 struct bbdd_nl *nl, char **error)
 {
 	struct bbdd_bpf_rb_context *rb_ctx;
 	struct ring_buffer *rb;
@@ -158,6 +162,7 @@ bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 
 	*rb_ctx = (struct bbdd_bpf_rb_context) {
 		.rb = rb,
+		.nl = nl,
 	};
 	return rb_ctx;
 
@@ -174,7 +179,8 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 	free(rb_ctx);
 }
 
-struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx, char **error)
+struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
+				 struct bbdd_nl *nl, char **error)
 {
 	struct bbdd_bpf *bpf;
 
@@ -192,7 +198,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx, char **error)
 		goto free_bpf;
 	}
 
-	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, error);
+	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, error);
 	if (bpf->rb_ctx == NULL)
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;

@@ -36,6 +36,13 @@ int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what,
 int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 		   char **error);
 
+int bbdd_sockaddr_ntop(socklen_t bufsize;
+		       const struct bbdd_sockaddr *sa,
+		       char buf[bufsize], socklen_t bufsize, char **error);
+
+const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
+				  size_t *size, char **error);
+
 /* Parse a string in format of <proto>://<address>:<port>, with IPv6 address
  * enclosed in [brackets]. */
 int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *sa,

@@ -138,6 +138,48 @@ int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 	return -1;
 }
 
+const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
+				  size_t *size, char **error)
+{
+	int af = sa->sa.sa_family;
+
+	switch (af) {
+	case AF_INET:
+		if (size != NULL)
+			*size = sizeof(sa->sin.sin_addr);
+		return &sa->sin.sin_addr;
+	case AF_INET6:
+		if (size != NULL)
+			*size = sizeof(sa->sin6.sin6_addr);
+		return &sa->sin6.sin6_addr;
+	case AF_UNIX:
+	default:
+		bbdd_util_fmterr(error, "Invalid address family `%d'", af);
+		return NULL;
+	}
+}
+
+int bbdd_sockaddr_ntop(socklen_t bufsize;
+		       const struct bbdd_sockaddr *sa,
+		       char buf[bufsize], socklen_t bufsize, char **error)
+{
+	int af = sa->sa.sa_family;
+	const char *ret = NULL;
+	const void *addrbuf;
+
+	addrbuf = bbdd_sockaddr_addrbuf(sa, NULL, error);
+	if (addrbuf == NULL)
+		return -1;
+
+	ret = inet_ntop(af, addrbuf, buf, bufsize);
+	if (ret == NULL) {
+		bbdd_util_fmterr(error, "Failed to format address: %m");
+		return -1;
+	}
+
+	return 0;
+}
+
 static int bbdd_sock_parse_addr_ipv4(const char *addr_in, bool allow_port,
 				     struct bbdd_sockaddr *bsa,
 				     char **error)

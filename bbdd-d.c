@@ -2275,7 +2275,7 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	if (pctx == NULL)
 		goto nl_destroy;
 
-	bbdd.bpf = bbdd_bpf_create(pctx, &error);
+	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &error);
 	if (bbdd.bpf == NULL) {
 		fprintf(stderr, "Failed to initialize BPF: %s\n", error);
 		free(error);

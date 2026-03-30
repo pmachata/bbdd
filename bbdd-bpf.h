@@ -4,12 +4,14 @@
 #include <stdint.h>
 #include <json-c/json_object.h>
 
+#include "bbdd-nl.h"
 #include "bbdd-poll.h"
 #include "bbdd-sock.h"
 
 struct bbdd_bpf;
 
-struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx, char **error);
+struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
+				 struct bbdd_nl *nl, char **error);
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf);
 
 int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,

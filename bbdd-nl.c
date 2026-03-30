@@ -8,11 +8,13 @@
 #include <libmnl/libmnl.h>
 #include <linux/ethtool_netlink.h>
 #include <linux/genetlink.h>
+#include <linux/neighbour.h>
 #include <linux/netlink.h>
 #include <linux/pkt_sched.h>
 #include <linux/rtnetlink.h>
 #include <linux/veth.h>
 
+#include "bbdd-sock.h"
 #include "bbdd-util.h"
 
 struct bbdd_nl {
@@ -506,6 +508,48 @@ uint32_t bbdd_nl_tc_h_root(void)
 	return TC_H_ROOT;
 }
 
+int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
+			  const struct bbdd_sockaddr *addr, char **error)
+{
+	struct nlmsghdr *nlh;
+	struct ndmsg *ndm;
+	const void *raw_addr;
+	size_t addr_len;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_NEWNEIGH;
+	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK;
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	ndm = mnl_nlmsg_put_extra_header(nlh, sizeof(*ndm));
+	ndm->ndm_family = (uint8_t) addr->sa.sa_family;
+	ndm->ndm_ifindex = (int) ifindex;
+	ndm->ndm_state = NUD_INCOMPLETE;
+	ndm->ndm_flags = NTF_USE;
+
+	raw_addr = bbdd_sockaddr_addrbuf(addr, &addr_len, error);
+	if (raw_addr == NULL)
+		return -EAFNOSUPPORT;
+
+	mnl_attr_put(nlh, NDA_DST, addr_len, raw_addr);
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "Failed to send RTM_NEWNEIGH: %m");
+		return -errno;
+	}
+
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	if (rc < 0) {
+		if (errno == EEXIST)
+			return 0;
+		bbdd_util_fmterr(error, "Failed to refresh neighbor: %m");
+		return -1;
+	}
+
+	return 0;
+}
 
 int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
 			 unsigned int nqueues, char **error)

@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bbdd-sock.h"
+
 struct bbdd_nl;
 
 struct bbdd_nl *bbdd_nl_create(void);
@@ -34,3 +36,6 @@ uint32_t bbdd_nl_tc_h_root(void);
 
 int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
 			 unsigned int nqueues, char **error);
+
+int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
+			  const struct bbdd_sockaddr *addr, char **error);
