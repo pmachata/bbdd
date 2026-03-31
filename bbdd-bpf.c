@@ -524,7 +524,7 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 	}
 
 #define FIELD(NAME)							\
-	if (bbdd_bpf_add_stat(obj, #NAME, data.stats.NAME, error))	\
+	if (bbdd_bpf_add_stat(obj, #NAME, data.diag_stats.NAME, error))	\
 		goto err;
 
 	BBDD_SESSION_DIAG_STATS(FIELD)

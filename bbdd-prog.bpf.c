@@ -253,46 +253,46 @@ int bbdd_tx(struct __sk_buff *skb)
 	ret = bpf_fib_lookup(skb, &params, sizeof(params),
 			     config->bpf_fib_lookup_flags);
 	if (ret < 0) {
-		BUMP(data->stats.fail_lookup);
+		BUMP(data->diag_stats.fail_lookup);
 		goto out;
 	} else {
 		switch (ret) {
 		case BPF_FIB_LKUP_RET_SUCCESS:
 			break;
 		case BPF_FIB_LKUP_RET_BLACKHOLE:
-			BUMP(data->stats.dst_blackholed);
+			BUMP(data->diag_stats.dst_blackholed);
 			goto out;
 		case BPF_FIB_LKUP_RET_UNREACHABLE:
-			BUMP(data->stats.dst_unreachable);
+			BUMP(data->diag_stats.dst_unreachable);
 			goto out;
 		case BPF_FIB_LKUP_RET_PROHIBIT:
-			BUMP(data->stats.dst_prohibited);
+			BUMP(data->diag_stats.dst_prohibited);
 			goto out;
 		case BPF_FIB_LKUP_RET_FWD_DISABLED:
-			BUMP(data->stats.indev_no_forwarding);
+			BUMP(data->diag_stats.indev_no_forwarding);
 			goto out;
 		case BPF_FIB_LKUP_RET_UNSUPP_LWT:
-			BUMP(data->stats.req_encap);
+			BUMP(data->diag_stats.req_encap);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
 			bbdd_tx_notify_no_neighbor(proto, &params);
-			BUMP(data->stats.no_neighbor);
+			BUMP(data->diag_stats.no_neighbor);
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:
-			BUMP(data->stats.req_fragmentation);
+			BUMP(data->diag_stats.req_fragmentation);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_SRC_ADDR:
-			BUMP(data->stats.no_src_addr);
+			BUMP(data->diag_stats.no_src_addr);
 			goto out;
 		case BPF_FIB_LKUP_RET_NOT_FWDED:
-			BUMP(data->stats.not_forwarded);
+			BUMP(data->diag_stats.not_forwarded);
 			goto out;
 		}
 	}
 
 	eth = bpf_dynptr_slice_rdwr(&p, 0, eth_buf, sizeof(eth_buf));
 	if (!eth) {
-		BUMP(data->stats.fail_update);
+		BUMP(data->diag_stats.fail_update);
 		goto out;
 	}
 
@@ -301,26 +301,26 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (eth == (void *) eth_buf) {
 		ret = bpf_dynptr_write(&p, 0, eth_buf, sizeof(eth_buf), 0);
 		if (ret) {
-			BUMP(data->stats.fail_update);
+			BUMP(data->diag_stats.fail_update);
 			goto out;
 		}
 	}
 
 	if (proto == bpf_htons(ETH_P_IP)) {
 		if (!bbdd_tx_update_ipv4(skb, &p, &params)) {
-			BUMP(data->stats.fail_update);
+			BUMP(data->diag_stats.fail_update);
 			goto out;
 		}
 	} else {
 		if (!bbdd_tx_update_ipv6(skb, &p, &params)) {
-			BUMP(data->stats.fail_update);
+			BUMP(data->diag_stats.fail_update);
 			goto out;
 		}
 	}
 
 	ret = bpf_clone_redirect(skb, params.ifindex, 0);
 	if (ret) {
-		BUMP(data->stats.fail_redir);
+		BUMP(data->diag_stats.fail_redir);
 		goto out;
 	}
 

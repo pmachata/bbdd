@@ -51,7 +51,7 @@ struct bbdd_bfd_session_config {
 struct bbdd_bfd_session_data {
 	struct {
 		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
-	} stats;
+	} diag_stats;
 };
 
 #undef STAT_FIELD
