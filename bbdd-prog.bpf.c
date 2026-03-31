@@ -238,7 +238,7 @@ int bbdd_tx(struct __sk_buff *skb)
 	if (bfd == NULL)
 		goto tx_not_bfd;
 
-	id = bpf_ntohl(bfd->local_id);
+	id = bpf_ntohl(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_bpf_session_config_hash, &id);
 	if (config == NULL)
 		goto tx_no_session;
