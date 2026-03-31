@@ -1653,11 +1653,14 @@ static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 	return 0;
 }
 
-static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
-						struct json_object *id,
-						struct bbdd_bpf *bpf,
-						uint32_t *descrs,
-						size_t ndescrs)
+static void
+bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
+			       struct json_object *id,
+			       struct bbdd_bpf *bpf,
+			       uint32_t *descrs,
+			       size_t ndescrs,
+			       struct json_object *(*cb)(struct bbdd_bpf *,
+							 uint32_t, char **))
 {
 	struct json_object *obj;
 	struct json_object *array;
@@ -1699,8 +1702,7 @@ static void bbdd_d_handle_session_stats_diag_do(struct bbdd_sock *peer,
 	for (size_t i = 0; i < ndescrs; i++) {
 		uint32_t descr = descrs[i];
 
-		stats_obj = bbdd_bpf_session_diag_stats_json(bpf, descr,
-							     &error);
+		stats_obj = cb(bpf, descr, &error);
 		if (stats_obj == NULL)
 			goto put_array;
 
@@ -1769,7 +1771,31 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_diag_do(peer, id, bpf, descrs, ndescrs);
+	bbdd_d_handle_session_stats_do(peer, id, bpf, descrs, ndescrs,
+				       bbdd_bpf_session_diag_stats_json);
+	free(descrs);
+}
+
+static void bbdd_d_handle_session_stats(struct bbdd_sock *peer,
+					struct json_object *params_obj,
+					struct json_object *id,
+					struct bbdd_nl *nl,
+					struct bbdd_sess_dir *sdir,
+					struct bbdd_bpf *bpf)
+{
+	struct bbdd_c_session sess;
+	uint32_t *descrs;
+	size_t ndescrs;
+	int rc;
+
+	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+					  &sess, NULL, NULL, nl, sdir,
+					  &descrs, &ndescrs);
+	if (rc < 0)
+		return;
+
+	bbdd_d_handle_session_stats_do(peer, id, bpf, descrs, ndescrs,
+				       bbdd_bpf_session_stats_json);
 	free(descrs);
 }
 
@@ -1879,6 +1905,9 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 	else if (strcmp(method, "session-stats-diag") == 0)
 		bbdd_d_handle_session_stats_diag(peer, params_obj, id, nl,
 						 sdir, bpf);
+	else if (strcmp(method, "session-stats") == 0)
+		bbdd_d_handle_session_stats(peer, params_obj, id, nl,
+					    sdir, bpf);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }

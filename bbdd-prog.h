@@ -35,6 +35,13 @@
 	FIELD(wrong_gen_id)		        \
 	/**/
 
+#define BBDD_SESSION_STATS(FIELD)		\
+	FIELD(rx_bytes)				\
+	FIELD(rx_packets)		        \
+	FIELD(tx_bytes)			        \
+	FIELD(tx_packets)		        \
+	/**/
+
 #define STAT_FIELD(NAME) __u64 NAME;
 struct bbdd_prog_global_diag_stats {
 	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
@@ -52,6 +59,9 @@ struct bbdd_bfd_session_data {
 	struct {
 		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
 	} diag_stats;
+	struct {
+		BBDD_SESSION_STATS(STAT_FIELD)
+	} stats;
 };
 
 #undef STAT_FIELD
