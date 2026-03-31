@@ -9,9 +9,12 @@
 #include "bbdd-sock.h"
 
 struct bbdd_bpf;
+struct bbdd_bpf_global_config;
 
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
-				 struct bbdd_nl *nl, char **error);
+				 struct bbdd_nl *nl,
+				 struct bbdd_bpf_global_config *conf,
+				 char **error);
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf);
 
 int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,

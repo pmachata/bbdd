@@ -83,6 +83,22 @@ struct bbdd_bfd_control_packet {
 	__be32 required_echo_rx;
 };
 
+#define BBDD_GLOBAL_RX_SOCKETS(X)			\
+	X(shop4, AF_INET, BFD_SINGLE_HOP_PORT)	\
+	X(shop6, AF_INET6, BFD_SINGLE_HOP_PORT)	\
+	X(mhop4, AF_INET, BFD_MULTI_HOP_PORT)	\
+	X(mhop6, AF_INET6, BFD_MULTI_HOP_PORT)	\
+	/**/
+
+#define FIELD(NAME, AF, PORT) int NAME##_fd;
+
+struct bbdd_bpf_global_config {
+	__u32 veth_tx_ifindex;
+	BBDD_GLOBAL_RX_SOCKETS(FIELD)
+};
+
+#undef FIELD
+
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
 	BBDD_BPF_RB_ELEM_RX_UNK_DISCR,

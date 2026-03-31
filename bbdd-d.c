@@ -27,6 +27,7 @@
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
+#include "bbdd-prog.h"
 #include "bbdd-poll.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
@@ -2217,73 +2218,79 @@ fini_veth:
 	return err;
 }
 
-static struct bbdd_d_rx_socket {
-	uint16_t af;
-	uint16_t port;
-} bbdd_d_rx_sockets[] = {
-	{ AF_INET,  BFD_SINGLE_HOP_PORT },
-	{ AF_INET,  BFD_MULTI_HOP_PORT },
-	{ AF_INET6, BFD_SINGLE_HOP_PORT },
-	{ AF_INET6, BFD_MULTI_HOP_PORT },
-};
-enum {
-	bbdd_d_rx_nsockets = ARRAY_SIZE(bbdd_d_rx_sockets),
+struct bbdd_d_rx_socks {
+#define FIELD(NAME, ...) struct bbdd_sock NAME##_sk;
+	BBDD_GLOBAL_RX_SOCKETS(FIELD)
+#undef FIELD
 };
 
 static void
-bbdd_d_rx_sockets_close(struct bbdd_sock rx_socks[bbdd_d_rx_nsockets])
+bbdd_d_rx_sockets_close(struct bbdd_d_rx_socks *rx_socks)
 {
-	for (int i = 0; i < bbdd_d_rx_nsockets; i++)
-		if (rx_socks[i].sa.sa.sa_family != AF_UNSPEC)
-			bbdd_sock_close_udp(&rx_socks[i]);
+#define CLOSE_SOCK(NAME, ...)						\
+		if (rx_socks->NAME##_sk.sa.sa.sa_family != AF_UNSPEC)	\
+			bbdd_sock_close_udp(&rx_socks->NAME##_sk);
+	BBDD_GLOBAL_RX_SOCKETS(CLOSE_SOCK)
+#undef CLOSE_SOCK
 }
 
 static int
-bbdd_d_rx_sockets_open(struct bbdd_sock rx_socks[bbdd_d_rx_nsockets],
+bbdd_d_rx_sockets_open_one(struct bbdd_sock *rx_sock,
+			   uint16_t af, uint16_t port,
+			   char **error)
+{
+	struct bbdd_sockaddr addr;
+
+	addr.sa.sa_family = af;
+	switch (af) {
+	case AF_INET:
+		addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
+		addr.sin.sin_port = htons(port);
+		addr.len = sizeof(addr.sin);
+		break;
+	case AF_INET6:
+		addr.sin6.sin6_addr = in6addr_any;
+		addr.sin6.sin6_port = htons(port);
+		addr.len = sizeof(addr.sin6);
+		break;
+	}
+
+	return bbdd_sock_open_udp(addr, rx_sock, error);
+}
+
+static int
+bbdd_d_rx_sockets_open(struct bbdd_d_rx_socks *rx_socks,
 		       char **error)
 {
-	int i;
+	int rc;
 
-	for (i = 0; i < bbdd_d_rx_nsockets; i++)
-		rx_socks[i] = (struct bbdd_sock) {};
+	*rx_socks = (struct bbdd_d_rx_socks){};
 
-	for (i = 0; i < bbdd_d_rx_nsockets; i++) {
-		uint16_t port = bbdd_d_rx_sockets[i].port;
-		uint16_t af = bbdd_d_rx_sockets[i].af;
-		struct bbdd_sockaddr addr;
-		int rc;
+#define OPEN_SOCK(NAME, AF, PORT)					\
+	do {								\
+		rc = bbdd_d_rx_sockets_open_one(&rx_socks->NAME##_sk,	\
+						(AF), (PORT), error);	\
+		if (rc)							\
+			goto close;					\
+	} while (0);
 
-		addr.sa.sa_family = af;
-		switch (af) {
-		case AF_INET:
-			addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
-			addr.sin.sin_port = htons(port);
-			addr.len = sizeof(addr.sin);
-			break;
-		case AF_INET6:
-			addr.sin6.sin6_addr = in6addr_any;
-			addr.sin6.sin6_port = htons(port);
-			addr.len = sizeof(addr.sin6);
-			break;
-		}
+	BBDD_GLOBAL_RX_SOCKETS(OPEN_SOCK);
 
-		rc = bbdd_sock_open_udp(addr, &rx_socks[i], error);
-		if (rc)
-			goto close;
-	}
+#undef SOCK
 
 	return 0;
 
 close:
 	bbdd_d_rx_sockets_close(rx_socks);
-	return -1;
+	return rc;
 }
 
 static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
-	struct bbdd_sock rx_socks[bbdd_d_rx_nsockets];
+	struct bbdd_d_rx_socks rx_socks;
+	struct bbdd_bpf_global_config bpf_conf;
 	char *error;
 	int err;
 
@@ -2304,11 +2311,22 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	if (pctx == NULL)
 		goto nl_destroy;
 
-	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &error);
+	err = bbdd_d_rx_sockets_open(&rx_socks, &error);
+	if (err) {
+		bbdd_util_printerr(err, &error, "Failed to open BFD RX sockets");
+		goto poll_fini;
+	}
+
+#define ASSIGN_SOCK(NAME, ...) \
+		bpf_conf.NAME##_fd = rx_socks.NAME##_sk.fd;
+	BBDD_GLOBAL_RX_SOCKETS(ASSIGN_SOCK)
+#undef ASSIGN_SOCK
+
+	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &bpf_conf, &error);
 	if (bbdd.bpf == NULL) {
 		fprintf(stderr, "Failed to initialize BPF: %s\n", error);
 		free(error);
-		goto poll_fini;
+		goto rx_sockets_close;
 	}
 
 	bbdd.sdir = bbdd_sess_dir_create();
@@ -2325,15 +2343,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto sess_dir_destroy;
 	}
 
-	err = bbdd_d_rx_sockets_open(rx_socks, &error);
-	if (err) {
-		bbdd_util_printerr(err, &error, "Failed to open BFD RX sockets");
-		goto fini_veth;
-	}
-
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
 	if (err != 0)
-		goto rx_sockets_close;
+		goto fini_veth;
 
 	err = bbdd_poll_push_fd(pctx, bbdd.ctl.fd, POLLIN,
 				bbdd_d_ctl_recv, &bbdd, &error);
@@ -2347,14 +2359,14 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 
 sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
-rx_sockets_close:
-	bbdd_d_rx_sockets_close(rx_socks);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
+rx_sockets_close:
+	bbdd_d_rx_sockets_close(&rx_socks);
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:

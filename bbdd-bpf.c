@@ -180,7 +180,9 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 }
 
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
-				 struct bbdd_nl *nl, char **error)
+				 struct bbdd_nl *nl,
+				 struct bbdd_bpf_global_config *,
+				 char **error)
 {
 	struct bbdd_bpf *bpf;
 
