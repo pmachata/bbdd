@@ -57,7 +57,7 @@ static void bbdd_tx_notify_no_neighbor(u16 proto,
 	bpf_ringbuf_submit(elem, 0);
 }
 
-static bool bbdd_tx_validate_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
 	struct iphdr *iph;
@@ -71,6 +71,60 @@ static bool bbdd_tx_validate_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 	*tot_len = bpf_ntohs(iph->tot_len);
 	*off += sizeof(struct iphdr);
 	return true;
+}
+
+static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+{
+	u8 ip6h_buf[sizeof(struct ipv6hdr)];
+	struct ipv6hdr *ip6h;
+
+	ip6h = bpf_dynptr_slice(p, *off, ip6h_buf, sizeof(ip6h_buf));
+	if (!ip6h)
+		return false;
+	if (ip6h->nexthdr != IPPROTO_UDP)
+		return false;
+
+	*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
+	*off += sizeof(struct ipv6hdr);
+	return true;
+}
+
+static struct bbdd_bfd_control_packet *
+bbdd_get_bfd(struct __sk_buff *skb, u16 *tot_len,
+	     u8 *bfd_buf, size_t bfd_buf_size)
+{
+	u8 udph_buf[sizeof(struct udphdr)] = {};
+	u16 proto = skb->protocol;
+	struct bpf_dynptr p;
+	struct udphdr *udph;
+	u32 off;
+
+	if (proto != bpf_htons(ETH_P_IP) &&
+	    proto != bpf_htons(ETH_P_IPV6))
+		return NULL;
+
+	if (bpf_dynptr_from_skb(skb, 0, &p))
+		return NULL;
+
+	off = sizeof(struct ethhdr);
+	if (proto == bpf_htons(ETH_P_IP)) {
+		if (!bbdd_is_bfd_ipv4(&p, &off, tot_len))
+			return NULL;
+	} else {
+		if (!bbdd_is_bfd_ipv6(&p, &off, tot_len))
+			return NULL;
+	}
+
+	udph = bpf_dynptr_slice(&p, off, udph_buf, sizeof(udph_buf));
+	if (!udph)
+		return NULL;
+
+	if (udph->dest != bpf_htons(BFD_SINGLE_HOP_PORT) &&
+	    udph->dest != bpf_htons(BFD_MULTI_HOP_PORT))
+		return NULL;
+
+	off += sizeof(*udph);
+	return bpf_dynptr_slice(&p, off, bfd_buf, bfd_buf_size);
 }
 
 static bool bbdd_tx_update_ipv4(struct __sk_buff *skb, struct bpf_dynptr *p,
@@ -108,22 +162,6 @@ static bool bbdd_tx_update_ipv4(struct __sk_buff *skb, struct bpf_dynptr *p,
 				  BPF_F_MARK_MANGLED_0 | BPF_F_PSEUDO_HDR |
 				  sizeof(__be32));
 	return !ret;
-}
-
-static bool bbdd_tx_validate_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
-{
-	u8 ip6h_buf[sizeof(struct ipv6hdr)];
-	struct ipv6hdr *ip6h;
-
-	ip6h = bpf_dynptr_slice(p, *off, ip6h_buf, sizeof(ip6h_buf));
-	if (!ip6h)
-		return false;
-	if (ip6h->nexthdr != IPPROTO_UDP)
-		return false;
-
-	*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
-	*off += sizeof(struct ipv6hdr);
-	return true;
 }
 
 static bool bbdd_tx_update_ipv6(struct __sk_buff *skb, struct bpf_dynptr *p,
@@ -173,20 +211,17 @@ SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
-	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u8 eth_buf[sizeof(struct ethhdr)] = {};
 	union {
 		u8 ip[sizeof(struct iphdr)];
 		u8 ip6[sizeof(struct ipv6hdr)];
 	} ipbuf = {};
 	struct bbdd_bfd_control_packet *bfd;
-	struct udphdr *udph;
 	struct ethhdr *eth;
 	struct ipv6hdr *ip6h;
 	struct iphdr *iph;
 
 	struct bpf_dynptr p;
-	u32 off;
 	u16 proto;
 
 	struct bbdd_bfd_session_config *config;
@@ -198,35 +233,9 @@ int bbdd_tx(struct __sk_buff *skb)
 
 	int ret;
 
-	/* Filtering */
 	proto = skb->protocol;
-	if (proto != bpf_htons(ETH_P_IP) &&
-	    proto != bpf_htons(ETH_P_IPV6))
-		goto tx_not_bfd;
-
-	if (bpf_dynptr_from_skb(skb, 0, &p))
-		goto tx_not_bfd;
-
-	off = sizeof(struct ethhdr);
-	if (proto == bpf_htons(ETH_P_IP)) {
-		if (!bbdd_tx_validate_ipv4(&p, &off, &tot_len))
-			goto tx_not_bfd;
-	} else {
-		if (!bbdd_tx_validate_ipv6(&p, &off, &tot_len))
-			goto tx_not_bfd;
-	}
-
-	udph = bpf_dynptr_slice(&p, off, udph_buf, sizeof(udph_buf));
-	if (!udph)
-		goto tx_not_bfd;
-
-	if (udph->dest != bpf_htons(BFD_SINGLE_HOP_PORT) &&
-	    udph->dest != bpf_htons(BFD_MULTI_HOP_PORT))
-		goto tx_not_bfd;
-
-	off += sizeof(*udph);
-	bfd = bpf_dynptr_slice(&p, off, bfd_buf, sizeof(bfd_buf));
-	if (!bfd)
+	bfd = bbdd_get_bfd(skb, &tot_len, bfd_buf, sizeof bfd_buf);
+	if (bfd == NULL)
 		goto tx_not_bfd;
 
 	id = bpf_ntohl(bfd->local_id);
