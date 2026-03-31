@@ -324,6 +324,9 @@ int bbdd_tx(struct __sk_buff *skb)
 		goto out;
 	}
 
+	BUMP(data->stats.tx_packets);
+	__sync_fetch_and_add(&data->stats.tx_bytes, skb->len);
+
 out:
 	interval_us = config->max_interval_us - config->min_interval_us;
 	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
