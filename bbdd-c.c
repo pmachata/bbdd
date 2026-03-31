@@ -46,7 +46,7 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 		fprintf(stderr, "Error %" PRId64 ": %s\n", code, message);
 }
 
-static bool bbdd_c_response_extract_result(const struct json_object *j,
+static bool bbdd_c_response_extract_result(struct json_object *j,
 					   int expect_id,
 					   enum json_type result_type,
 					   struct json_object **ret_result)
@@ -377,7 +377,7 @@ put_request:
 }
 
 
-static int bbdd_c_session_act_jrpc_result(const struct json_object *response,
+static int bbdd_c_session_act_jrpc_result(struct json_object *response,
 					  const char *method,
 					  const int id)
 
@@ -763,7 +763,7 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	printf("\n");
 }
 
-static int bbdd_c_session_show_jrpc_result(const struct json_object *response,
+static int bbdd_c_session_show_jrpc_result(struct json_object *response,
 					   const char *, const int id)
 {
 	struct json_object *result;
@@ -852,7 +852,7 @@ static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
 	return 0;
 }
 
-static int bbdd_c_session_stats_jrpc_result(const struct json_object *response,
+static int bbdd_c_session_stats_jrpc_result(struct json_object *response,
 					    const char *, const int id)
 {
 	struct json_object *result;
@@ -885,7 +885,7 @@ static struct bbdd_c_session_command {
 	const bool allow_change;
 	const char *const rpc;
 	const char *const rpc_diag;
-	int (*show)(const struct json_object *, const char *method, int id);
+	int (*show)(struct json_object *, const char *method, int id);
 } const bbdd_c_session_commands[] = {
 	{
 		.name = "add",
