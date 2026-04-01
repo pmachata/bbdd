@@ -283,51 +283,51 @@ int bbdd_tx(struct __sk_buff *skb)
 	ret = bpf_fib_lookup(skb, &params, sizeof(params),
 			     config->bpf_fib_lookup_flags);
 	if (ret < 0) {
-		BUMP(data->diag_stats.fail_lookup);
+		BUMP(data->diag_stats.tx_fail_lookup);
 		goto out;
 	} else {
 		switch (ret) {
 		case BPF_FIB_LKUP_RET_SUCCESS:
 			break;
 		case BPF_FIB_LKUP_RET_BLACKHOLE:
-			BUMP(data->diag_stats.dst_blackholed);
+			BUMP(data->diag_stats.tx_dst_blackholed);
 			goto out;
 		case BPF_FIB_LKUP_RET_UNREACHABLE:
-			BUMP(data->diag_stats.dst_unreachable);
+			BUMP(data->diag_stats.tx_dst_unreachable);
 			goto out;
 		case BPF_FIB_LKUP_RET_PROHIBIT:
-			BUMP(data->diag_stats.dst_prohibited);
+			BUMP(data->diag_stats.tx_dst_prohibited);
 			goto out;
 		case BPF_FIB_LKUP_RET_FWD_DISABLED:
-			BUMP(data->diag_stats.indev_no_forwarding);
+			BUMP(data->diag_stats.tx_indev_no_forwarding);
 			goto out;
 		case BPF_FIB_LKUP_RET_UNSUPP_LWT:
-			BUMP(data->diag_stats.req_encap);
+			BUMP(data->diag_stats.tx_req_encap);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
-			bbdd_tx_notify_no_neighbor(proto, &params);
-			BUMP(data->diag_stats.no_neighbor);
+			bbdd_tx_notify_no_neighbor(skb->protocol, &params);
+			BUMP(data->diag_stats.tx_no_neighbor);
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:
-			BUMP(data->diag_stats.req_fragmentation);
+			BUMP(data->diag_stats.tx_req_fragmentation);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_SRC_ADDR:
-			BUMP(data->diag_stats.no_src_addr);
+			BUMP(data->diag_stats.tx_no_src_addr);
 			goto out;
 		case BPF_FIB_LKUP_RET_NOT_FWDED:
-			BUMP(data->diag_stats.not_forwarded);
+			BUMP(data->diag_stats.tx_not_forwarded);
 			goto out;
 		}
 	}
 
 	if (!bbdd_tx_update(skb, &params)) {
-		BUMP(data->diag_stats.fail_update);
+		BUMP(data->diag_stats.tx_fail_update);
 		goto out;
 	}
 
 	ret = bpf_clone_redirect(skb, params.ifindex, 0);
 	if (ret) {
-		BUMP(data->diag_stats.fail_redir);
+		BUMP(data->diag_stats.tx_fail_redir);
 		goto out;
 	}
 

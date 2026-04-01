@@ -18,21 +18,21 @@
 	/**/
 
 #define BBDD_SESSION_DIAG_STATS(FIELD)		\
-	FIELD(dst_blackholed)		        \
-	FIELD(dst_unreachable)		        \
-	FIELD(dst_prohibited)		        \
-	FIELD(indev_no_forwarding)	        \
-	FIELD(req_encap)		        \
-	FIELD(no_neighbor)			\
-	FIELD(req_fragmentation)	        \
-	FIELD(no_src_addr)		        \
-	FIELD(not_forwarded)		        \
-	FIELD(fail_lookup)		        \
-	FIELD(fail_cksum_update)	        \
-	FIELD(fail_update)		        \
-	FIELD(fail_redir)		        \
-	FIELD(loopback_filter)		        \
-	FIELD(wrong_gen_id)		        \
+	FIELD(tx_dst_blackholed)		\
+	FIELD(tx_dst_unreachable)		\
+	FIELD(tx_dst_prohibited)		\
+	FIELD(tx_indev_no_forwarding)		\
+	FIELD(tx_req_encap)			\
+	FIELD(tx_no_neighbor)			\
+	FIELD(tx_req_fragmentation)		\
+	FIELD(tx_no_src_addr)			\
+	FIELD(tx_not_forwarded)			\
+	FIELD(tx_fail_lookup)			\
+	FIELD(tx_fail_cksum_update)		\
+	FIELD(tx_fail_update)			\
+	FIELD(tx_fail_redir)			\
+	FIELD(tx_loopback_filter)		\
+	FIELD(tx_wrong_gen_id)		        \
 	/**/
 
 #define BBDD_SESSION_STATS(FIELD)		\
