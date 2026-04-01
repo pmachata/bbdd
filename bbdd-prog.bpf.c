@@ -43,8 +43,8 @@ struct {
 	_Generic((ELEM),						\
 		 struct bbdd_bpf_rb_elem_rx_timeout:			\
 			BBDD_BPF_RB_ELEM_RX_TIMEOUT,			\
-		 struct bbdd_bpf_rb_elem_rx_unk_discr:			\
-			BBDD_BPF_RB_ELEM_RX_UNK_DISCR,			\
+		 struct bbdd_bpf_rb_elem_rx_discr_0:			\
+			BBDD_BPF_RB_ELEM_RX_DISCR_0,			\
 		 struct bbdd_bpf_rb_elem_rx_unx_packet:			\
 			BBDD_BPF_RB_ELEM_RX_UNX_PACKET,			\
 		 struct bbdd_bpf_rb_elem_tx_no_neighbor:		\

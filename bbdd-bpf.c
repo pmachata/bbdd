@@ -99,6 +99,14 @@ bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *ele
 	return bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, error);
 }
 
+static int
+bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem)
+{
+	fprintf(stderr, "RX: discrimininator 0 iif %d ethtype %d ttl %d multihop %d\n",
+		elem->ifindex, elem->ethtype, elem->ttl, elem->multihop);
+	return 0;
+}
+
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = ctx;
@@ -107,9 +115,11 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
 		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl, rb_ctx->error);
-	case BBDD_BPF_RB_ELEM_RX_UNK_DISCR:
+	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
+		return bbdd_bpf_rb_handle_discr_0(data);
 	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
+		fprintf(stderr, "unhandled RB event type %d\n", head->type);
 		break;
 	}
 	return 0;

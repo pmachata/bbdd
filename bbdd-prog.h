@@ -101,7 +101,7 @@ struct bbdd_bpf_global_config {
 
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
-	BBDD_BPF_RB_ELEM_RX_UNK_DISCR,
+	BBDD_BPF_RB_ELEM_RX_DISCR_0,
 	BBDD_BPF_RB_ELEM_RX_UNX_PACKET,
 	BBDD_BPF_RB_ELEM_RX_TIMEOUT,
 };
@@ -121,12 +121,12 @@ struct bbdd_bpf_rb_elem_tx_no_neighbor {
 	struct bbdd_bpf_addr addr;
 };
 
-struct bbdd_bpf_rb_elem_rx_unk_discr {
+struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bpf_rb_elem_head head;
-	int ifindex;
-	int ethtype;
-	__u16 dport; // xxx or sport?
+	__u32 ifindex;
+	__u16 ethtype;
 	__u8 ttl;
+	__u8 multihop;
 	struct bbdd_bpf_addr saddr;
 	struct bbdd_bpf_addr daddr;
 	struct bbdd_bfd_control_packet packet;
