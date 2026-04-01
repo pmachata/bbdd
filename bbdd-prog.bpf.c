@@ -128,7 +128,7 @@ bbdd_get_bfd(struct __sk_buff *skb, u16 *tot_len,
 }
 
 static bool bbdd_tx_update_ipv4(struct __sk_buff *skb, struct bpf_dynptr *p,
-				struct bpf_fib_lookup *params)
+				const struct bpf_fib_lookup *params)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
 	u32 ip_off = sizeof(struct ethhdr);
@@ -165,7 +165,7 @@ static bool bbdd_tx_update_ipv4(struct __sk_buff *skb, struct bpf_dynptr *p,
 }
 
 static bool bbdd_tx_update_ipv6(struct __sk_buff *skb, struct bpf_dynptr *p,
-				struct bpf_fib_lookup *params)
+				const struct bpf_fib_lookup *params)
 {
 	u8 ip6h_buf[sizeof(struct ipv6hdr)];
 	u32 ip6_off = sizeof(struct ethhdr);
@@ -207,33 +207,54 @@ static bool bbdd_tx_update_ipv6(struct __sk_buff *skb, struct bpf_dynptr *p,
 	return true;
 }
 
+static bool bbdd_tx_update(struct __sk_buff *skb,
+			   const struct bpf_fib_lookup *params)
+{
+	u8 eth_buf[sizeof(struct ethhdr)] = {};
+	struct ethhdr *eth;
+	struct bpf_dynptr p = {};
+	u16 proto = skb->protocol;
+	int ret;
+
+	if (bpf_dynptr_from_skb(skb, 0, &p))
+		return false;
+
+	eth = bpf_dynptr_slice_rdwr(&p, 0, eth_buf, sizeof(eth_buf));
+	if (!eth)
+		return false;
+
+	__builtin_memcpy(eth->h_source, params->smac, ETH_ALEN);
+	__builtin_memcpy(eth->h_dest, params->dmac, ETH_ALEN);
+	if (eth == (void *) eth_buf) {
+		ret = bpf_dynptr_write(&p, 0, eth_buf, sizeof(eth_buf), 0);
+		if (ret)
+			return false;
+	}
+
+	if (proto == bpf_htons(ETH_P_IP)) {
+		if (!bbdd_tx_update_ipv4(skb, &p, params))
+			return false;
+	} else {
+		if (!bbdd_tx_update_ipv6(skb, &p, params))
+			return false;
+	}
+
+	return true;
+}
+
 SEC("tc")
 int bbdd_tx(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
-	u8 eth_buf[sizeof(struct ethhdr)] = {};
-	union {
-		u8 ip[sizeof(struct iphdr)];
-		u8 ip6[sizeof(struct ipv6hdr)];
-	} ipbuf = {};
 	struct bbdd_bfd_control_packet *bfd;
-	struct ethhdr *eth;
-	struct ipv6hdr *ip6h;
-	struct iphdr *iph;
-
-	struct bpf_dynptr p;
-	u16 proto;
-
 	struct bbdd_bfd_session_config *config;
 	struct bbdd_bfd_session_data *data;
 	struct bpf_fib_lookup params;
 	u64 interval_us;
 	u16 tot_len;
 	u32 id;
-
 	int ret;
 
-	proto = skb->protocol;
 	bfd = bbdd_get_bfd(skb, &tot_len, bfd_buf, sizeof bfd_buf);
 	if (bfd == NULL)
 		goto tx_not_bfd;
@@ -299,32 +320,9 @@ int bbdd_tx(struct __sk_buff *skb)
 		}
 	}
 
-	eth = bpf_dynptr_slice_rdwr(&p, 0, eth_buf, sizeof(eth_buf));
-	if (!eth) {
+	if (!bbdd_tx_update(skb, &params)) {
 		BUMP(data->diag_stats.fail_update);
 		goto out;
-	}
-
-	__builtin_memcpy(eth->h_source, params.smac, ETH_ALEN);
-	__builtin_memcpy(eth->h_dest, params.dmac, ETH_ALEN);
-	if (eth == (void *) eth_buf) {
-		ret = bpf_dynptr_write(&p, 0, eth_buf, sizeof(eth_buf), 0);
-		if (ret) {
-			BUMP(data->diag_stats.fail_update);
-			goto out;
-		}
-	}
-
-	if (proto == bpf_htons(ETH_P_IP)) {
-		if (!bbdd_tx_update_ipv4(skb, &p, &params)) {
-			BUMP(data->diag_stats.fail_update);
-			goto out;
-		}
-	} else {
-		if (!bbdd_tx_update_ipv6(skb, &p, &params)) {
-			BUMP(data->diag_stats.fail_update);
-			goto out;
-		}
 	}
 
 	ret = bpf_clone_redirect(skb, params.ifindex, 0);
