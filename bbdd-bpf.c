@@ -298,7 +298,7 @@ free:
 int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,
 			    char **error)
 {
-	bpf->rx = bbdd_bpf_attach(bpf->skel->progs.bbdd_rx, ifindex,
+	bpf->rx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx, ifindex,
 				  BPF_TC_INGRESS, error);
 	return bpf->rx != NULL ? 0 : -1;
 }
@@ -307,7 +307,7 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 			    char **error)
 {
 	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)ifindex;
-	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_tx, ifindex,
+	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx, ifindex,
 				  BPF_TC_EGRESS, error);
 	return bpf->tx != NULL ? 0 : -1;
 }

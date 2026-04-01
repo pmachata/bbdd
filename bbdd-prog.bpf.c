@@ -300,7 +300,7 @@ static bool bbdd_tx_update(struct __sk_buff *skb,
 }
 
 SEC("tc")
-int bbdd_tx(struct __sk_buff *skb)
+int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	struct bbdd_bfd_control_packet *bfd;
@@ -406,7 +406,7 @@ tx_no_session:
 }
 
 SEC("tc")
-int bbdd_rx(struct __sk_buff *skb)
+int bbdd_xmit_veth_rx(struct __sk_buff *skb)
 {
 	return bpf_redirect(bbdd_veth_tx_ifindex, 0);
 }
