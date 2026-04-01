@@ -82,7 +82,16 @@ static void bbdd_tx_notify_no_neighbor(u16 proto,
 	bpf_ringbuf_submit(elem, 0);
 }
 
-static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+struct bbdd_bfd_rx_pkt_digest {
+	u8 ttl;
+	u8 multihop;
+	struct bbdd_bpf_addr saddr;
+	struct bbdd_bpf_addr daddr;
+};
+
+static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off,
+			     u16 *tot_len,
+			     struct bbdd_bfd_rx_pkt_digest *digest)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
 	struct iphdr *iph;
@@ -93,12 +102,23 @@ static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 	if (iph->protocol != IPPROTO_UDP)
 		return false;
 
-	*tot_len = bpf_ntohs(iph->tot_len);
+	if (tot_len != NULL)
+		*tot_len = bpf_ntohs(iph->tot_len);
+	if (digest != NULL) {
+		digest->ttl = iph->ttl;
+		__builtin_memcpy(&digest->saddr, &iph->saddr,
+				 sizeof(iph->saddr));
+		__builtin_memcpy(&digest->daddr, &iph->daddr,
+				 sizeof(iph->daddr));
+	}
+
 	*off += sizeof(struct iphdr);
 	return true;
 }
 
-static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
+static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off,
+			     u16 *tot_len,
+			     struct bbdd_bfd_rx_pkt_digest *digest)
 {
 	u8 ip6h_buf[sizeof(struct ipv6hdr)];
 	struct ipv6hdr *ip6h;
@@ -109,14 +129,23 @@ static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off, u16 *tot_len)
 	if (ip6h->nexthdr != IPPROTO_UDP)
 		return false;
 
-	*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
+	if (tot_len != NULL)
+		*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
+	if (digest != NULL) {
+		digest->ttl = ip6h->hop_limit;
+		__builtin_memcpy(&digest->saddr, &ip6h->saddr,
+				 sizeof(ip6h->saddr));
+		__builtin_memcpy(&digest->daddr, &ip6h->daddr,
+				 sizeof(ip6h->daddr));
+	}
+
 	*off += sizeof(struct ipv6hdr);
 	return true;
 }
 
 static struct bbdd_bfd_control_packet *
-bbdd_get_bfd(struct __sk_buff *skb, u16 *tot_len,
-	     u8 *bfd_buf, size_t bfd_buf_size)
+bbdd_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
+	     u16 *tot_len, struct bbdd_bfd_rx_pkt_digest *digest)
 {
 	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u16 proto = skb->protocol;
@@ -133,10 +162,10 @@ bbdd_get_bfd(struct __sk_buff *skb, u16 *tot_len,
 
 	off = sizeof(struct ethhdr);
 	if (proto == bpf_htons(ETH_P_IP)) {
-		if (!bbdd_is_bfd_ipv4(&p, &off, tot_len))
+		if (!bbdd_is_bfd_ipv4(&p, &off, tot_len, digest))
 			return NULL;
 	} else {
-		if (!bbdd_is_bfd_ipv6(&p, &off, tot_len))
+		if (!bbdd_is_bfd_ipv6(&p, &off, tot_len, digest))
 			return NULL;
 	}
 
@@ -147,6 +176,9 @@ bbdd_get_bfd(struct __sk_buff *skb, u16 *tot_len,
 	if (udph->dest != bpf_htons(BFD_SINGLE_HOP_PORT) &&
 	    udph->dest != bpf_htons(BFD_MULTI_HOP_PORT))
 		return NULL;
+
+	if (digest != NULL)
+		digest->multihop = udph->dest == bpf_htons(BFD_MULTI_HOP_PORT);
 
 	off += sizeof(*udph);
 	return bpf_dynptr_slice(&p, off, bfd_buf, bfd_buf_size);
@@ -280,7 +312,7 @@ int bbdd_tx(struct __sk_buff *skb)
 	u32 id;
 	int ret;
 
-	bfd = bbdd_get_bfd(skb, &tot_len, bfd_buf, sizeof bfd_buf);
+	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len, NULL);
 	if (bfd == NULL)
 		goto tx_not_bfd;
 
