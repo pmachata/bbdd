@@ -14,7 +14,7 @@
 	FIELD(rx_discr_not_found)		\
 	FIELD(rx_socket_not_found)		\
 	FIELD(rx_socket_assign_error)		\
-	FIELD(rx_ring_buffer_error)		\
+	FIELD(ring_buffer_error)		\
 	/**/
 
 #define BBDD_SESSION_DIAG_STATS(FIELD)		\

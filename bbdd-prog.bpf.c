@@ -37,16 +37,41 @@ struct {
 	__uint(max_entries, 256 * 1024);
 } bbdd_bpf_rb SEC(".maps");
 
+#define BUMP(COUNTER) __sync_fetch_and_add(&COUNTER, 1)
+
+#define BBDD_ELEM_TYPE(ELEM)						\
+	_Generic((ELEM),						\
+		 struct bbdd_bpf_rb_elem_rx_timeout:			\
+			BBDD_BPF_RB_ELEM_RX_TIMEOUT,			\
+		 struct bbdd_bpf_rb_elem_rx_unk_discr:			\
+			BBDD_BPF_RB_ELEM_RX_UNK_DISCR,			\
+		 struct bbdd_bpf_rb_elem_rx_unx_packet:			\
+			BBDD_BPF_RB_ELEM_RX_UNX_PACKET,			\
+		 struct bbdd_bpf_rb_elem_tx_no_neighbor:		\
+			BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR)
+
+#define BBDD_NOTIFY_ELEM_INIT(ELEM)					\
+	do {								\
+		typeof(*ELEM) *bbdd__elem;				\
+		size_t sz = sizeof(*bbdd__elem);			\
+									\
+		bbdd__elem = bpf_ringbuf_reserve(&bbdd_bpf_rb, sz, 0);	\
+		if (!bbdd__elem) {					\
+			BUMP(bbdd_prog_global_diag_stats.ring_buffer_error); \
+			return;						\
+		}							\
+									\
+		bbdd__elem->head.type = BBDD_ELEM_TYPE(*bbdd__elem);	\
+		(ELEM) = bbdd__elem;					\
+	} while (0)
+
 static void bbdd_tx_notify_no_neighbor(u16 proto,
 				       const struct bpf_fib_lookup *params)
 {
 	struct bbdd_bpf_rb_elem_tx_no_neighbor *elem;
 
-	elem = bpf_ringbuf_reserve(&bbdd_bpf_rb, sizeof(*elem), 0);
-	if (!elem)
-		return;
+	BBDD_NOTIFY_ELEM_INIT(elem);
 
-	elem->head.type = BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR;
 	elem->ifindex = params->ifindex;
 	elem->ethtype = bpf_ntohs(proto);
 	if (proto == bpf_htons(ETH_P_IP))
@@ -274,8 +299,6 @@ int bbdd_tx(struct __sk_buff *skb)
 
 	if (!skb->hash)
 		bpf_set_hash(skb, id);
-
-#define BUMP(COUNTER) __sync_fetch_and_add(&COUNTER, 1)
 
 	/* FIB lookup */
 	params = config->fib_lookup;
