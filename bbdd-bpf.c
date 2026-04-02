@@ -48,25 +48,8 @@ struct bbdd_bpf {
 static int bbdd_bpf_print(enum libbpf_print_level level,
 			  const char *fmt, va_list args)
 {
-	int priority;
-
-	if ((int)level > bbdd_env.verbosity)
-		return 0;
-
-	switch (level) {
-	case LIBBPF_WARN:
-		priority = LOG_WARNING;
-		break;
-	case LIBBPF_INFO:
-		priority = LOG_INFO;
-		break;
-	case LIBBPF_DEBUG:
-	default:
-		priority = LOG_DEBUG;
-		break;
-	}
-
-	vsyslog(priority, fmt, args);
+	if ((int)level <= bbdd_env.verbosity)
+		vfprintf(stderr, fmt, args);
 	return 0;
 }
 
