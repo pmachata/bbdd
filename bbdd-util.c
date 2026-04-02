@@ -37,9 +37,7 @@ void bbdd_util_printerr(int rc, char **error, const char *fmt, ...)
 	}
 
 	if (*error) {
-		if (rc > 0)
-			fprintf(stderr, ": ");
-		fprintf(stderr, "%s\n", *error);
+		fprintf(stderr, ": %s\n", *error);
 		free(*error);
 	}
 }
