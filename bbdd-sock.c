@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <linux/if_ether.h>
 #include <linux/types.h>
 
 #include "bbdd-util.h"
@@ -447,28 +448,32 @@ void bbdd_sock_close_c(struct bbdd_sock *cli)
 	bbdd_sock_close(cli);
 }
 
-int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
+int bbdd_sock_open_raw(sa_family_t family,
 		       struct bbdd_sock *sock,
 		       char **error)
 {
+	uint16_t ethtype;
 	int one = 1;
 	int fd;
 	int rc;
 
-	switch (addr.sa.sa_family) {
+	switch (family) {
 	case AF_INET:
+		ethtype = ETH_P_IP;
+		break;
 	case AF_INET6:
+		ethtype = ETH_P_IPV6;
 		break;
 	default:
-		bbdd_util_fmterr(error, "bbdd_sock_open_udp: family `%d' not supported",
-				 addr.sa.sa_family);
+		bbdd_util_fmterr(error, "bbdd_sock_open_raw: family `%d' not supported",
+				 family);
 		return -1;
 	}
 
-	fd = socket(addr.sa.sa_family, SOCK_DGRAM, 0);
+	fd = socket(AF_PACKET, SOCK_RAW, htons(ethtype));
 	if (fd < 0) {
 		bbdd_util_fmterr(error, "socket(af=%d, SOCK_DGRAM): %s",
-				 addr.sa.sa_family, strerror(errno));
+				 family, strerror(errno));
 		return -1;
 	}
 
@@ -478,25 +483,9 @@ int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		goto close_fd;
 	}
 
-	if (addr.sa.sa_family == AF_INET6) {
-		rc = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
-				&one, sizeof(one));
-		if (rc < 0) {
-			bbdd_util_fmterr(error, "IPV6_V6ONLY: %s",
-					 strerror(errno));
-			goto close_fd;
-		}
-	}
-
-	rc = bind(fd, &addr.sa, addr.len);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "bind: %m");
-		goto close_fd;
-	}
-
 	*sock = (struct bbdd_sock) {
 		.fd = fd,
-		.sa = addr,
+		.sa.sa.sa_family = family,
 	};
 	return 0;
 
@@ -505,7 +494,7 @@ close_fd:
 	return -1;
 }
 
-void bbdd_sock_close_udp(struct bbdd_sock *sock)
+void bbdd_sock_close_raw(struct bbdd_sock *sock)
 {
 	close(sock->fd);
 }

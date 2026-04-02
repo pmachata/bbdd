@@ -2229,33 +2229,9 @@ bbdd_d_rx_sockets_close(struct bbdd_d_rx_socks *rx_socks)
 {
 #define CLOSE_SOCK(NAME, ...)						\
 		if (rx_socks->NAME##_sk.sa.sa.sa_family != AF_UNSPEC)	\
-			bbdd_sock_close_udp(&rx_socks->NAME##_sk);
+			bbdd_sock_close_raw(&rx_socks->NAME##_sk);
 	BBDD_GLOBAL_RX_SOCKETS(CLOSE_SOCK)
 #undef CLOSE_SOCK
-}
-
-static int
-bbdd_d_rx_sockets_open_one(struct bbdd_sock *rx_sock,
-			   uint16_t af, uint16_t port,
-			   char **error)
-{
-	struct bbdd_sockaddr addr;
-
-	addr.sa.sa_family = af;
-	switch (af) {
-	case AF_INET:
-		addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
-		addr.sin.sin_port = htons(port);
-		addr.len = sizeof(addr.sin);
-		break;
-	case AF_INET6:
-		addr.sin6.sin6_addr = in6addr_any;
-		addr.sin6.sin6_port = htons(port);
-		addr.len = sizeof(addr.sin6);
-		break;
-	}
-
-	return bbdd_sock_open_udp(addr, rx_sock, error);
 }
 
 static int
@@ -2266,10 +2242,10 @@ bbdd_d_rx_sockets_open(struct bbdd_d_rx_socks *rx_socks,
 
 	*rx_socks = (struct bbdd_d_rx_socks){};
 
-#define OPEN_SOCK(NAME, AF, PORT)					\
+#define OPEN_SOCK(NAME, AF)						\
 	do {								\
-		rc = bbdd_d_rx_sockets_open_one(&rx_socks->NAME##_sk,	\
-						(AF), (PORT), error);	\
+		rc = bbdd_sock_open_raw((AF), &rx_socks->NAME##_sk,	\
+					error);				\
 		if (rc)							\
 			goto close;					\
 	} while (0);
