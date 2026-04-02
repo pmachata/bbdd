@@ -54,30 +54,43 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 }
 
 static int
+bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
+			  const struct bbdd_bpf_addr *bfd_addr,
+			  struct bbdd_sockaddr *addr,
+			  const char *context,
+			  char **error)
+{
+	switch (ethtype) {
+	case ETH_P_IP:
+		addr->sa.sa_family = AF_INET;
+		memcpy(&addr->sin.sin_addr, bfd_addr->addr,
+		       sizeof(addr->sin.sin_addr));
+		addr->len = sizeof(addr->sin);
+		return 0;
+	case ETH_P_IPV6:
+		addr->sa.sa_family = AF_INET6;
+		memcpy(&addr->sin6.sin6_addr, bfd_addr->addr,
+		       sizeof(addr->sin6.sin6_addr));
+		addr->len = sizeof(addr->sin6);
+		return 0;
+	}
+
+	bbdd_util_fmterr(error, "%s: invalid ethtype %#x", context, ethtype);
+	return -EPROTO;
+}
+
+static int
 bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem,
 			       struct bbdd_nl *nl, char **error)
 {
 	struct bbdd_sockaddr addr = {};
+	int err;
 
-	switch (elem->ethtype) {
-	case ETH_P_IP:
-		addr.sa.sa_family = AF_INET;
-		memcpy(&addr.sin.sin_addr, elem->addr.addr,
-		       sizeof(addr.sin.sin_addr));
-		addr.len = sizeof(addr.sin);
-		break;
-	case ETH_P_IPV6:
-		addr.sa.sa_family = AF_INET6;
-		memcpy(&addr.sin6.sin6_addr, elem->addr.addr,
-		       sizeof(addr.sin6.sin6_addr));
-		addr.len = sizeof(addr.sin6);
-		break;
-	default:
-		bbdd_util_fmterr(error,
-				 "BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR: "
-				 "invalid ethtype %d", elem->ethtype);
-		return -EPROTO;
-	}
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->addr, &addr,
+					"BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR",
+					error);
+	if (err)
+		return err;
 
 	return bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, error);
 }
