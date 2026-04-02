@@ -160,6 +160,42 @@ const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 	}
 }
 
+int bbdd_sockaddr_is_zero(const struct bbdd_sockaddr *sa, char **error)
+{
+	size_t size;
+	const unsigned char *buf;
+
+	buf = bbdd_sockaddr_addrbuf(sa, &size, error);
+	if (buf == NULL)
+		return -1;
+
+	for (size_t i = 0; i < size; i++)
+		if (buf[i] != 0)
+			return 0;
+	return 1;
+}
+
+int bbdd_sockaddr_eq(const struct bbdd_sockaddr *sa,
+		     const struct bbdd_sockaddr *sb, char **error)
+{
+	size_t sza, szb;
+	const unsigned char *ba, *bb;
+
+	if (sa->sa.sa_family != sb->sa.sa_family)
+		return 0;
+
+	ba = bbdd_sockaddr_addrbuf(sa, &sza, error);
+	if (ba == NULL)
+		return -1;
+
+	bb = bbdd_sockaddr_addrbuf(sb, &szb, error);
+	if (bb == NULL)
+		return -1;
+
+	assert(sza == szb);
+	return memcmp(ba, bb, sza) == 0;
+}
+
 int bbdd_sockaddr_ntop(socklen_t bufsize;
 		       const struct bbdd_sockaddr *sa,
 		       char buf[bufsize], socklen_t bufsize, char **error)

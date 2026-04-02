@@ -10,6 +10,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 #include <linux/if_ether.h>
 
 #include <bpf/libbpf.h>
@@ -96,11 +97,111 @@ bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *ele
 	return bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, error);
 }
 
+/* Return number of found sessions, or < 0 on error. The last matched session,
+ * if any, is returned through ret_descr. */
 static int
-bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem)
+bbdd_bpf_rb_discr0_find_session(uint32_t *ret_descr,
+				struct bbdd_sess_dir *sdir,
+				uint32_t ifindex,
+				bool multihop,
+				const struct bbdd_sockaddr *pk_src,
+				const struct bbdd_sockaddr *pk_dst,
+				char **error)
 {
-	fprintf(stderr, "RX: discrimininator 0 iif %d ethtype %d ttl %d multihop %d\n",
-		elem->ifindex, elem->ethtype, elem->ttl, elem->multihop);
+	int nmatch = 0;
+	int err;
+
+	for (struct bbdd_d_session *dsess = bbdd_sess_iter_start(sdir);
+	     dsess != NULL; dsess = bbdd_sess_iter_next(dsess)) {
+		const struct bbdd_sockaddr *ss_src = &dsess->src;
+		const struct bbdd_sockaddr *ss_dst = &dsess->dst;
+
+		if (multihop != dsess->flags.multihop)
+			continue;
+
+		if (ss_src->sa.sa_family == 0)
+			/* Session doesn't have set source address. */
+			goto dst;
+		if (ss_src->sa.sa_family != pk_src->sa.sa_family)
+			continue;
+
+		err = bbdd_sockaddr_eq(ss_src, pk_src, error);
+		if (err < 0)
+			return err;
+		if (err == false)
+			/* ss_src != pk_src. */
+			continue;
+
+	dst:
+		if (ss_dst->sa.sa_family == 0)
+			/* Session doesn't have set destination address. Weird,
+			 * but we are not validating here, so eat it. */
+			goto match;
+		if (ss_dst->sa.sa_family != pk_dst->sa.sa_family)
+			continue;
+
+		err = bbdd_sockaddr_eq(ss_dst, pk_dst, error);
+		if (err < 0)
+			return err;
+		if (err == false)
+			/* ss_dst != pk_dst. */
+			continue;
+
+	match:
+		nmatch++;
+		*ret_descr = dsess->local.descr;
+	}
+
+	return nmatch;
+}
+
+static int
+bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
+			   struct bbdd_sess_dir *sdir, char **error)
+{
+	struct bbdd_sockaddr saddr;
+	struct bbdd_sockaddr daddr;
+	uint32_t descr;
+	int err;
+	unsigned int nmatch;
+
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr, &saddr,
+					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
+					error);
+	if (err)
+		return err;
+
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->daddr, &daddr,
+					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
+					error);
+	if (err)
+		return err;
+
+	err = bbdd_bpf_rb_discr0_find_session(&descr, sdir,
+					      elem->ifindex, elem->multihop,
+					      &saddr, &daddr, error);
+	if (err < 0)
+		return err;
+	nmatch = (unsigned int) err;
+
+	{
+		char src_str[INET6_ADDRSTRLEN] = {};
+		char dst_str[INET6_ADDRSTRLEN] = {};
+
+		err = bbdd_sockaddr_ntop(&saddr, src_str, sizeof(src_str), error);
+		if (err)
+			return err;
+
+		err = bbdd_sockaddr_ntop(&saddr, dst_str, sizeof(dst_str), error);
+		if (err)
+			return err;
+
+		// xxx this is never hit, because as soon as we add a session
+		// the above is supposed to matche, TX starts transmitting, and
+		// incoming packets then have the right descriptor.
+		fprintf(stderr, "RX: discrimininator zero iif %d src %s dst %s ttl %d multihop %d: %u matches\n",
+			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
+	}
 	return 0;
 }
 
@@ -190,6 +291,19 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 	free(rb_ctx);
 }
 
+static int bbdd_bpf_attach_sock(struct bpf_program *prog, int sock_fd,
+				char **error)
+{
+	int prog_fd = bpf_program__fd(prog);
+
+	if (setsockopt(sock_fd, SOL_SOCKET, SO_ATTACH_BPF,
+		       &prog_fd, sizeof(prog_fd)) < 0) {
+		bbdd_util_fmterr(error, "SO_ATTACH_BPF: %m");
+		return -1;
+	}
+	return 0;
+}
+
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
@@ -217,8 +331,17 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;
 
+#define ATTACH_SOCK(NAME, ...) \
+	if (bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv, \
+				 conf->NAME##_fd, error) < 0) \
+		goto free_rb_ctx;
+	BBDD_GLOBAL_RX_SOCKETS(ATTACH_SOCK)
+#undef ATTACH_SOCK
+
 	return bpf;
 
+free_rb_ctx:
+	bbdd_bpf_rb_fini(bpf->rb_ctx);
 destroy_prog:
 	bbdd_prog__destroy(bpf->skel);
 free_bpf:

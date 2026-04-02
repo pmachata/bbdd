@@ -43,6 +43,13 @@ int bbdd_sockaddr_ntop(socklen_t bufsize;
 const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 				  size_t *size, char **error);
 
+/* Returns 0 or 1 for false or true; or < 0 for errors. */
+int bbdd_sockaddr_is_zero(const struct bbdd_sockaddr *sa, char **error);
+
+/* Returns 0 or 1 for false or true; or < 0 for errors. */
+int bbdd_sockaddr_eq(const struct bbdd_sockaddr *sa,
+		     const struct bbdd_sockaddr *sb, char **error);
+
 /* Parse a string in format of <proto>://<address>:<port>, with IPv6 address
  * enclosed in [brackets]. */
 int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *sa,

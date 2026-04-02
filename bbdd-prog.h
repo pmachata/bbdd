@@ -4,12 +4,14 @@
 #define BBDD_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(tx_no_session)			\
 	FIELD(tx_not_bfd)			\
-	FIELD(rx_packet_too_small)		\
+	FIELD(rx_not_bfd)			\
+	FIELD(rx_no_session)			\
 	FIELD(rx_wrong_version_number)		\
 	FIELD(rx_invalid_length)		\
 	FIELD(rx_detection_multiplier_0)	\
 	FIELD(rx_multipoint_not_0)		\
-	FIELD(rx_discr_0)			\
+	FIELD(rx_my_discr_0)			\
+	FIELD(rx_your_discr_0)			\
 	FIELD(rx_wrong_state)			\
 	FIELD(rx_discr_not_found)		\
 	FIELD(rx_socket_not_found)		\
@@ -71,6 +73,13 @@ struct bbdd_bfd_session_data {
 #define BFD_SINGLE_HOP_PORT	3784
 #define BFD_MULTI_HOP_PORT	4784
 
+enum bbdd_bfd_packet_state {
+	BBDD_BFD_PACKET_STATE_ADMINDOWN,
+	BBDD_BFD_PACKET_STATE_DOWN,
+	BBDD_BFD_PACKET_STATE_INIT,
+	BBDD_BFD_PACKET_STATE_UP,
+};
+
 struct bbdd_bfd_control_packet {
 	uint8_t version_diag;
 	uint8_t state_bits;
@@ -82,6 +91,18 @@ struct bbdd_bfd_control_packet {
 	__be32 required_rx;
 	__be32 required_echo_rx;
 };
+
+static inline uint8_t
+bbdd_bfd_control_packet_version(struct bbdd_bfd_control_packet *packet)
+{
+	return packet->version_diag >> 5;
+}
+
+static inline uint8_t
+bbdd_bpf_control_packet_state(struct bbdd_bfd_control_packet *packet)
+{
+	return packet->state_bits >> 6;
+}
 
 #define BBDD_GLOBAL_RX_SOCKETS(X)	\
 	X(ipv4, AF_INET)		\

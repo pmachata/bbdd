@@ -2289,7 +2289,7 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 
 	err = bbdd_d_rx_sockets_open(&rx_socks, &error);
 	if (err) {
-		bbdd_util_printerr(err, &error, "Failed to open BFD RX sockets");
+		bbdd_util_printerr(err, &error,  "Failed to open RX sockets");
 		goto poll_fini;
 	}
 
@@ -2310,6 +2310,8 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto sess_dir_destroy;
 	}
 
+	// xxx the veth pair could be created prior to BPF initialization and
+	// then passed in to be attached-to as necessary.
 	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.veth_tx_ifindex,
 				     &error);
 	if (err) {

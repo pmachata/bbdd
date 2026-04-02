@@ -79,6 +79,28 @@ static void bbdd_tx_notify_no_neighbor(u16 proto,
 	else
 		__builtin_memcpy(elem->addr.addr, params->ipv6_dst,
 				 sizeof(elem->addr.addr));
+
+	bpf_ringbuf_submit(elem, 0);
+}
+
+static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
+				   const struct bbdd_bpf_addr *saddr,
+				   const struct bbdd_bpf_addr *daddr,
+				   u8 ttl, u8 multihop,
+				   struct bbdd_bfd_control_packet *packet)
+{
+	struct bbdd_bpf_rb_elem_rx_discr_0 *elem;
+
+	BBDD_NOTIFY_ELEM_INIT(elem);
+
+	elem->ifindex = skb->ingress_ifindex;
+	elem->ethtype = bpf_ntohs(skb->protocol);
+	elem->saddr = *saddr;
+	elem->daddr = *daddr;
+	elem->ttl = ttl;
+	elem->multihop = multihop;
+	elem->packet = *packet;
+
 	bpf_ringbuf_submit(elem, 0);
 }
 
@@ -99,6 +121,7 @@ static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off,
 	iph = bpf_dynptr_slice(p, *off, iph_buf, sizeof(iph_buf));
 	if (!iph)
 		return false;
+
 	if (iph->protocol != IPPROTO_UDP)
 		return false;
 
@@ -312,6 +335,8 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	u32 id;
 	int ret;
 
+	/* SKB is an Ethernet packet. */
+
 	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len, NULL);
 	if (bfd == NULL)
 		goto tx_not_bfd;
@@ -409,6 +434,94 @@ SEC("tc")
 int bbdd_xmit_veth_rx(struct __sk_buff *skb)
 {
 	return bpf_redirect(bbdd_veth_tx_ifindex, 0);
+}
+
+SEC("socket")
+int bbdd_recv(struct __sk_buff *skb)
+{
+	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
+	struct bbdd_bfd_rx_pkt_digest digest = {};
+	struct bbdd_bfd_session_data *data;
+	struct bbdd_bfd_control_packet *bfd;
+	struct bpf_dynptr p = {};
+	struct udphdr *udph;
+	struct iphdr *iph;
+	u32 key;
+	u32 off;
+	u16 tot_len;
+	int ret;
+
+	/* SKB is an Ethernet packet. */
+
+	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, NULL, &digest);
+	if (bfd == NULL) {
+		BUMP(bbdd_prog_global_diag_stats.rx_not_bfd);
+		return TC_ACT_OK;
+	}
+
+	/* If the version number is not correct (1), the packet MUST be
+	 * discarded. */
+	if (bbdd_bfd_control_packet_version(bfd) != 1) {
+		BUMP(bbdd_prog_global_diag_stats.rx_wrong_version_number);
+		return TC_ACT_SHOT;
+	}
+
+	/* xxx bounce authentication */
+
+	/* xxx If the Length field is less than the minimum correct value (24 if
+	 * the A bit is clear, or 26 if the A bit is set), the packet MUST be
+	 * discarded. */
+	/* xxx If the Length field is greater than the payload of the
+	 * encapsulating protocol, the packet MUST be discarded. */
+	/* xxx If the Multipoint (M) bit is nonzero, the packet MUST be
+	 * discarded. */
+
+	/* If the Detect Mult field is zero, the packet MUST be discarded. */
+	if (bfd->detection_multiplier == 0) {
+		BUMP(bbdd_prog_global_diag_stats.rx_detection_multiplier_0);
+		return TC_ACT_SHOT;
+	}
+
+	/* If the My Discriminator field is zero, the packet MUST be
+	 * discarded. */
+	if (bfd->my_disc == 0) {
+		BUMP(bbdd_prog_global_diag_stats.rx_my_discr_0);
+		return TC_ACT_SHOT;
+	}
+
+	/* If the Your Discriminator field is zero and the State field is not
+	   Down or AdminDown, the packet MUST be discarded. */
+	if (bfd->your_disc == 0) {
+		switch (bbdd_bpf_control_packet_state(bfd)) {
+		case BBDD_BFD_PACKET_STATE_ADMINDOWN:
+		case BBDD_BFD_PACKET_STATE_DOWN:
+			break;
+		case BBDD_BFD_PACKET_STATE_INIT:
+		case BBDD_BFD_PACKET_STATE_UP:
+			BUMP(bbdd_prog_global_diag_stats.rx_wrong_state);
+			return TC_ACT_SHOT;
+		}
+
+		/* If the Your Discriminator field is zero, the session MUST be
+		 * selected based on some combination of other fields [...] */
+
+		BUMP(bbdd_prog_global_diag_stats.rx_your_discr_0);
+		bbdd_rx_notify_discr_0(skb, &digest.saddr, &digest.daddr,
+				       digest.ttl, digest.multihop, bfd);
+		return TC_ACT_SHOT;
+	}
+
+	key = bpf_ntohl(bfd->your_disc);
+	data = bpf_map_lookup_elem(&bbdd_bpf_session_data_hash, &key);
+	if (data == NULL) {
+		BUMP(bbdd_prog_global_diag_stats.rx_no_session);
+		return TC_ACT_SHOT;
+	}
+
+	BUMP(data->stats.rx_packets);
+	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
+
+	return TC_ACT_SHOT;
 }
 
 char _license[] SEC("license") = "GPL";
