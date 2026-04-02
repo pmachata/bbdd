@@ -115,7 +115,7 @@ struct bbdd_bpf_rb_elem_head {
 struct bbdd_bpf_rb_elem_tx_no_neighbor {
 	struct bbdd_bpf_rb_elem_head head;
 	int ifindex;
-	int ethtype;
+	__u16 ethtype;
 	struct bbdd_bpf_addr addr;
 };
 
