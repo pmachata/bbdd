@@ -232,12 +232,9 @@ static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, void *data, char **error)
 
 	rb_ctx->error = error;
 	ret = ring_buffer__consume(rb_ctx->rb);
-	if (ret < 0) {
-		bbdd_util_fmterr(error, "ring_buffer__consume: %s",
-				 strerror(-ret));
-		return -1;
-	}
 	rb_ctx->error = NULL;
+	if (ret < 0)
+		return -1;
 
 	return 0;
 }
