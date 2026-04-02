@@ -2317,30 +2317,28 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto poll_fini;
 	}
 
-#define ASSIGN_SOCK(NAME, ...) \
-		bpf_conf.NAME##_fd = rx_socks.NAME##_sk.fd;
-	BBDD_GLOBAL_RX_SOCKETS(ASSIGN_SOCK)
-#undef ASSIGN_SOCK
-
-	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &bpf_conf, &error);
-	if (bbdd.bpf == NULL) {
-		fprintf(stderr, "Failed to initialize BPF: %s\n", error);
-		free(error);
-		goto rx_sockets_close;
-	}
-
 	bbdd.sdir = bbdd_sess_dir_create();
 	if (bbdd.sdir == NULL) {
 		fprintf(stderr, "Failed to create session directory: %m\n");
-		goto bpf_destroy;
+		goto rx_sockets_close;
+	}
+
+#define ASSIGN_SOCK(NAME, ...) \
+		bpf_conf.NAME##_fd = rx_socks.NAME##_sk.fd;
+	BBDD_GLOBAL_RX_SOCKETS(ASSIGN_SOCK);
+#undef ASSIGN_SOCK
+
+	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &bpf_conf, bbdd.sdir, &error);
+	if (bbdd.bpf == NULL) {
+		bbdd_util_printerr(err, &error,  "Failed to initialize BPF");
+		goto sess_dir_destroy;
 	}
 
 	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.veth_tx_ifindex,
 				     &error);
 	if (err) {
-		fprintf(stderr, "Failed to prepare veth pair: %s\n", error);
-		free(error);
-		goto sess_dir_destroy;
+		bbdd_util_printerr(err, &error,  "Failed to prepare veth pair");
+		goto bpf_destroy;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
@@ -2361,10 +2359,10 @@ sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
 fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
-sess_dir_destroy:
-	bbdd_sess_dir_destroy(bbdd.sdir);
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
+sess_dir_destroy:
+	bbdd_sess_dir_destroy(bbdd.sdir);
 rx_sockets_close:
 	bbdd_d_rx_sockets_close(&rx_socks);
 poll_fini:

@@ -35,6 +35,7 @@ struct bbdd_bpf_rb_context {
 	struct bbdd_bpf *bpf;
 	struct ring_buffer *rb;
 	struct bbdd_nl *nl;
+	struct bbdd_sess_dir *sdir;
 	char **error;
 };
 
@@ -110,9 +111,11 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
-		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl, rb_ctx->error);
+		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl,
+						      rb_ctx->error);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		return bbdd_bpf_rb_handle_discr_0(data);
+		return bbdd_bpf_rb_handle_discr_0(data, rb_ctx->sdir,
+						  rb_ctx->error);
 	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
 		fprintf(stderr, "unhandled RB event type %d\n", head->type);
@@ -140,7 +143,8 @@ static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, void *data, char **error)
 
 static struct bbdd_bpf_rb_context *
 bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
-		 struct bbdd_nl *nl, char **error)
+		 struct bbdd_nl *nl, struct bbdd_sess_dir *sdir,
+		 char **error)
 {
 	struct bbdd_bpf_rb_context *rb_ctx;
 	struct ring_buffer *rb;
@@ -169,6 +173,7 @@ bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 	*rb_ctx = (struct bbdd_bpf_rb_context) {
 		.rb = rb,
 		.nl = nl,
+		.sdir = sdir,
 	};
 	return rb_ctx;
 
@@ -187,7 +192,8 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
-				 struct bbdd_bpf_global_config *,
+				 struct bbdd_bpf_global_config *conf,
+				 struct bbdd_sess_dir *sdir,
 				 char **error)
 {
 	struct bbdd_bpf *bpf;
@@ -206,7 +212,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto free_bpf;
 	}
 
-	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, error);
+	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, error);
 	if (bpf->rb_ctx == NULL)
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;

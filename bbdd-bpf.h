@@ -6,6 +6,7 @@
 
 #include "bbdd-nl.h"
 #include "bbdd-poll.h"
+#include "bbdd-sess.h"
 #include "bbdd-sock.h"
 
 struct bbdd_bpf;
@@ -14,6 +15,7 @@ struct bbdd_bpf_global_config;
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
+				 struct bbdd_sess_dir *sdir,
 				 char **error);
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf);
 
