@@ -35,28 +35,9 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 						uint32_t id,
 						char **error);
 
-int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 uint32_t id,
-			 uint32_t ifindex,
-			 const struct bbdd_sockaddr *src,
-			 const struct bbdd_sockaddr *dst,
-			 uint32_t tbid,
-			 uint32_t flags,
-			 uint32_t min_interval_us,
-			 uint32_t max_interval_us,
-			 uint32_t gen_id,
-			 char **error);
+int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid, char **error);
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    uint32_t id,
-			    uint32_t ifindex,
-			    const struct bbdd_sockaddr *src,
-			    const struct bbdd_sockaddr *dst,
-			    uint32_t tbid,
-			    uint32_t flags,
-			    uint32_t min_interval_ns,
-			    uint32_t max_interval_ns,
-			    uint32_t gen_id,
-			    char **error);
-
-int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t lid, char **error);
+			    const struct bbdd_d_session *dsess,
+			    uint32_t veth_tx_ifindex,
+			    bool add, char **error);

@@ -15,6 +15,10 @@
 
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/udp.h>
+#include <netpacket/packet.h>
 
 #include "bbdd.h"
 #include "bbdd-nl.h"
@@ -499,17 +503,17 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	return 0;
 }
 
-int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    uint32_t id,
-			    uint32_t ifindex,
-			    const struct bbdd_sockaddr *src,
-			    const struct bbdd_sockaddr *dst,
-			    uint32_t tbid,
-			    uint32_t flags,
-			    uint32_t min_interval_us,
-			    uint32_t max_interval_us,
-			    uint32_t gen_id,
-			    char **error)
+static int bbdd_bpf_session_do_update(struct bbdd_bpf *bpf,
+				      uint32_t id,
+				      uint32_t ifindex,
+				      const struct bbdd_sockaddr *src,
+				      const struct bbdd_sockaddr *dst,
+				      uint32_t tbid,
+				      uint32_t flags,
+				      uint32_t min_interval_us,
+				      uint32_t max_interval_us,
+				      uint32_t gen_id,
+				      char **error)
 {
 	struct bbdd_bfd_session_config config;
 	int err;
@@ -529,17 +533,17 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 					 gen_id, error);
 }
 
-int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 uint32_t id,
-			 uint32_t ifindex,
-			 const struct bbdd_sockaddr *src,
-			 const struct bbdd_sockaddr *dst,
-			 uint32_t tbid,
-			 uint32_t flags,
-			 uint32_t min_interval_us,
-			 uint32_t max_interval_us,
-			 uint32_t gen_id,
-			 char **error)
+static int bbdd_bpf_session_do_add(struct bbdd_bpf *bpf,
+				   uint32_t id,
+				   uint32_t ifindex,
+				   const struct bbdd_sockaddr *src,
+				   const struct bbdd_sockaddr *dst,
+				   uint32_t tbid,
+				   uint32_t flags,
+				   uint32_t min_interval_us,
+				   uint32_t max_interval_us,
+				   uint32_t gen_id,
+				   char **error)
 {
 	struct bbdd_bfd_session_data data = {};
 	int err;
@@ -707,4 +711,219 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 err:
 	json_object_put(obj);
 	return NULL;
+}
+
+static uint32_t bbdd_bpf_cksum_acc(uint32_t sum, const void *buf, size_t len)
+{
+	const uint16_t *p = buf;
+
+	while (len >= 2) {
+		sum += *p++;
+		len -= 2;
+	}
+	if (len)
+		sum += *(const uint8_t *)p;
+	return sum;
+}
+
+static uint16_t bbdd_bpf_cksum_fold(uint32_t sum)
+{
+	while (sum >> 16)
+		sum = (sum & 0xffff) + (sum >> 16);
+	return ~(uint16_t)sum;
+}
+
+static uint16_t bbdd_bpf_inet_cksum(const void *buf, size_t len)
+{
+	return bbdd_bpf_cksum_fold(bbdd_bpf_cksum_acc(0, buf, len));
+}
+
+/* udp_len is in host byte order; udp points to UDP header followed by data */
+static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
+				    const void *udp, uint16_t udp_len)
+{
+	struct {
+		struct in6_addr src;
+		struct in6_addr dst;
+		__be32 len;
+		uint8_t zeros[3];
+		uint8_t nxt;
+	} pseudo = {
+		.src = ip6->ip6_src,
+		.dst = ip6->ip6_dst,
+		.len = htonl(udp_len),
+		.nxt = IPPROTO_UDP,
+	};
+	uint32_t sum = 0;
+
+	sum = bbdd_bpf_cksum_acc(sum, &pseudo, sizeof(pseudo));
+	sum = bbdd_bpf_cksum_acc(sum, udp, udp_len);
+	return bbdd_bpf_cksum_fold(sum);
+}
+
+static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
+				       uint32_t tx_ifindex, char **error)
+{
+	enum { v1 = 1 };
+	struct bbdd_bfd_control_packet bfd = {
+		.version_diag = (v1 << 5) | (uint8_t) dsess->local.state.diag,
+		.state_bits = (uint8_t) dsess->local.state.state << 6,
+		.detection_multiplier = dsess->local.detect_mult,
+		.length = sizeof(bfd),
+		.my_disc = htonl(dsess->local.discr),
+		.your_disc = htonl(dsess->remote.discr),
+		.desired_tx = htonl(dsess->local.min_tx_us),
+		.required_rx = htonl(dsess->local.min_rx_us),
+		.required_echo_rx = 0,
+	};
+	union {
+		struct sockaddr    sa;
+		struct sockaddr_ll sll;
+	} dst_sa = {};
+	ssize_t rc;
+
+	dst_sa.sll.sll_family  = AF_PACKET;
+	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
+	dst_sa.sll.sll_halen   = ETH_ALEN;
+	memset(dst_sa.sll.sll_addr, 0xff, ETH_ALEN);
+
+	if (dsess->dst.sa.sa_family == AF_INET) {
+		struct {
+			struct iphdr ip;
+			struct udphdr udp;
+			struct bbdd_bfd_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin.sin_port;
+		pkt.udp.dest   = dsess->dst.sin.sin_port;
+		pkt.udp.len    = htons(udp_len);
+		pkt.udp.check  = 0; /* optional for IPv4 */
+
+		pkt.ip.version  = 4;
+		pkt.ip.ihl      = 5;
+		pkt.ip.tot_len  = htons(sizeof(pkt));
+		pkt.ip.ttl      = dsess->ttl;
+		pkt.ip.protocol = IPPROTO_UDP;
+		pkt.ip.saddr    = dsess->src.sin.sin_addr.s_addr;
+		pkt.ip.daddr    = dsess->dst.sin.sin_addr.s_addr;
+		pkt.ip.check    = bbdd_bpf_inet_cksum(&pkt.ip, sizeof(pkt.ip));
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
+
+		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	} else {
+		struct {
+			struct ip6_hdr ip6;
+			struct udphdr udp;
+			struct bbdd_bfd_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin6.sin6_port;
+		pkt.udp.dest   = dsess->dst.sin6.sin6_port;
+		pkt.udp.len    = htons(udp_len);
+
+		pkt.ip6.ip6_vfc  = 0x60; /* version 6 */
+		pkt.ip6.ip6_plen = htons(udp_len);
+		pkt.ip6.ip6_nxt  = IPPROTO_UDP;
+		pkt.ip6.ip6_hlim = dsess->ttl;
+		pkt.ip6.ip6_src  = dsess->src.sin6.sin6_addr;
+		pkt.ip6.ip6_dst  = dsess->dst.sin6.sin6_addr;
+		pkt.udp.check    = bbdd_bpf_udp6_cksum(&pkt.ip6, &pkt.udp,
+						       udp_len);
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
+		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	}
+
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "sendto(bfd_tx): %d %m", errno);
+		return -1;
+	}
+	return 0;
+}
+
+static int bbdd_bpf_session_set_mark(const struct bbdd_d_session *dsess,
+				     char **error)
+{
+	uint32_t mark = dsess->gen_id;
+	int rc;
+
+	rc = setsockopt(dsess->sock_fd, SOL_SOCKET, SO_MARK,
+			&mark, sizeof(mark));
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
+		return -1;
+	}
+	return 0;
+}
+
+enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
+
+int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+			    const struct bbdd_d_session *dsess,
+			    uint32_t veth_tx_ifindex,
+			    bool add, char **error)
+{
+	uint32_t min_interval_us;
+	uint32_t max_interval_us;
+	uint32_t tbid = 0;    // xxx VRF support
+	uint32_t flags = BPF_FIB_LOOKUP_SRC;
+	uint32_t fwd_ifindex;
+	int rc;
+
+	min_interval_us = dsess->remote.min_tx_us * 75 / 100;
+	if (dsess->local.detect_mult == 1)
+		max_interval_us = dsess->remote.min_tx_us * 90 / 100;
+	else
+		max_interval_us = dsess->remote.min_tx_us;
+
+	rc = bbdd_bpf_session_set_mark(dsess, error);
+	if (rc != 0)
+		return rc;
+
+	if (tbid != 0)
+		flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
+
+	if (dsess->ifindex != 0) {
+		fwd_ifindex = dsess->ifindex;
+		flags |= BPF_FIB_LOOKUP_OUTPUT;
+	} else {
+		fwd_ifindex = veth_tx_ifindex;
+	}
+
+#define ARGS	bpf, dsess->local.discr, fwd_ifindex,			\
+		&dsess->src, &dsess->dst, tbid, flags,			\
+		min_interval_us, max_interval_us, dsess->gen_id,	\
+		error
+
+	if (add)
+		rc = bbdd_bpf_session_do_add(ARGS);
+	else
+		rc = bbdd_bpf_session_do_update(ARGS);
+	if (rc != 0)
+		return rc;
+#undef ARGS
+
+	rc = bbdd_bpf_session_inject_pkt(dsess, veth_tx_ifindex, error);
+	if (rc != 0)
+		goto del_session;
+
+	return 0;
+
+	/* There's no reliable way to roll back everything, and e.g. rolling
+	 * back the mark is pointless. Unless everything lines up just right,
+	 * the session is broken. Even if the standard allowed to do something
+	 * like add a new session with new id and then remove the old one, when
+	 * the removal fails, we've got two sessions and it's broken. The only
+	 * thing that we clean up is the session add. */
+del_session:
+	if (add)
+		bbdd_bpf_session_delete(bpf, dsess->local.discr, NULL);
+	return rc;
 }
