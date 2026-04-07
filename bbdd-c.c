@@ -411,7 +411,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 		polsize_state_only,
 
 		/* Rest of the complete policy. */
-		pol_descr = polsize_state_only,
+		pol_discr = polsize_state_only,
 		pol_detect_mult,
 		pol_min_tx_us,
 		pol_min_rx_us,
@@ -423,7 +423,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 				.required = true },
 		[pol_diag] = { .key = "diag", .type = json_type_string,
 			       .required = true },
-		[pol_descr] = { .key = "descr",
+		[pol_discr] = { .key = "discr",
 				.type = json_type_int, .required = true },
 		[pol_detect_mult] = { .key = "detect_mult",
 				      .type = json_type_int, .required = true },
@@ -470,7 +470,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 #define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
 #define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
 
-	DISSECT_U32(descr);
+	DISSECT_U32(discr);
 	DISSECT_U8(detect_mult);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
@@ -696,7 +696,7 @@ bbdd_c_session_show_state_end(const struct bbdd_d_session_state_end *end)
 static void
 bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 {
-	printf("descr %u ", data->descr);
+	printf("discr %u ", data->discr);
 	printf("detect-mult %u ", data->detect_mult);
 	printf("min_tx %u us ", data->min_tx_us);
 	printf("min_rx %u us ", data->min_rx_us);
@@ -708,8 +708,8 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 				    struct bbdd_c_session_state *state)
 {
 	bool seen = false;
-	if (sess->descr_seen) {
-		printf("descr %u ", sess->descr);
+	if (sess->discr_seen) {
+		printf("discr %u ", sess->discr);
 		seen = true;
 	}
 	if (sess->src_af) {
@@ -806,11 +806,11 @@ static int bbdd_c_session_stats_dissect_one(struct json_object *obj,
 					    char **error)
 {
 	enum {
-		pol_descr,
+		pol_discr,
 		pol_stats,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_descr] = { .key = "descr", .type = json_type_int,
+		[pol_discr] = { .key = "discr", .type = json_type_int,
 				.required = true },
 		[pol_stats] = { .key = "stats", .type = json_type_object,
 				.required = true },
@@ -824,8 +824,8 @@ static int bbdd_c_session_stats_dissect_one(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	printf("descr %" PRIu32 ":\n",
-	       (uint32_t)json_object_get_uint64(values[pol_descr]));
+	printf("discr %" PRIu32 ":\n",
+	       (uint32_t)json_object_get_uint64(values[pol_discr]));
 	bbdd_c_print_stats_obj(values[pol_stats]);
 	return 0;
 }
@@ -944,12 +944,12 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
-		"	KEY ::= { descr | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
+		"	KEY ::= { discr | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
 		"	FLAG ::= { multihop | demand | cbit | echo | ipv6 | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value"
 		"\n"
 		"Parameter KEY and VALUE details:\n"
-		"	descr U32 	-- session descriptor\n"
+		"	discr U32 	-- session discriminator\n"
 		"	src ADDR	-- source address\n"
 		"	dst ADDR	-- destination address\n"
 		"	min-tx U32	-- minimum tx interval in microseconds\n"
@@ -1231,8 +1231,8 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 			goto put_params_obj;
 	}
 
-	if ((sess->descr_seen &&
-	     bbdd_jrpc_append_int(params_obj, "descr", sess->descr)) ||
+	if ((sess->discr_seen &&
+	     bbdd_jrpc_append_int(params_obj, "discr", sess->discr)) ||
 	    (sess->src_af &&
 	     bbdd_jrpc_append_str(params_obj, "src", sess->src)) ||
 	    (sess->dst_af &&
@@ -1466,9 +1466,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
 					       sess->dst,
 					       &sess->dst_af)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "descr",
-					      &sess->descr,
-					      &sess->descr_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "discr",
+					      &sess->discr,
+					      &sess->discr_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
 					      &sess->min_tx_us,
 					      &sess->min_tx_us_seen)) ||

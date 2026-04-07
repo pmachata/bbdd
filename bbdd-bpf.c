@@ -102,9 +102,9 @@ bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *ele
 }
 
 /* Return number of found sessions, or < 0 on error. The last matched session,
- * if any, is returned through ret_descr. */
+ * if any, is returned through ret_discr. */
 static int
-bbdd_bpf_rb_discr0_find_session(uint32_t *ret_descr,
+bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 				struct bbdd_sess_dir *sdir,
 				uint32_t ifindex,
 				bool multihop,
@@ -123,37 +123,43 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_descr,
 		if (multihop != dsess->flags.multihop)
 			continue;
 
-		if (ss_src->sa.sa_family == 0)
-			/* Session doesn't have set source address. */
-			goto dst;
-		if (ss_src->sa.sa_family != pk_src->sa.sa_family)
+		if (dsess->ifindex != 0 && dsess->ifindex != ifindex)
 			continue;
 
-		err = bbdd_sockaddr_eq(ss_src, pk_src, error);
+		/* This is incoming packet aimed at us, so we need to match
+		 * packet DST vs. session SRC and vice versa. */
+
+		if (ss_src->sa.sa_family == 0)
+			/* Session doesn't have set source address. */
+			goto src;
+		if (ss_src->sa.sa_family != pk_dst->sa.sa_family)
+			continue;
+
+		err = bbdd_sockaddr_eq(ss_src, pk_dst, error);
 		if (err < 0)
 			return err;
 		if (err == false)
-			/* ss_src != pk_src. */
+			/* ss_src != pk_dst. */
 			continue;
 
-	dst:
+	src:
 		if (ss_dst->sa.sa_family == 0)
 			/* Session doesn't have set destination address. Weird,
 			 * but we are not validating here, so eat it. */
 			goto match;
-		if (ss_dst->sa.sa_family != pk_dst->sa.sa_family)
+		if (ss_dst->sa.sa_family != pk_src->sa.sa_family)
 			continue;
 
-		err = bbdd_sockaddr_eq(ss_dst, pk_dst, error);
+		err = bbdd_sockaddr_eq(ss_dst, pk_src, error);
 		if (err < 0)
 			return err;
 		if (err == false)
-			/* ss_dst != pk_dst. */
+			/* ss_dst != pk_src. */
 			continue;
 
 	match:
 		nmatch++;
-		*ret_descr = dsess->local.descr;
+		*ret_discr = dsess->local.discr;
 	}
 
 	return nmatch;
@@ -165,7 +171,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 {
 	struct bbdd_sockaddr saddr;
 	struct bbdd_sockaddr daddr;
-	uint32_t descr;
+	uint32_t discr;
 	int err;
 	unsigned int nmatch;
 
@@ -181,7 +187,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 	if (err)
 		return err;
 
-	err = bbdd_bpf_rb_discr0_find_session(&descr, sdir,
+	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
 					      elem->ifindex, elem->multihop,
 					      &saddr, &daddr, error);
 	if (err < 0)

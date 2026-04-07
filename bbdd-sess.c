@@ -11,7 +11,7 @@
  * location when you add it into a hash table." So it's OK to wrap the
  * structure and hand out pointers. */
 struct bbdd_sess_dir_entry {
-	/* key is sess.local.descr */
+	/* key is sess.local.discr */
 	struct bbdd_d_session sess;
 	UT_hash_handle hh;
 };
@@ -56,20 +56,20 @@ static uint32_t bbdd_sess_rand_u32(void)
 	return buf;
 }
 
-uint32_t bbdd_sess_get_unique_descr(struct bbdd_sess_dir *sdir)
+uint32_t bbdd_sess_get_unique_discr(struct bbdd_sess_dir *sdir)
 {
-	uint32_t descr;
+	uint32_t discr;
 
 	do {
-		descr = bbdd_sess_rand_u32();
-	} while (descr != 0 &&
-		 bbdd_sess_dir_get_session(sdir, descr) != NULL);
+		discr = bbdd_sess_rand_u32();
+	} while (discr != 0 &&
+		 bbdd_sess_dir_get_session(sdir, discr) != NULL);
 
-	return descr;
+	return discr;
 }
 
 struct bbdd_d_session *
-bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir, uint32_t descr)
+bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir, uint32_t discr)
 {
 	struct bbdd_sess_dir_entry *entry;
 
@@ -78,28 +78,28 @@ bbdd_sess_dir_add_session(struct bbdd_sess_dir *sdir, uint32_t descr)
 		return NULL;
 
 	*entry = (struct bbdd_sess_dir_entry) {
-		.sess.local.descr = descr,
+		.sess.local.discr = discr,
 	};
 
-	HASH_ADD_INT(sdir->sessions, sess.local.descr, entry);
+	HASH_ADD_INT(sdir->sessions, sess.local.discr, entry);
 	return &entry->sess;
 }
 
 struct bbdd_d_session *bbdd_sess_dir_get_session(struct bbdd_sess_dir *sdir,
-						 uint32_t descr)
+						 uint32_t discr)
 {
 	struct bbdd_sess_dir_entry *entry;
 
-	HASH_FIND_INT(sdir->sessions, &descr, entry);
+	HASH_FIND_INT(sdir->sessions, &discr, entry);
 	if (entry == NULL)
 		return NULL;
 
 	return &entry->sess;
 }
 
-bool bbdd_sess_dir_has_session(struct bbdd_sess_dir *sdir, uint32_t descr)
+bool bbdd_sess_dir_has_session(struct bbdd_sess_dir *sdir, uint32_t discr)
 {
-	return bbdd_sess_dir_get_session(sdir, descr) != NULL;
+	return bbdd_sess_dir_get_session(sdir, discr) != NULL;
 }
 
 void bbdd_sess_dir_del_session(struct bbdd_sess_dir *sdir,
