@@ -1876,12 +1876,36 @@ fini_veth:
 	return err;
 }
 
+static int
+bbdd_d_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
+		     char **error)
+{
+	struct bbdd_sockaddr addr;
+
+	addr.sa.sa_family = af;
+	switch (af) {
+	case AF_INET:
+		addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
+		addr.sin.sin_port = htons(port);
+		addr.len = sizeof(addr.sin);
+		break;
+	case AF_INET6:
+		addr.sin6.sin6_addr = in6addr_any;
+		addr.sin6.sin6_port = htons(port);
+		addr.len = sizeof(addr.sin6);
+		break;
+	}
+
+	return bbdd_sock_open_udp(addr, sock, error);
+}
+
 static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_sock ipv4_sk;
 	struct bbdd_sock ipv6_sk;
+	struct bbdd_sock ipv4_shop;
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
@@ -1913,10 +1937,21 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	if (err != 0)
 		goto ipv4_close;
 
+	// xxx When we don't open a UDP socket, the stack generates ICMP port
+	// unreachable messages. So for now only open IPv4 port so that these go
+	// away. Long-term we need to either open all of the variants or find
+	// another solution. I think just keeping the sockets open is enough,
+	// the ipv4/ipv6 raw socket program takes care of shooting down all the
+	// BPF packets, so the UDP sockets should never see any traffic.
+	err = bbdd_d_sock_open_udp(&ipv4_shop, AF_INET, BFD_SINGLE_HOP_PORT,
+				   &error);
+	if (err != 0)
+		goto ipv6_close;
+
 	bbdd.sdir = bbdd_sess_dir_create();
 	if (bbdd.sdir == NULL) {
 		fprintf(stderr, "Failed to create session directory: %m\n");
-		goto ipv6_close;
+		goto ipv4_shop_close;
 	}
 
 	err = bbdd_d_start_init_veth(bbdd.nl,
@@ -1963,6 +1998,8 @@ fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
+ipv4_shop_close:
+	bbdd_sock_close_udp(&ipv4_shop);
 ipv6_close:
 	bbdd_sock_close_raw(&ipv6_sk);
 ipv4_close:

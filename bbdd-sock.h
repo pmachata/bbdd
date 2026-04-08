@@ -72,6 +72,11 @@ int bbdd_sock_open_raw(sa_family_t family,
 		       char **error);
 void bbdd_sock_close_raw(struct bbdd_sock *sock);
 
+int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
+		       struct bbdd_sock *sock,
+		       char **error);
+void bbdd_sock_close_udp(struct bbdd_sock *sock);
+
 int bbdd_sock_recv(struct bbdd_sock *sock,
 		   struct bbdd_sock *peer,
 		   char **bufp);

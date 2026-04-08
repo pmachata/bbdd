@@ -508,8 +508,8 @@ int bbdd_sock_open_raw(sa_family_t family,
 
 	fd = socket(AF_PACKET, SOCK_RAW, htons(ethtype));
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "socket(af=%d, SOCK_DGRAM): %s",
-				 family, strerror(errno));
+		bbdd_util_fmterr(error, "socket(AF_PACKET, SOCK_RAW): %s",
+				 strerror(errno));
 		return -1;
 	}
 
@@ -531,6 +531,64 @@ close_fd:
 }
 
 void bbdd_sock_close_raw(struct bbdd_sock *sock)
+{
+	close(sock->fd);
+}
+
+int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
+		       struct bbdd_sock *sock,
+		       char **error)
+{
+	int one = 1;
+	int fd;
+	int rc;
+
+	switch (addr.sa.sa_family) {
+	case AF_INET:
+	case AF_INET6:
+		break;
+	default:
+		bbdd_util_fmterr(error, "bbdd_sock_open_udp: family `%d' not supported",
+				 addr.sa.sa_family);
+		return -1;
+	}
+
+	fd = socket(addr.sa.sa_family, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		bbdd_util_fmterr(error, "socket(af=%d, SOCK_DGRAM): %s",
+				 addr.sa.sa_family, strerror(errno));
+		return -1;
+	}
+
+	if (addr.sa.sa_family == AF_INET6) {
+		rc = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+				&one, sizeof(one));
+		if (rc < 0) {
+			bbdd_util_fmterr(error, "IPV6_V6ONLY: %s",
+					 strerror(errno));
+			goto close_fd;
+		}
+	}
+
+	rc = bind(fd, &addr.sa, addr.len);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "bind: %m");
+		goto close_fd;
+	}
+
+	*sock = (struct bbdd_sock) {
+		.fd = fd,
+		.sa = addr,
+	};
+
+	return 0;
+
+close_fd:
+	close(fd);
+	return -1;
+}
+
+void bbdd_sock_close_udp(struct bbdd_sock *sock)
 {
 	close(sock->fd);
 }
