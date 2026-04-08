@@ -71,6 +71,128 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 	return 0;
 }
 
+static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
+					struct bbdd_bpf_session *bsess,
+					uint32_t id,
+					uint32_t ifindex,
+					const struct bbdd_sockaddr *src,
+					const struct bbdd_sockaddr *dst,
+					uint32_t tbid,
+					uint32_t flags,
+					uint32_t min_interval_us,
+					uint32_t max_interval_us,
+					char **error)
+{
+	int af = src->sa.sa_family ?: dst->sa.sa_family;
+	struct bbdd_prog_session_config config = {
+		.fib_lookup = {
+			.family = (uint8_t) af,
+			.l4_protocol = IPPROTO_UDP,
+			.sport = src->sin46.port,
+			.dport = dst->sin46.port,
+			.ifindex = ifindex,
+			.tbid = tbid,
+			.mark = bsess->gen_id,
+		},
+		.bpf_fib_lookup_flags = flags,
+		.min_interval_us = min_interval_us,
+		.max_interval_us = max_interval_us,
+		.gen_id = bsess->gen_id,
+	};
+	int err;
+
+	if (af != dst->sa.sa_family) {
+		bbdd_util_fmterr(error, "Mismatch in families of source and destination addresses");
+		return -1;
+	}
+
+	switch (af) {
+	case AF_INET:
+		config.fib_lookup.ipv4_src = src->sin.sin_addr.s_addr;
+		config.fib_lookup.ipv4_dst = dst->sin.sin_addr.s_addr;
+		break;
+	case AF_INET6:
+		memcpy(config.fib_lookup.ipv6_src, &src->sin6.sin6_addr,
+		       sizeof(config.fib_lookup.ipv6_src));
+		memcpy(config.fib_lookup.ipv6_dst, &dst->sin6.sin6_addr,
+		       sizeof(config.fib_lookup.ipv6_dst));
+		break;
+	default:
+		bbdd_util_fmterr(error, "Unsupported session address family %d",
+				 af);
+		return -1;
+	}
+
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+				   &id, sizeof(id),
+				   &config, sizeof(config),
+				   BPF_ANY);
+	if (err) {
+		bbdd_util_fmterr(error, "Failed to insert / update BPF session config: %s",
+				 strerror(-err));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
+				     struct bbdd_bpf_session *bsess,
+				     uint32_t discr,
+				     uint32_t ifindex,
+				     const struct bbdd_sockaddr *src,
+				     const struct bbdd_sockaddr *dst,
+				     uint32_t tbid,
+				     uint32_t flags,
+				     uint32_t min_interval_us,
+				     uint32_t max_interval_us,
+				     char **error)
+{
+	struct bbdd_prog_session_data data = {};
+	int err;
+
+	err = bbdd_bpf_session_conf_update(bpf, bsess,
+					   discr, ifindex, src, dst, tbid, flags,
+					   min_interval_us, max_interval_us,
+					   error);
+	if (err)
+		return err;
+
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
+				   &discr, sizeof(discr),
+				   &data, sizeof(data),
+				   BPF_ANY);
+	if (err) {
+		bbdd_util_fmterr(error, "Failed to insert session data: %s",
+				 strerror(-err));
+		goto delete;
+	}
+
+	return 0;
+
+delete:
+	bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+			     &discr, sizeof(discr), 0);
+	return err;
+}
+
+static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t discr)
+{
+	int err;
+
+	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+				   &discr, sizeof(discr), 0);
+	if (err != 0)
+		fprintf(stderr, "Couldn't delete session %u from session_config_hash\n",
+			discr);
+
+	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
+				   &discr, sizeof(discr), 0);
+	if (err != 0)
+		fprintf(stderr, "Couldn't delete session %u from session_data_hash\n",
+			discr);
+}
+
 static int
 bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 			  const struct bbdd_bpf_addr *bfd_addr,
@@ -471,128 +593,6 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
 	free(bpf);
-}
-
-static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
-					struct bbdd_bpf_session *bsess,
-					uint32_t id,
-					uint32_t ifindex,
-					const struct bbdd_sockaddr *src,
-					const struct bbdd_sockaddr *dst,
-					uint32_t tbid,
-					uint32_t flags,
-					uint32_t min_interval_us,
-					uint32_t max_interval_us,
-					char **error)
-{
-	int af = src->sa.sa_family ?: dst->sa.sa_family;
-	struct bbdd_prog_session_config config = {
-		.fib_lookup = {
-			.family = (uint8_t) af,
-			.l4_protocol = IPPROTO_UDP,
-			.sport = src->sin46.port,
-			.dport = dst->sin46.port,
-			.ifindex = ifindex,
-			.tbid = tbid,
-			.mark = bsess->gen_id,
-		},
-		.bpf_fib_lookup_flags = flags,
-		.min_interval_us = min_interval_us,
-		.max_interval_us = max_interval_us,
-		.gen_id = bsess->gen_id,
-	};
-	int err;
-
-	if (af != dst->sa.sa_family) {
-		bbdd_util_fmterr(error, "Mismatch in families of source and destination addresses");
-		return -1;
-	}
-
-	switch (af) {
-	case AF_INET:
-		config.fib_lookup.ipv4_src = src->sin.sin_addr.s_addr;
-		config.fib_lookup.ipv4_dst = dst->sin.sin_addr.s_addr;
-		break;
-	case AF_INET6:
-		memcpy(config.fib_lookup.ipv6_src, &src->sin6.sin6_addr,
-		       sizeof(config.fib_lookup.ipv6_src));
-		memcpy(config.fib_lookup.ipv6_dst, &dst->sin6.sin6_addr,
-		       sizeof(config.fib_lookup.ipv6_dst));
-		break;
-	default:
-		bbdd_util_fmterr(error, "Unsupported session address family %d",
-				 af);
-		return -1;
-	}
-
-	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-				   &id, sizeof(id),
-				   &config, sizeof(config),
-				   BPF_ANY);
-	if (err) {
-		bbdd_util_fmterr(error, "Failed to insert / update BPF session config: %s",
-				 strerror(-err));
-		return -1;
-	}
-
-	return 0;
-}
-
-static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
-				     struct bbdd_bpf_session *bsess,
-				     uint32_t id,
-				     uint32_t ifindex,
-				     const struct bbdd_sockaddr *src,
-				     const struct bbdd_sockaddr *dst,
-				     uint32_t tbid,
-				     uint32_t flags,
-				     uint32_t min_interval_us,
-				     uint32_t max_interval_us,
-				     char **error)
-{
-	struct bbdd_prog_session_data data = {};
-	int err;
-
-	err = bbdd_bpf_session_conf_update(bpf, bsess,
-					   id, ifindex, src, dst, tbid, flags,
-					   min_interval_us, max_interval_us,
-					   error);
-	if (err)
-		return err;
-
-	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &id, sizeof(id),
-				   &data, sizeof(data),
-				   BPF_ANY);
-	if (err) {
-		bbdd_util_fmterr(error, "Failed to insert / update BPF session data: %s",
-				 strerror(-err));
-		goto delete;
-	}
-
-	return 0;
-
-delete:
-	bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-			     &id, sizeof(id), 0);
-	return err;
-}
-
-static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t id)
-{
-	int err;
-
-	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-				   &id, sizeof(id), 0);
-	if (err != 0)
-		fprintf(stderr, "Couldn't delete session %u from session_config_hash\n",
-			id);
-
-	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &id, sizeof(id), 0);
-	if (err != 0)
-		fprintf(stderr, "Couldn't delete session %u from session_data_hash\n",
-			id);
 }
 
 static void bbdd_bpf_stat_fmterr(char **error)
