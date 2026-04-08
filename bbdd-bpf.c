@@ -311,68 +311,6 @@ static int bbdd_bpf_attach_sock(struct bpf_program *prog, int sock_fd,
 	return 0;
 }
 
-struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
-				 struct bbdd_nl *nl,
-				 struct bbdd_bpf_global_config *conf,
-				 struct bbdd_sess_dir *sdir,
-				 char **error)
-{
-	struct bbdd_bpf *bpf;
-
-	bpf = calloc(1, sizeof(*bpf));
-	if (bpf == NULL) {
-		bbdd_util_fmterr(error, "calloc: %m");
-		return NULL;
-	}
-
-	libbpf_set_print(bbdd_bpf_print);
-
-	bpf->skel = bbdd_prog__open_and_load();
-	if (!bpf->skel) {
-		bbdd_util_fmterr(error, "bbdd_prog__open_and_load: %m");
-		goto free_bpf;
-	}
-
-	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, error);
-	if (bpf->rb_ctx == NULL)
-		goto destroy_prog;
-	bpf->rb_ctx->bpf = bpf;
-
-#define ATTACH_SOCK(NAME, ...) \
-	if (bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv, \
-				 conf->NAME##_fd, error) < 0) \
-		goto free_rb_ctx;
-	BBDD_GLOBAL_RX_SOCKETS(ATTACH_SOCK)
-#undef ATTACH_SOCK
-
-	return bpf;
-
-free_rb_ctx:
-	bbdd_bpf_rb_fini(bpf->rb_ctx);
-destroy_prog:
-	bbdd_prog__destroy(bpf->skel);
-free_bpf:
-	free(bpf);
-	return NULL;
-}
-
-static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
-{
-	bpf_tc_detach(&attachment->hook, &attachment->opts);
-	free(attachment);
-}
-
-void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
-{
-	if (bpf->rx)
-		bbdd_bpf_detach(bpf->rx);
-	if (bpf->tx)
-		bbdd_bpf_detach(bpf->tx);
-	bbdd_bpf_rb_fini(bpf->rb_ctx);
-	bbdd_prog__destroy(bpf->skel);
-	free(bpf);
-}
-
 static struct bbdd_bpf_attachment *
 bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 		enum bpf_tc_attach_point attach_point,
@@ -442,6 +380,68 @@ int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
 	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx, ifindex,
 				  BPF_TC_EGRESS, error);
 	return bpf->tx != NULL ? 0 : -1;
+}
+
+struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
+				 struct bbdd_nl *nl,
+				 struct bbdd_bpf_global_config *conf,
+				 struct bbdd_sess_dir *sdir,
+				 char **error)
+{
+	struct bbdd_bpf *bpf;
+
+	bpf = calloc(1, sizeof(*bpf));
+	if (bpf == NULL) {
+		bbdd_util_fmterr(error, "calloc: %m");
+		return NULL;
+	}
+
+	libbpf_set_print(bbdd_bpf_print);
+
+	bpf->skel = bbdd_prog__open_and_load();
+	if (!bpf->skel) {
+		bbdd_util_fmterr(error, "bbdd_prog__open_and_load: %m");
+		goto free_bpf;
+	}
+
+	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, error);
+	if (bpf->rb_ctx == NULL)
+		goto destroy_prog;
+	bpf->rb_ctx->bpf = bpf;
+
+#define ATTACH_SOCK(NAME, ...) \
+	if (bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv, \
+				 conf->NAME##_fd, error) < 0) \
+		goto free_rb_ctx;
+	BBDD_GLOBAL_RX_SOCKETS(ATTACH_SOCK)
+#undef ATTACH_SOCK
+
+	return bpf;
+
+free_rb_ctx:
+	bbdd_bpf_rb_fini(bpf->rb_ctx);
+destroy_prog:
+	bbdd_prog__destroy(bpf->skel);
+free_bpf:
+	free(bpf);
+	return NULL;
+}
+
+static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
+{
+	bpf_tc_detach(&attachment->hook, &attachment->opts);
+	free(attachment);
+}
+
+void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
+{
+	if (bpf->rx)
+		bbdd_bpf_detach(bpf->rx);
+	if (bpf->tx)
+		bbdd_bpf_detach(bpf->tx);
+	bbdd_bpf_rb_fini(bpf->rb_ctx);
+	bbdd_prog__destroy(bpf->skel);
+	free(bpf);
 }
 
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
