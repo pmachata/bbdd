@@ -358,7 +358,11 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 		return err;
 	nmatch = (unsigned int) err;
 
-	{
+	/* xxx I think there should be counters for the various scenarios:
+	 * your_discr given, but not found, your_discr given, but no matches
+	 * found, or given, but many matches found. Maybe emit a monitor event
+	 * (when that exists). For now just print a message. */
+	if (nmatch != 1) {
 		char src_str[INET6_ADDRSTRLEN] = {};
 		char dst_str[INET6_ADDRSTRLEN] = {};
 
@@ -366,16 +370,16 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 		if (err)
 			return err;
 
-		err = bbdd_sockaddr_ntop(&saddr, dst_str, sizeof(dst_str), error);
+		err = bbdd_sockaddr_ntop(&daddr, dst_str, sizeof(dst_str), error);
 		if (err)
 			return err;
 
-		// xxx this is never hit, because as soon as we add a session
-		// the above is supposed to matche, TX starts transmitting, and
-		// incoming packets then have the right descriptor.
-		fprintf(stderr, "RX: discrimininator zero iif %d src %s dst %s ttl %d multihop %d: %u matches\n",
+		fprintf(stderr, "RX: session lookup for iif %d src %s dst %s ttl %d multihop %d: expected one match, got %u\n",
 			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
+		return 0;
 	}
+
+	fprintf(stderr, "Matched discriminatior %u\n", discr);
 	return 0;
 }
 
