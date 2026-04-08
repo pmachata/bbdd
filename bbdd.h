@@ -153,9 +153,8 @@ struct bbdd_d_session {
 	/* Remote session data. */
 	struct bbdd_d_session_data remote;
 
-	/* Additional per-session parameters. */
-	uint32_t gen_id;
-	int sock_fd;
+	/* BPF-specific data. */
+	struct bbdd_bpf_session *bpf;
 };
 
 int bbdd_d_start(int argc, char **argv);

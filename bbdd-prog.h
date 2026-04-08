@@ -49,7 +49,7 @@ struct bbdd_prog_global_diag_stats {
 	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
 };
 
-struct bbdd_bfd_session_config {
+struct bbdd_prog_session_config {
 	struct bpf_fib_lookup fib_lookup;
 	__u32 bpf_fib_lookup_flags;
 	__u32 min_interval_us;
@@ -57,7 +57,7 @@ struct bbdd_bfd_session_config {
 	__u32 gen_id;
 };
 
-struct bbdd_bfd_session_data {
+struct bbdd_prog_session_data {
 	struct {
 		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
 	} diag_stats;
@@ -104,19 +104,12 @@ bbdd_bpf_control_packet_state(struct bbdd_bfd_control_packet *packet)
 	return packet->state_bits >> 6;
 }
 
-#define BBDD_GLOBAL_RX_SOCKETS(X)	\
-	X(ipv4, AF_INET)		\
-	X(ipv6, AF_INET6)		\
-	/**/
-
-#define FIELD(NAME, ...) int NAME##_fd;
-
 struct bbdd_bpf_global_config {
+	__u32 veth_rx_ifindex;
 	__u32 veth_tx_ifindex;
-	BBDD_GLOBAL_RX_SOCKETS(FIELD)
+	int ipv4_fd;
+	int ipv6_fd;
 };
-
-#undef FIELD
 
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,

@@ -3,6 +3,7 @@
 
 #include "bbdd-bpf.h"
 
+#include <assert.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -11,10 +12,11 @@
 #include <syslog.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <linux/if_ether.h>
+#include <unistd.h>
 
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
+#include <linux/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
@@ -45,10 +47,20 @@ struct bbdd_bpf_rb_context {
 };
 
 struct bbdd_bpf {
+	/* Some of the conf information is not strictly necessary to keep around
+	 * or duplicated in the attachments, but it's easier to keep it all. */
+	struct bbdd_bpf_global_config conf;
+
 	struct bbdd_prog *skel;
 	struct bbdd_bpf_attachment *rx;
 	struct bbdd_bpf_attachment *tx;
 	struct bbdd_bpf_rb_context *rb_ctx;
+};
+
+/* Per-session data. */
+struct bbdd_bpf_session {
+	uint32_t gen_id;
+	int sock_fd;
 };
 
 static int bbdd_bpf_print(enum libbpf_print_level level,
@@ -311,6 +323,11 @@ static int bbdd_bpf_attach_sock(struct bpf_program *prog, int sock_fd,
 	return 0;
 }
 
+static void bbdd_bpf_detach_sock(int sock_fd)
+{
+	setsockopt(sock_fd, SOL_SOCKET, SO_DETACH_BPF, NULL, 0);
+}
+
 static struct bbdd_bpf_attachment *
 bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 		enum bpf_tc_attach_point attach_point,
@@ -365,21 +382,10 @@ free:
 	return NULL;
 }
 
-int bbdd_bpf_attach_veth_rx(struct bbdd_bpf *bpf, uint32_t ifindex,
-			    char **error)
+static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 {
-	bpf->rx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx, ifindex,
-				  BPF_TC_INGRESS, error);
-	return bpf->rx != NULL ? 0 : -1;
-}
-
-int bbdd_bpf_attach_veth_tx(struct bbdd_bpf *bpf, uint32_t ifindex,
-			    char **error)
-{
-	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)ifindex;
-	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx, ifindex,
-				  BPF_TC_EGRESS, error);
-	return bpf->tx != NULL ? 0 : -1;
+	bpf_tc_detach(&attachment->hook, &attachment->opts);
+	free(attachment);
 }
 
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
@@ -389,12 +395,15 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 char **error)
 {
 	struct bbdd_bpf *bpf;
+	int err;
 
 	bpf = calloc(1, sizeof(*bpf));
 	if (bpf == NULL) {
 		bbdd_util_fmterr(error, "calloc: %m");
 		return NULL;
 	}
+
+	bpf->conf = *conf;
 
 	libbpf_set_print(bbdd_bpf_print);
 
@@ -409,15 +418,41 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;
 
-#define ATTACH_SOCK(NAME, ...) \
-	if (bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv, \
-				 conf->NAME##_fd, error) < 0) \
+	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)conf->veth_tx_ifindex;
+
+	/* Attach programs as the last step when everything else is
+	 * prepared. */
+
+	bpf->rx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx,
+				  conf->veth_rx_ifindex,
+				  BPF_TC_INGRESS, error);
+	if (bpf->rx == NULL)
 		goto free_rb_ctx;
-	BBDD_GLOBAL_RX_SOCKETS(ATTACH_SOCK)
-#undef ATTACH_SOCK
+
+	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx,
+				  conf->veth_tx_ifindex,
+				  BPF_TC_EGRESS, error);
+	if (bpf->tx == NULL)
+		goto detach_rx;
+
+	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
+				   conf->ipv4_fd, error);
+	if (err != 0)
+		goto detach_tx;
+
+	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
+				   conf->ipv6_fd, error);
+	if (err != 0)
+		goto detach_ipv4;
 
 	return bpf;
 
+detach_ipv4:
+	bbdd_bpf_detach_sock(conf->ipv4_fd);
+detach_tx:
+	bbdd_bpf_detach(bpf->tx);
+detach_rx:
+	bbdd_bpf_detach(bpf->rx);
 free_rb_ctx:
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 destroy_prog:
@@ -427,37 +462,31 @@ free_bpf:
 	return NULL;
 }
 
-static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
-{
-	bpf_tc_detach(&attachment->hook, &attachment->opts);
-	free(attachment);
-}
-
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
-	if (bpf->rx)
-		bbdd_bpf_detach(bpf->rx);
-	if (bpf->tx)
-		bbdd_bpf_detach(bpf->tx);
+	bbdd_bpf_detach_sock(bpf->conf.ipv6_fd);
+	bbdd_bpf_detach_sock(bpf->conf.ipv4_fd);
+	bbdd_bpf_detach(bpf->tx);
+	bbdd_bpf_detach(bpf->rx);
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
 	free(bpf);
 }
 
-static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-				     uint32_t id,
-				     uint32_t ifindex,
-				     const struct bbdd_sockaddr *src,
-				     const struct bbdd_sockaddr *dst,
-				     uint32_t tbid,
-				     uint32_t flags,
-				     uint32_t min_interval_us,
-				     uint32_t max_interval_us,
-				     uint32_t gen_id,
-				     char **error)
+static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
+					struct bbdd_bpf_session *bsess,
+					uint32_t id,
+					uint32_t ifindex,
+					const struct bbdd_sockaddr *src,
+					const struct bbdd_sockaddr *dst,
+					uint32_t tbid,
+					uint32_t flags,
+					uint32_t min_interval_us,
+					uint32_t max_interval_us,
+					char **error)
 {
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
-	struct bbdd_bfd_session_config config = {
+	struct bbdd_prog_session_config config = {
 		.fib_lookup = {
 			.family = (uint8_t) af,
 			.l4_protocol = IPPROTO_UDP,
@@ -465,12 +494,12 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			.dport = dst->sin46.port,
 			.ifindex = ifindex,
 			.tbid = tbid,
-			.mark = gen_id,
+			.mark = bsess->gen_id,
 		},
 		.bpf_fib_lookup_flags = flags,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
-		.gen_id = gen_id,
+		.gen_id = bsess->gen_id,
 	};
 	int err;
 
@@ -496,7 +525,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
 				   &id, sizeof(id),
 				   &config, sizeof(config),
 				   BPF_ANY);
@@ -509,59 +538,29 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	return 0;
 }
 
-static int bbdd_bpf_session_do_update(struct bbdd_bpf *bpf,
-				      uint32_t id,
-				      uint32_t ifindex,
-				      const struct bbdd_sockaddr *src,
-				      const struct bbdd_sockaddr *dst,
-				      uint32_t tbid,
-				      uint32_t flags,
-				      uint32_t min_interval_us,
-				      uint32_t max_interval_us,
-				      uint32_t gen_id,
-				      char **error)
+static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
+				     struct bbdd_bpf_session *bsess,
+				     uint32_t id,
+				     uint32_t ifindex,
+				     const struct bbdd_sockaddr *src,
+				     const struct bbdd_sockaddr *dst,
+				     uint32_t tbid,
+				     uint32_t flags,
+				     uint32_t min_interval_us,
+				     uint32_t max_interval_us,
+				     char **error)
 {
-	struct bbdd_bfd_session_config config;
+	struct bbdd_prog_session_data data = {};
 	int err;
 
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
-				   &id, sizeof(id),
-				   &config, sizeof(config), 0);
-	if (err != 0) {
-		bbdd_util_fmterr(error, "Failed to update session %u: session not in hash",
-				 id);
-		return -1;
-	}
-
-	return __bbdd_bpf_session_update(bpf,
-					 id, ifindex, src, dst, tbid, flags,
-					 min_interval_us, max_interval_us,
-					 gen_id, error);
-}
-
-static int bbdd_bpf_session_do_add(struct bbdd_bpf *bpf,
-				   uint32_t id,
-				   uint32_t ifindex,
-				   const struct bbdd_sockaddr *src,
-				   const struct bbdd_sockaddr *dst,
-				   uint32_t tbid,
-				   uint32_t flags,
-				   uint32_t min_interval_us,
-				   uint32_t max_interval_us,
-				   uint32_t gen_id,
-				   char **error)
-{
-	struct bbdd_bfd_session_data data = {};
-	int err;
-
-	err = __bbdd_bpf_session_update(bpf,
-					id, ifindex, src, dst, tbid, flags,
-					min_interval_us, max_interval_us,
-					gen_id, error);
+	err = bbdd_bpf_session_conf_update(bpf, bsess,
+					   id, ifindex, src, dst, tbid, flags,
+					   min_interval_us, max_interval_us,
+					   error);
 	if (err)
 		return err;
 
-	err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
 				   &id, sizeof(id),
 				   &data, sizeof(data),
 				   BPF_ANY);
@@ -574,29 +573,26 @@ static int bbdd_bpf_session_do_add(struct bbdd_bpf *bpf,
 	return 0;
 
 delete:
-	bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
+	bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
 			     &id, sizeof(id), 0);
 	return err;
 }
 
-int bbdd_bpf_session_delete(struct bbdd_bpf *bpf, uint32_t id,
-			    char **error)
+static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t id)
 {
-	int err1;
-	int err2;
 	int err;
 
-	err1 = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_config_hash,
-				    &id, sizeof(id), 0);
-	err2 = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
-				    &id, sizeof(id), 0);
-	err = err1 ?: err2;
+	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+				   &id, sizeof(id), 0);
+	if (err != 0)
+		fprintf(stderr, "Couldn't delete session %u from session_config_hash\n",
+			id);
 
-	if (err)
-		bbdd_util_fmterr(error, "Failed to delete BPF session %u: %s",
-				 id, strerror(-err));
-
-	return err;
+	err = bpf_map__delete_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
+				   &id, sizeof(id), 0);
+	if (err != 0)
+		fprintf(stderr, "Couldn't delete session %u from session_data_hash\n",
+			id);
 }
 
 static void bbdd_bpf_stat_fmterr(char **error)
@@ -647,11 +643,11 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 						     uint32_t id,
 						     char **error)
 {
-	struct bbdd_bfd_session_data data;
+	struct bbdd_prog_session_data data;
 	struct json_object *obj;
 	int err;
 
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
 				   &id, sizeof(id),
 				   &data, sizeof(data), 0);
 	if (err) {
@@ -685,11 +681,11 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 						uint32_t id,
 						char **error)
 {
-	struct bbdd_bfd_session_data data;
+	struct bbdd_prog_session_data data;
 	struct json_object *obj;
 	int err;
 
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_bpf_session_data_hash,
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
 				   &id, sizeof(id),
 				   &data, sizeof(data), 0);
 	if (err) {
@@ -768,6 +764,7 @@ static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
 }
 
 static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
+				       struct bbdd_bpf_session *bsess,
 				       uint32_t tx_ifindex, char **error)
 {
 	enum { v1 = 1 };
@@ -818,7 +815,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
 
-		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
 			    &dst_sa.sa, sizeof(dst_sa.sll));
 	} else {
 		struct {
@@ -843,7 +840,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 						       udp_len);
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
-		rc = sendto(dsess->sock_fd, &pkt, sizeof(pkt), 0,
+		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
 			    &dst_sa.sa, sizeof(dst_sa.sll));
 	}
 
@@ -854,13 +851,13 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	return 0;
 }
 
-static int bbdd_bpf_session_set_mark(const struct bbdd_d_session *dsess,
+static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
 				     char **error)
 {
-	uint32_t mark = dsess->gen_id;
+	uint32_t mark = bsess->gen_id;
 	int rc;
 
-	rc = setsockopt(dsess->sock_fd, SOL_SOCKET, SO_MARK,
+	rc = setsockopt(bsess->sock_fd, SOL_SOCKET, SO_MARK,
 			&mark, sizeof(mark));
 	if (rc < 0) {
 		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
@@ -871,10 +868,10 @@ static int bbdd_bpf_session_set_mark(const struct bbdd_d_session *dsess,
 
 enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
 
-int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    const struct bbdd_d_session *dsess,
-			    uint32_t veth_tx_ifindex,
-			    bool add, char **error)
+static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+				     const struct bbdd_d_session *dsess,
+				     struct bbdd_bpf_session *bsess,
+				     bool add, char **error)
 {
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
@@ -883,13 +880,15 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t fwd_ifindex;
 	int rc;
 
+	bsess->gen_id++;
+
 	min_interval_us = dsess->remote.min_tx_us * 75 / 100;
 	if (dsess->local.detect_mult == 1)
 		max_interval_us = dsess->remote.min_tx_us * 90 / 100;
 	else
 		max_interval_us = dsess->remote.min_tx_us;
 
-	rc = bbdd_bpf_session_set_mark(dsess, error);
+	rc = bbdd_bpf_session_set_mark(bsess, error);
 	if (rc != 0)
 		return rc;
 
@@ -900,23 +899,24 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		fwd_ifindex = dsess->ifindex;
 		flags |= BPF_FIB_LOOKUP_OUTPUT;
 	} else {
-		fwd_ifindex = veth_tx_ifindex;
+		fwd_ifindex = bpf->conf.veth_tx_ifindex;
 	}
 
-#define ARGS	bpf, dsess->local.discr, fwd_ifindex,			\
+#define ARGS	bpf, bsess, dsess->local.discr, fwd_ifindex,	\
 		&dsess->src, &dsess->dst, tbid, flags,			\
-		min_interval_us, max_interval_us, dsess->gen_id,	\
-		error
+		min_interval_us, max_interval_us, error
 
 	if (add)
-		rc = bbdd_bpf_session_do_add(ARGS);
+		rc = bbdd_bpf_session_conf_add(ARGS);
 	else
-		rc = bbdd_bpf_session_do_update(ARGS);
+		rc = bbdd_bpf_session_conf_update(ARGS);
 	if (rc != 0)
 		return rc;
 #undef ARGS
 
-	rc = bbdd_bpf_session_inject_pkt(dsess, veth_tx_ifindex, error);
+	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
+					 bpf->conf.veth_tx_ifindex,
+					 error);
 	if (rc != 0)
 		goto del_session;
 
@@ -930,6 +930,114 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * thing that we clean up is the session add. */
 del_session:
 	if (add)
-		bbdd_bpf_session_delete(bpf, dsess->local.discr, NULL);
+		bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
 	return rc;
+}
+
+static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
+				    uint32_t veth_tx_ifindex, char **error)
+{
+	uint16_t proto;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_ll sll;
+	} sa = {};
+	int fd;
+	int rc;
+
+	switch (dsess->dst.sa.sa_family) {
+	case AF_INET:
+		proto = ETH_P_IP;
+		break;
+	case AF_INET6:
+		proto = ETH_P_IPV6;
+		break;
+	default:
+		bbdd_util_fmterr(error, "Unsupported address family %d",
+				 dsess->src.sa.sa_family);
+		return -1;
+	}
+
+	fd = socket(AF_PACKET, SOCK_DGRAM, htons(proto));
+	if (fd < 0) {
+		bbdd_util_fmterr(error, "socket(AF_PACKET): %m");
+		return -1;
+	}
+
+	sa.sll.sll_family   = AF_PACKET;
+	sa.sll.sll_protocol = htons(proto);
+	sa.sll.sll_ifindex  = (int)veth_tx_ifindex;
+
+	rc = bind(fd, &sa.sa, sizeof(sa));
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "bind(AF_PACKET): %m");
+		goto close_fd;
+	}
+
+	return fd;
+
+close_fd:
+	close(fd);
+	return -1;
+}
+
+struct bbdd_bpf_session *
+bbdd_bpf_session_add(struct bbdd_bpf *bpf,
+		     const struct bbdd_d_session *dsess,
+		     char **error)
+{
+	struct bbdd_bpf_session *bsess;
+	int sock_fd;
+	int err;
+
+	bsess = malloc(sizeof(*bsess));
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		return NULL;
+	}
+
+	sock_fd = bbdd_d_session_open_sock(dsess, bpf->conf.veth_tx_ifindex,
+					   error);
+	if (sock_fd < 0) {
+		err = sock_fd;
+		goto free_bsess;
+	}
+
+	*bsess = (struct bbdd_bpf_session) {
+		.gen_id = 0,
+		.sock_fd = sock_fd,
+	};
+
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, error);
+	if (err != 0)
+		goto close_sock;
+
+	return bsess;
+
+close_sock:
+	close(sock_fd);
+free_bsess:
+	free(bsess);
+	return NULL;
+}
+
+int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+			    const struct bbdd_d_session *dsess,
+			    struct bbdd_bpf_session *bsess,
+			    char **error)
+{
+	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, error);
+}
+
+void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
+			  const struct bbdd_d_session *dsess,
+			  struct bbdd_bpf_session *bsess)
+{
+	/* The packet will be dropped by the looper when no matching session is
+	 * found. */
+
+	bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
+
+	close(bsess->sock_fd);
+	free(bsess);
 }

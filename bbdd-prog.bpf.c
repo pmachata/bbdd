@@ -21,16 +21,16 @@ struct bbdd_prog_global_diag_stats bbdd_prog_global_diag_stats;
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, __u32);
-	__type(value, struct bbdd_bfd_session_config);
+	__type(value, struct bbdd_prog_session_config);
 	__uint(max_entries, 16 * 1024);
-} bbdd_bpf_session_config_hash SEC(".maps");
+} bbdd_prog_session_config_hash SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, __u32);
-	__type(value, struct bbdd_bfd_session_data);
+	__type(value, struct bbdd_prog_session_data);
 	__uint(max_entries, 16 * 1024);
-} bbdd_bpf_session_data_hash SEC(".maps");
+} bbdd_prog_session_data_hash SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -327,8 +327,8 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	struct bbdd_bfd_control_packet *bfd;
-	struct bbdd_bfd_session_config *config;
-	struct bbdd_bfd_session_data *data;
+	struct bbdd_prog_session_config *config;
+	struct bbdd_prog_session_data *data;
 	struct bpf_fib_lookup params;
 	u64 interval_us;
 	u16 tot_len;
@@ -342,11 +342,11 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		goto tx_not_bfd;
 
 	id = bpf_ntohl(bfd->my_disc);
-	config = bpf_map_lookup_elem(&bbdd_bpf_session_config_hash, &id);
+	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &id);
 	if (config == NULL)
 		goto tx_no_session;
 
-	data = bpf_map_lookup_elem(&bbdd_bpf_session_data_hash, &id);
+	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &id);
 	if (data == NULL)
 		goto tx_no_session;
 
@@ -441,7 +441,7 @@ int bbdd_recv(struct __sk_buff *skb)
 {
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	struct bbdd_bfd_rx_pkt_digest digest = {};
-	struct bbdd_bfd_session_data *data;
+	struct bbdd_prog_session_data *data;
 	struct bbdd_bfd_control_packet *bfd;
 	struct bpf_dynptr p = {};
 	struct udphdr *udph;
@@ -512,7 +512,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	}
 
 	key = bpf_ntohl(bfd->your_disc);
-	data = bpf_map_lookup_elem(&bbdd_bpf_session_data_hash, &key);
+	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &key);
 	if (data == NULL) {
 		BUMP(bbdd_prog_global_diag_stats.rx_no_session);
 		return TC_ACT_SHOT;

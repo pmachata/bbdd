@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/resource.h>
@@ -11,7 +12,7 @@
 #include <stdlib.h>
 #include <syslog.h>
 #include <unistd.h>
-#include <ctype.h>
+
 #include <arpa/inet.h>
 #include <netpacket/packet.h>
 #include <bpf/libbpf.h>
@@ -950,8 +951,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	dsess->remote = dsess->local;
 
 	dsess->remote.discr = 0x45e2784b; // xxx for testing
-
-	dsess->gen_id++;
 	return 0;
 }
 
@@ -1114,85 +1113,13 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 	alloc->occ[i] &= ~(1L << f);
 }
 
-static int bbdd_d_session_open_sock(struct bbdd_d_session *dsess,
-				    uint32_t tx_ifindex, char **error)
-{
-	uint16_t proto;
-	union {
-		struct sockaddr sa;
-		struct sockaddr_ll sll;
-	} sa;
-	int fd;
-	int rc;
-
-	switch (dsess->dst.sa.sa_family) {
-	case AF_INET:
-		proto = ETH_P_IP;
-		break;
-	case AF_INET6:
-		proto = ETH_P_IPV6;
-		break;
-	default:
-		bbdd_util_fmterr(error, "Unsupported address family %d",
-				 dsess->src.sa.sa_family);
-		return -1;
-	}
-
-	fd = socket(AF_PACKET, SOCK_DGRAM, htons(proto));
-	if (fd < 0) {
-		bbdd_util_fmterr(error, "socket(AF_PACKET): %m");
-		return -1;
-	}
-
-	sa.sll.sll_family   = AF_PACKET;
-	sa.sll.sll_protocol = htons(proto);
-	sa.sll.sll_ifindex  = (int)tx_ifindex;
-
-	rc = bind(fd, &sa.sa, sizeof(sa));
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "bind(AF_PACKET): %m");
-		goto close_fd;
-	}
-
-	dsess->sock_fd = fd;
-	return 0;
-
-close_fd:
-	close(fd);
-	return -1;
-}
-
-static void bbdd_d_session_close_sock(struct bbdd_d_session *dsess)
-{
-	close(dsess->sock_fd);
-}
-
-static int bbdd_d_handle_session_add_bpf(struct bbdd_bpf *bpf,
-					 const struct bbdd_d_session *dsess,
-					 uint32_t veth_tx_ifindex,
-					 char **error)
-{
-	return bbdd_bpf_session_update(bpf, dsess, veth_tx_ifindex, true,
-				       error);
-}
-
-static int bbdd_d_handle_session_update_bpf(struct bbdd_bpf *bpf,
-					    const struct bbdd_d_session *dsess,
-					    uint32_t veth_tx_ifindex,
-					    char **error)
-{
-	return bbdd_bpf_session_update(bpf, dsess, veth_tx_ifindex, false,
-				       error);
-}
-
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
 				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf,
-				      struct bbdd_d_sport_alloc *spa,
-				      uint32_t veth_tx_ifindex)
+				      struct bbdd_d_sport_alloc *spa)
 {
 	struct bbdd_c_session csess;
 	struct bbdd_d_session *dsess;
@@ -1225,26 +1152,19 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 		goto put_port;
 	}
 
-	dsess->sock_fd = -1;
 	dsess->src.sin46.port = sport;
 
 	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	rc = bbdd_d_session_open_sock(dsess, veth_tx_ifindex, &error);
-	if (rc != 0)
+	dsess->bpf = bbdd_bpf_session_add(bpf, dsess, &error);
+	if (dsess->bpf == NULL)
 		goto sess_dir_del_session;
-
-	rc = bbdd_d_handle_session_add_bpf(bpf, dsess, veth_tx_ifindex, &error);
-	if (rc != 0)
-		goto close_sock;
 
 	bbdd_d_respond_empty(peer, id);
 	return;
 
-close_sock:
-	bbdd_d_session_close_sock(dsess);
 sess_dir_del_session:
 	bbdd_sess_dir_del_session(sdir, dsess);
 put_port:
@@ -1306,8 +1226,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 				      struct json_object *id,
 				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
-				      struct bbdd_bpf *bpf,
-				      uint32_t tx_ifindex)
+				      struct bbdd_bpf *bpf)
 {
 	struct bbdd_c_session select;
 	struct bbdd_c_session change;
@@ -1362,8 +1281,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 			goto free_discrs;
 		}
 
-		rc = bbdd_d_handle_session_update_bpf(bpf, dsess, tx_ifindex,
-						      &error);
+		rc = bbdd_bpf_session_update(bpf, dsess, dsess->bpf, &error);
 		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_discrs;
@@ -1385,10 +1303,11 @@ free_discrs:
 	free(discrs);
 }
 
-static int bbdd_d_handle_session_del_one_sess(struct bbdd_sess_dir *sdir,
-					      struct bbdd_d_sport_alloc *spa,
-					      uint32_t discr,
-					      char **error)
+static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
+					 struct bbdd_bpf *bpf,
+					 struct bbdd_d_sport_alloc *spa,
+					 uint32_t discr,
+					 char **error)
 {
 	struct bbdd_d_session *dsess;
 	uint16_t sport;
@@ -1399,39 +1318,12 @@ static int bbdd_d_handle_session_del_one_sess(struct bbdd_sess_dir *sdir,
 		return -1;
 	}
 
+	bbdd_bpf_session_del(bpf, dsess, dsess->bpf);
+
 	sport = dsess->src.sin46.port;
 	bbdd_d_sport_put(spa, sport);
 
-	bbdd_d_session_close_sock(dsess);
 	bbdd_sess_dir_del_session(sdir, dsess);
-
-	return 0;
-}
-
-static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
-					 struct bbdd_bpf *bpf,
-					 struct bbdd_d_sport_alloc *spa,
-					 uint32_t discr,
-					 char **error)
-{
-	char *error1 = NULL;
-	char *error2 = NULL;
-	int rc1, rc2;
-
-	/* Clean up as much as possible, even when one step fails. */
-	rc1 = bbdd_d_handle_session_del_one_sess(sdir, spa, discr, &error1);
-	rc2 = bbdd_bpf_session_delete(bpf, discr, &error2);
-
-	if (rc1 < 0 || rc2 < 0) {
-		if (error1 != NULL) {
-			*error = error1;
-			free(error2);
-		} else {
-			*error = error2;
-		}
-
-		return -1;
-	}
 
 	return 0;
 }
@@ -1661,7 +1553,6 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
 				 struct bbdd_d_sport_alloc *spa,
-				 uint32_t veth_tx_ifindex,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1678,10 +1569,9 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_d_handle_session_add(peer, params_obj, id, nl,
-					  sdir, bpf, spa, veth_tx_ifindex);
+					  sdir, bpf, spa);
 	else if (strcmp(method, "session-set") == 0)
-		bbdd_d_handle_session_set(peer, params_obj, id, nl,
-					  sdir, bpf, veth_tx_ifindex);
+		bbdd_d_handle_session_set(peer, params_obj, id, nl, sdir, bpf);
 	else if (strcmp(method, "session-del") == 0)
 		bbdd_d_handle_session_del(peer, params_obj, id, nl,
 					  sdir, bpf, spa);
@@ -1699,7 +1589,6 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 				struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
-				uint32_t veth_tx_ifindex,
 				struct bbdd_sock *ctl,
 				struct bbdd_nl *nl)
 {
@@ -1732,7 +1621,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(pctx, sdir, bpf, spa, veth_tx_ifindex,
+	bbdd_d_handle_method(pctx, sdir, bpf, spa,
 			     &peer, method, params, id, nl);
 
 put_req_obj:
@@ -1747,7 +1636,6 @@ struct bbdd_context {
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
-	uint32_t veth_tx_ifindex;
 };
 
 static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, void *arg, char **)
@@ -1755,7 +1643,7 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, void *arg, char **)
 	struct bbdd_context *bbdd = arg;
 
 	bbdd_d_ctl_activity(pctx, bbdd->sdir, bbdd->bpf, &bbdd->spa,
-			    bbdd->veth_tx_ifindex, &bbdd->ctl, bbdd->nl);
+			    &bbdd->ctl, bbdd->nl);
 	return 0;
 }
 
@@ -1895,7 +1783,6 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 }
 
 static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
-				     struct bbdd_bpf *bpf,
 				     const char *name, uint32_t ifindex,
 				     unsigned int ncpus,
 				     char **error)
@@ -1912,15 +1799,10 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 			return err;
 	}
 
-	err = bbdd_bpf_attach_veth_rx(bpf, ifindex, error);
-	if (err)
-		return err;
-
 	return bbdd_nl_set_if_up(nl, ifindex, error);
 }
 
 static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
-				     struct bbdd_bpf *bpf,
 				     const char *name, uint32_t ifindex,
 				     unsigned int ncpus,
 				     char **error)
@@ -1933,10 +1815,6 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 		return err;
 
 	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
-	if (err)
-		return err;
-
-	err = bbdd_bpf_attach_veth_tx(bpf, ifindex, error);
 	if (err)
 		return err;
 
@@ -1960,12 +1838,11 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 }
 
 static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
-				  struct bbdd_bpf *bpf,
+				  uint32_t *rx_ifindex,
 				  uint32_t *tx_ifindex,
 				  char **error)
 {
 	unsigned int ncpus;
-	uint32_t rx_ifindex;
 	int err;
 
 	/* Note: this returns number of CPUs, or < 0 on failure. */
@@ -1975,20 +1852,18 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	ncpus = (unsigned int) err;
 
 	err = bbdd_nl_add_veth(nl,
-			       bbdd_d_veth_rx_name, &rx_ifindex,
+			       bbdd_d_veth_rx_name, rx_ifindex,
 			       bbdd_d_veth_tx_name, tx_ifindex,
 			       error);
 	if (err)
 		return err;
 
-	err = bbdd_d_start_init_veth_rx(nl, bpf,
-					bbdd_d_veth_rx_name, rx_ifindex,
+	err = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name, *rx_ifindex,
 					ncpus, error);
 	if (err)
 		goto fini_veth;
 
-	err = bbdd_d_start_init_veth_tx(nl, bpf,
-					bbdd_d_veth_tx_name, *tx_ifindex,
+	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name, *tx_ifindex,
 					ncpus, error);
 	if (err)
 		goto fini_veth;
@@ -2000,54 +1875,14 @@ fini_veth:
 	return err;
 }
 
-struct bbdd_d_rx_socks {
-#define FIELD(NAME, ...) struct bbdd_sock NAME##_sk;
-	BBDD_GLOBAL_RX_SOCKETS(FIELD)
-#undef FIELD
-};
-
-static void
-bbdd_d_rx_sockets_close(struct bbdd_d_rx_socks *rx_socks)
-{
-#define CLOSE_SOCK(NAME, ...)						\
-		if (rx_socks->NAME##_sk.sa.sa.sa_family != AF_UNSPEC)	\
-			bbdd_sock_close_raw(&rx_socks->NAME##_sk);
-	BBDD_GLOBAL_RX_SOCKETS(CLOSE_SOCK)
-#undef CLOSE_SOCK
-}
-
-static int
-bbdd_d_rx_sockets_open(struct bbdd_d_rx_socks *rx_socks,
-		       char **error)
-{
-	int rc;
-
-	*rx_socks = (struct bbdd_d_rx_socks){};
-
-#define OPEN_SOCK(NAME, AF)						\
-	do {								\
-		rc = bbdd_sock_open_raw((AF), &rx_socks->NAME##_sk,	\
-					error);				\
-		if (rc)							\
-			goto close;					\
-	} while (0);
-
-	BBDD_GLOBAL_RX_SOCKETS(OPEN_SOCK);
-
-#undef SOCK
-
-	return 0;
-
-close:
-	bbdd_d_rx_sockets_close(rx_socks);
-	return rc;
-}
-
 static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
-	struct bbdd_d_rx_socks rx_socks;
+	struct bbdd_sock ipv4_sk;
+	struct bbdd_sock ipv6_sk;
+	uint32_t veth_rx_ifindex;
+	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
 	char *error;
 	int err;
@@ -2069,41 +1904,45 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	if (pctx == NULL)
 		goto nl_destroy;
 
-	err = bbdd_d_rx_sockets_open(&rx_socks, &error);
-	if (err) {
-		bbdd_util_printerr(err, &error,  "Failed to open RX sockets");
+	err = bbdd_sock_open_raw(AF_INET, &ipv4_sk, &error);
+	if (err != 0)
 		goto poll_fini;
-	}
+
+	err = bbdd_sock_open_raw(AF_INET6, &ipv6_sk, &error);
+	if (err != 0)
+		goto ipv4_close;
 
 	bbdd.sdir = bbdd_sess_dir_create();
 	if (bbdd.sdir == NULL) {
 		fprintf(stderr, "Failed to create session directory: %m\n");
-		goto rx_sockets_close;
+		goto ipv6_close;
 	}
 
-#define ASSIGN_SOCK(NAME, ...) \
-		bpf_conf.NAME##_fd = rx_socks.NAME##_sk.fd;
-	BBDD_GLOBAL_RX_SOCKETS(ASSIGN_SOCK);
-#undef ASSIGN_SOCK
+	err = bbdd_d_start_init_veth(bbdd.nl,
+				     &veth_rx_ifindex,
+				     &veth_tx_ifindex,
+				     &error);
+	if (err) {
+		bbdd_util_printerr(err, &error,  "Failed to prepare veth pair");
+		goto sess_dir_destroy;
+	}
+
+	bpf_conf = (struct bbdd_bpf_global_config) {
+		.ipv4_fd = ipv4_sk.fd,
+		.ipv6_fd = ipv6_sk.fd,
+		.veth_rx_ifindex = veth_rx_ifindex,
+		.veth_tx_ifindex = veth_tx_ifindex,
+	};
 
 	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &bpf_conf, bbdd.sdir, &error);
 	if (bbdd.bpf == NULL) {
 		bbdd_util_printerr(err, &error,  "Failed to initialize BPF");
-		goto sess_dir_destroy;
-	}
-
-	// xxx the veth pair could be created prior to BPF initialization and
-	// then passed in to be attached-to as necessary.
-	err = bbdd_d_start_init_veth(bbdd.nl, bbdd.bpf, &bbdd.veth_tx_ifindex,
-				     &error);
-	if (err) {
-		bbdd_util_printerr(err, &error,  "Failed to prepare veth pair");
-		goto bpf_destroy;
+		goto fini_veth;
 	}
 
 	err = bbdd_sock_open_d(&bbdd.ctl, bbdd_env.sockdir);
 	if (err != 0)
-		goto fini_veth;
+		goto bpf_destroy;
 
 	err = bbdd_poll_push_fd(pctx, bbdd.ctl.fd, POLLIN,
 				bbdd_d_ctl_recv, &bbdd, &error);
@@ -2117,14 +1956,16 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 
 sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
-fini_veth:
-	bbdd_d_start_fini_veth(bbdd.nl);
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
+fini_veth:
+	bbdd_d_start_fini_veth(bbdd.nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
-rx_sockets_close:
-	bbdd_d_rx_sockets_close(&rx_socks);
+ipv6_close:
+	bbdd_sock_close_raw(&ipv6_sk);
+ipv4_close:
+	bbdd_sock_close_raw(&ipv4_sk);
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:
