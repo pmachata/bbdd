@@ -329,67 +329,10 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 	return nmatch;
 }
 
-static int
-bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
-			   struct bbdd_sess_dir *sdir, char **error)
+static void
+bbdd_bpf_discr_resolve(struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir,
+		       uint32_t local_discr, uint32_t remote_discr)
 {
-	struct bbdd_sockaddr saddr;
-	struct bbdd_sockaddr daddr;
-	uint32_t discr;
-	int err;
-	unsigned int nmatch;
-
-	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr, &saddr,
-					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
-					error);
-	if (err)
-		return err;
-
-	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->daddr, &daddr,
-					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
-					error);
-	if (err)
-		return err;
-
-	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
-					      elem->ifindex, elem->multihop,
-					      &saddr, &daddr, error);
-	if (err < 0)
-		return err;
-	nmatch = (unsigned int) err;
-
-	/* xxx I think there should be counters for the various scenarios:
-	 * your_discr given, but not found, your_discr given, but no matches
-	 * found, or given, but many matches found. Maybe emit a monitor event
-	 * (when that exists). For now just print a message. */
-	if (nmatch != 1) {
-		char src_str[INET6_ADDRSTRLEN] = {};
-		char dst_str[INET6_ADDRSTRLEN] = {};
-
-		err = bbdd_sockaddr_ntop(&saddr, src_str, sizeof(src_str), error);
-		if (err)
-			return err;
-
-		err = bbdd_sockaddr_ntop(&daddr, dst_str, sizeof(dst_str), error);
-		if (err)
-			return err;
-
-		fprintf(stderr, "RX: session lookup for iif %d src %s dst %s ttl %d multihop %d: expected one match, got %u\n",
-			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
-		return 0;
-	}
-
-	fprintf(stderr, "Matched discriminatior %u\n", discr);
-	return 0;
-}
-
-static int
-bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve *elem,
-				 struct bbdd_bpf *bpf,
-				 struct bbdd_sess_dir *sdir)
-{
-	uint32_t local_discr = elem->local_discr;
-	uint32_t remote_discr = elem->remote_discr;
 	struct bbdd_d_session *dsess;
 	char *error;
 	int err;
@@ -399,14 +342,16 @@ bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve 
 
 	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
 	if (dsess == NULL) {
-		/* I think this can come up when BPF found a session and emit
-		 * this event, but before we got to process it, the session was
-		 * deleted, so don't even print anything. */
-		return 0;
+		/* I think this can come up when BPF found a session and emit an
+		 * event, but before we got to process it, the session gets
+		 * deleted. So don't even print anything. */
+		return;
 	}
 
-	fprintf(stderr, "resolve local %u remote %u\n",
-		elem->local_discr, elem->remote_discr);
+	if (dsess->remote.discr == remote_discr)
+		return;
+
+	fprintf(stderr, "resolve local %u remote %u\n", local_discr, remote_discr);
 	dsess->remote.discr = remote_discr;
 
 	// xxx this accesses dsess->bpf, which it shouldn't.
@@ -419,7 +364,80 @@ bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve 
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u; Failed to update config",
 				   dsess->local.discr);
+}
 
+static int
+bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
+			   struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir)
+{
+	struct bbdd_sockaddr saddr;
+	struct bbdd_sockaddr daddr;
+	uint32_t remote_discr = ntohl(elem->packet.my_disc);
+	uint32_t discr;
+	int err;
+	unsigned int nmatch;
+	char *error;
+
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr, &saddr,
+					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
+					&error);
+	if (err != 0)
+		goto error;
+
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->daddr, &daddr,
+					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
+					&error);
+	if (err != 0)
+		goto error;
+
+	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
+					      elem->ifindex, elem->multihop,
+					      &saddr, &daddr, &error);
+	if (err < 0)
+		goto error;
+
+	nmatch = (unsigned int) err;
+
+	/* xxx I think there should be counters for the various scenarios:
+	 * your_discr given, but not found, your_discr given, but no matches
+	 * found, or given, but many matches found. Maybe emit a monitor event
+	 * (when that exists). For now just print a message. */
+	if (nmatch != 1) {
+		char src_str[INET6_ADDRSTRLEN] = {};
+		char dst_str[INET6_ADDRSTRLEN] = {};
+
+		err = bbdd_sockaddr_ntop(&saddr, src_str, sizeof(src_str), &error);
+		if (err != 0)
+			goto error;
+
+		err = bbdd_sockaddr_ntop(&daddr, dst_str, sizeof(dst_str), &error);
+		if (err != 0)
+			goto error;
+
+		fprintf(stderr, "RX: session lookup for iif %d src %s dst %s ttl %d multihop %d: expected one match, got %u\n",
+			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
+		return 0;
+	}
+
+	fprintf(stderr, "Matched session with discrimator %u\n", discr);
+
+	bbdd_bpf_discr_resolve(bpf, sdir, discr, remote_discr);
+
+	/// xxx: this needs to do the usual packet processing that BPF couldn't do
+	return 0;
+
+error:
+	bbdd_util_printerr(err, &error, "bbdd_bpf_rb_handle_discr_0");
+	return 0;
+}
+
+static int
+bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve *elem,
+				 struct bbdd_bpf *bpf,
+				 struct bbdd_sess_dir *sdir)
+{
+	bbdd_bpf_discr_resolve(bpf, sdir,
+			       elem->local_discr, elem->remote_discr);
 	return 0;
 }
 
@@ -433,8 +451,8 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl,
 						      rb_ctx->error);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		return bbdd_bpf_rb_handle_discr_0(data, rb_ctx->sdir,
-						  rb_ctx->error);
+		return bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf,
+						  rb_ctx->sdir);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE:
 		return bbdd_bpf_rb_handle_discr_resolve(data, rb_ctx->bpf,
 							rb_ctx->sdir);
