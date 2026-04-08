@@ -55,6 +55,7 @@ struct bbdd_prog_session_config {
 	__u32 min_interval_us;
 	__u32 max_interval_us;
 	__u32 gen_id;
+	bool discr_resolved;
 };
 
 struct bbdd_prog_session_data {
@@ -114,6 +115,7 @@ struct bbdd_bpf_global_config {
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
 	BBDD_BPF_RB_ELEM_RX_DISCR_0,
+	BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE,
 	BBDD_BPF_RB_ELEM_RX_UNX_PACKET,
 	BBDD_BPF_RB_ELEM_RX_TIMEOUT,
 };
@@ -142,6 +144,12 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bpf_addr saddr;
 	struct bbdd_bpf_addr daddr;
 	struct bbdd_bfd_control_packet packet;
+};
+
+struct bbdd_bpf_rb_elem_rx_discr_resolve {
+	struct bbdd_bpf_rb_elem_head head;
+	__u32 local_discr;
+	__u32 remote_discr;
 };
 
 struct bbdd_bpf_rb_elem_rx_unx_packet {

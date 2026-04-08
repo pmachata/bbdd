@@ -948,9 +948,10 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	// xxx for now, apply for remote endpoint the same configuration as the
 	// local one so that we can test packet timing before Rx is in place.
 	fprintf(stderr, "xxx warning: overriding session remote configuration\n");
-	dsess->remote = dsess->local;
-
-	dsess->remote.discr = 0x45e2784b; // xxx for testing
+	dsess->remote.detect_mult = dsess->local.detect_mult;
+	dsess->remote.min_tx_us = dsess->local.min_tx_us;
+	dsess->remote.min_rx_us = dsess->local.min_rx_us;
+	dsess->remote.min_echo_rx = dsess->local.min_echo_rx;
 	return 0;
 }
 

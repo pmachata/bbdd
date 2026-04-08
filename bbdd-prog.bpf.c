@@ -45,6 +45,8 @@ struct {
 			BBDD_BPF_RB_ELEM_RX_TIMEOUT,			\
 		 struct bbdd_bpf_rb_elem_rx_discr_0:			\
 			BBDD_BPF_RB_ELEM_RX_DISCR_0,			\
+		 struct bbdd_bpf_rb_elem_rx_discr_resolve:		\
+			BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE,		\
 		 struct bbdd_bpf_rb_elem_rx_unx_packet:			\
 			BBDD_BPF_RB_ELEM_RX_UNX_PACKET,			\
 		 struct bbdd_bpf_rb_elem_tx_no_neighbor:		\
@@ -100,6 +102,18 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 	elem->ttl = ttl;
 	elem->multihop = multihop;
 	elem->packet = *packet;
+
+	bpf_ringbuf_submit(elem, 0);
+}
+
+static void bbdd_rx_notify_discr_resolve(__u32 local_discr, __u32 remote_discr)
+{
+	struct bbdd_bpf_rb_elem_rx_discr_resolve *elem;
+
+	BBDD_NOTIFY_ELEM_INIT(elem);
+
+	elem->local_discr = local_discr;
+	elem->remote_discr = remote_discr;
 
 	bpf_ringbuf_submit(elem, 0);
 }
@@ -442,11 +456,12 @@ int bbdd_recv(struct __sk_buff *skb)
 	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
 	struct bbdd_bfd_rx_pkt_digest digest = {};
 	struct bbdd_prog_session_data *data;
+	struct bbdd_prog_session_config *config;
 	struct bbdd_bfd_control_packet *bfd;
 	struct bpf_dynptr p = {};
 	struct udphdr *udph;
 	struct iphdr *iph;
-	u32 key;
+	u32 discr;
 	u32 off;
 	u16 tot_len;
 	int ret;
@@ -511,12 +526,16 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	key = bpf_ntohl(bfd->your_disc);
-	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &key);
-	if (data == NULL) {
+	discr = bpf_ntohl(bfd->your_disc);
+	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &discr);
+	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
+	if (data == NULL || config == NULL) {
 		BUMP(bbdd_prog_global_diag_stats.rx_no_session);
 		return TC_ACT_SHOT;
 	}
+
+	if (!config->discr_resolved)
+		bbdd_rx_notify_discr_resolve(discr, bpf_ntohl(bfd->my_disc));
 
 	BUMP(data->stats.rx_packets);
 	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);

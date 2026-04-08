@@ -193,6 +193,36 @@ static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t discr)
 			discr);
 }
 
+static int bbdd_bpf_session_conf_resolve_discr(struct bbdd_bpf *bpf,
+					       uint32_t discr, char **error)
+{
+	struct bbdd_prog_session_config conf;
+	int err;
+
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+				   &discr, sizeof(discr),
+				   &conf, sizeof(conf), 0);
+	if (err != 0) {
+		bbdd_util_fmterr(error, "Failed to update session %u: session not in hash",
+				 discr);
+		return err;
+	}
+
+	conf.discr_resolved = true;
+
+	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
+				   &discr, sizeof(discr),
+				   &conf, sizeof(conf),
+				   BPF_ANY);
+	if (err) {
+		bbdd_util_fmterr(error, "Failed to update session config: %s",
+				 strerror(-err));
+		return err;
+	}
+
+	return 0;
+}
+
 static int
 bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 			  const struct bbdd_bpf_addr *bfd_addr,
@@ -349,6 +379,46 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 	return 0;
 }
 
+static int
+bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve *elem,
+				 struct bbdd_bpf *bpf,
+				 struct bbdd_sess_dir *sdir)
+{
+	uint32_t local_discr = elem->local_discr;
+	uint32_t remote_discr = elem->remote_discr;
+	struct bbdd_d_session *dsess;
+	char *error;
+	int err;
+
+	/* Errors here are problematic, but not worth killing the daemon
+	 * over. Just eat them. */
+
+	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
+	if (dsess == NULL) {
+		/* I think this can come up when BPF found a session and emit
+		 * this event, but before we got to process it, the session was
+		 * deleted, so don't even print anything. */
+		return 0;
+	}
+
+	fprintf(stderr, "resolve local %u remote %u\n",
+		elem->local_discr, elem->remote_discr);
+	dsess->remote.discr = remote_discr;
+
+	// xxx this accesses dsess->bpf, which it shouldn't.
+	err = bbdd_bpf_session_update(bpf, dsess, dsess->bpf, &error);
+	if (err != 0)
+		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
+				   dsess->local.discr);
+
+	err = bbdd_bpf_session_conf_resolve_discr(bpf, local_discr, &error);
+	if (err != 0)
+		bbdd_util_printerr(err, &error, "discr_resolve: session %u; Failed to update config",
+				   dsess->local.discr);
+
+	return 0;
+}
+
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = ctx;
@@ -361,6 +431,9 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
 		return bbdd_bpf_rb_handle_discr_0(data, rb_ctx->sdir,
 						  rb_ctx->error);
+	case BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE:
+		return bbdd_bpf_rb_handle_discr_resolve(data, rb_ctx->bpf,
+							rb_ctx->sdir);
 	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
 		fprintf(stderr, "unhandled RB event type %d\n", head->type);
