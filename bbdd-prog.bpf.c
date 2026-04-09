@@ -534,6 +534,11 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
+	if (config->admin_down) {
+		BUMP(bbdd_prog_global_diag_stats.rx_admin_down);
+		return TC_ACT_SHOT;
+	}
+
 	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
 	if (ret != 0) {
 		bbdd_rx_notify_unx_packet(bfd);

@@ -183,6 +183,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
 		.gen_id = bsess->gen_id,
+		.admin_down = dsess->local.state.state == STATE_ADMINDOWN,
 		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
 						  dsess->local.discr),
 	};
@@ -412,6 +413,15 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		return;
 	}
 
+	/* For admin down sessions where your_disc is given, we don't even get
+	 * to see these packets, because BPF shoots them down. But when
+	 * your_disc == 0, the packets are processed here, and we need to shoot
+	 * them down ourselves.
+	 */
+	if (dsess->local.state.state == STATE_ADMINDOWN)
+		// xxx bump rx_admin_down
+		return;
+
 	old_local = dsess->local;
 	old_remote = dsess->remote;
 
@@ -419,17 +429,15 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (err)
 		return;
 
-	// xxx note: when our session is admin down, we shouldn't even be
-	// getting these packets, BPF should just shoot them. This is currently
-	// not implemented, so the state machine can act wonky around admin
-	// down.
-
 	if (dsess->remote.state.state == STATE_ADMINDOWN) {
 		if (dsess->local.state.state != STATE_DOWN) {
 			dsess->local.state.state = STATE_DOWN;
 			dsess->local.state.diag = DIAG_DOWN;
 			// xxx should this reset timers to slow? And the same
 			// below.
+			// xxx should we at some point reset the remote
+			// discriminator? Otherwise we'll keep referring to
+			// a your_disc that may be long gone.
 		}
 	} else {
 		switch (dsess->local.state.state) {

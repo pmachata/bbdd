@@ -12,7 +12,7 @@
 	FIELD(rx_multipoint_not_0)		\
 	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0)			\
-	FIELD(rx_wrong_state)			\
+	FIELD(rx_admin_down)			\
 	FIELD(rx_discr_not_found)		\
 	FIELD(rx_socket_not_found)		\
 	FIELD(rx_socket_assign_error)		\
