@@ -755,6 +755,49 @@ put_entry_obj:
 	return NULL;
 }
 
+struct json_object *bbdd_d_session_json(struct bbdd_d_session *dsess)
+{
+	struct json_object *entry_obj;
+	struct json_object *sess_obj;
+	struct json_object *state_obj;
+	struct bbdd_c_session sess;
+	int rc;
+
+	bbdd_d_session_to_c(dsess, &sess);
+
+	entry_obj = json_object_new_object();
+	if (entry_obj == NULL)
+		return NULL;
+
+	state_obj = bbdd_d_jrpc_session_state_obj(dsess);
+	if (state_obj == NULL)
+		goto put_entry_obj;
+
+	sess_obj = bbdd_c_jrpc_session_obj(&sess);
+	if (sess_obj == NULL)
+		goto put_state_obj;
+
+	rc = json_object_object_add(entry_obj, "data", sess_obj);
+	if (rc != 0)
+		goto put_sess_obj;
+	sess_obj = NULL;
+
+	rc = json_object_object_add(entry_obj, "state", state_obj);
+	if (rc != 0)
+		goto put_state_obj;
+	state_obj = NULL;
+
+	return entry_obj;
+
+put_sess_obj:
+	json_object_put(sess_obj);
+put_state_obj:
+	json_object_put(state_obj);
+put_entry_obj:
+	json_object_put(entry_obj);
+	return NULL;
+}
+
 static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
@@ -765,8 +808,6 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	struct json_object *result_obj;
 	struct json_object *array;
 	struct json_object *entry_obj;
-	struct json_object *sess_obj;
-	struct json_object *state_obj;
 	int rc;
 	bool dumped;
 
@@ -808,7 +849,6 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	dumped = false;
 	for (size_t i = 0; i < ndiscrs; i++) {
 		struct bbdd_d_session *dsess;
-		struct bbdd_c_session sess;
 
 		dsess = bbdd_sess_dir_get_session(sdir, discrs[i]);
 		if (dsess == NULL)
@@ -816,32 +856,12 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 		dumped = true;
 
-		bbdd_d_session_to_c(dsess, &sess);
-
-		entry_obj = json_object_new_object();
+		entry_obj = bbdd_d_session_json(dsess);
 		if (entry_obj == NULL)
 			goto put_array;
 
-		state_obj = bbdd_d_jrpc_session_state_obj(dsess);
-		if (state_obj == NULL)
-			goto put_entry_obj;
-
-		sess_obj = bbdd_c_jrpc_session_obj(&sess);
-		if (sess_obj == NULL)
-			goto put_state_obj;
-
-		rc = json_object_object_add(entry_obj, "data", sess_obj);
-		if (rc != 0)
-			goto put_sess_obj;
-		sess_obj = NULL;
-
-		rc = json_object_object_add(entry_obj, "state", state_obj);
-		if (rc != 0)
-			goto put_state_obj;
-		state_obj = NULL;
-
 		if (json_object_array_add(array, entry_obj) != 0)
-			goto put_state_obj;
+			goto put_entry_obj;
 		entry_obj = NULL;
 	}
 
@@ -863,10 +883,6 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	json_object_put(obj);
 	return;
 
-put_sess_obj:
-	json_object_put(sess_obj);
-put_state_obj:
-	json_object_put(state_obj);
 put_entry_obj:
 	json_object_put(entry_obj);
 put_array:

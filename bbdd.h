@@ -168,3 +168,5 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv);
 
 const char *bbdd_d_bfd_diag_to_str(enum bfd_diagnostic_value sv);
 int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv);
+
+struct json_object *bbdd_d_session_json(struct bbdd_d_session *dsess);
