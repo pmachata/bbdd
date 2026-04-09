@@ -45,8 +45,6 @@ struct {
 			BBDD_BPF_RB_ELEM_RX_TIMEOUT,			\
 		 struct bbdd_bpf_rb_elem_rx_discr_0:			\
 			BBDD_BPF_RB_ELEM_RX_DISCR_0,			\
-		 struct bbdd_bpf_rb_elem_rx_discr_resolve:		\
-			BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE,		\
 		 struct bbdd_bpf_rb_elem_rx_unx_packet:			\
 			BBDD_BPF_RB_ELEM_RX_UNX_PACKET,			\
 		 struct bbdd_bpf_rb_elem_tx_no_neighbor:		\
@@ -106,14 +104,13 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 	bpf_ringbuf_submit(elem, 0);
 }
 
-static void bbdd_rx_notify_discr_resolve(__u32 local_discr, __u32 remote_discr)
+static void bbdd_rx_notify_unx_packet(struct bbdd_bfd_control_packet *packet)
 {
-	struct bbdd_bpf_rb_elem_rx_discr_resolve *elem;
+	struct bbdd_bpf_rb_elem_rx_unx_packet *elem;
 
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
-	elem->local_discr = local_discr;
-	elem->remote_discr = remote_discr;
+	elem->packet = *packet;
 
 	bpf_ringbuf_submit(elem, 0);
 }
@@ -475,51 +472,31 @@ int bbdd_recv(struct __sk_buff *skb)
 	}
 
 	/* If the version number is not correct (1), the packet MUST be
-	 * discarded. */
+	 * discarded. We need to check this here, because the payload
+	 * interpretation depends on the version.
+	 */
 	if (bbdd_bfd_control_packet_version(bfd) != 1) {
 		BUMP(bbdd_prog_global_diag_stats.rx_wrong_version_number);
 		return TC_ACT_SHOT;
 	}
 
-	/* xxx bounce authentication */
-
-	/* xxx If the Length field is less than the minimum correct value (24 if
-	 * the A bit is clear, or 26 if the A bit is set), the packet MUST be
-	 * discarded. */
-	/* xxx If the Length field is greater than the payload of the
-	 * encapsulating protocol, the packet MUST be discarded. */
-	/* xxx If the Multipoint (M) bit is nonzero, the packet MUST be
-	 * discarded. */
-
-	/* If the Detect Mult field is zero, the packet MUST be discarded. */
-	if (bfd->detection_multiplier == 0) {
-		BUMP(bbdd_prog_global_diag_stats.rx_detection_multiplier_0);
+	/* If the Length field is less than the minimum correct value (24 if the
+         * A bit is clear, or 26 if the A bit is set), the packet MUST be
+         * discarded. If the Length field is greater than the payload of the
+         * encapsulating protocol, the packet MUST be discarded.
+	 *
+	 * We know there was enough data to at least access the payload as
+	 * represented by struct bbdd_bfd_control_packet. Since that's all that
+	 * we ever support, we can simply validate that the length matches.
+	 */
+	if (bfd->length != sizeof(*bfd)) {
+		BUMP(bbdd_prog_global_diag_stats.rx_invalid_length);
 		return TC_ACT_SHOT;
 	}
 
-	/* If the My Discriminator field is zero, the packet MUST be
-	 * discarded. */
-	if (bfd->my_disc == 0) {
-		BUMP(bbdd_prog_global_diag_stats.rx_my_discr_0);
-		return TC_ACT_SHOT;
-	}
-
-	/* If the Your Discriminator field is zero and the State field is not
-	   Down or AdminDown, the packet MUST be discarded. */
 	if (bfd->your_disc == 0) {
-		switch (bbdd_bpf_control_packet_state(bfd)) {
-		case BBDD_BFD_PACKET_STATE_ADMINDOWN:
-		case BBDD_BFD_PACKET_STATE_DOWN:
-			break;
-		case BBDD_BFD_PACKET_STATE_INIT:
-		case BBDD_BFD_PACKET_STATE_UP:
-			BUMP(bbdd_prog_global_diag_stats.rx_wrong_state);
-			return TC_ACT_SHOT;
-		}
-
 		/* If the Your Discriminator field is zero, the session MUST be
 		 * selected based on some combination of other fields [...] */
-
 		BUMP(bbdd_prog_global_diag_stats.rx_your_discr_0);
 		bbdd_rx_notify_discr_0(skb, &digest.saddr, &digest.daddr,
 				       digest.ttl, digest.multihop, bfd);
@@ -534,8 +511,32 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	if (!config->discr_resolved)
-		bbdd_rx_notify_discr_resolve(discr, bpf_ntohl(bfd->my_disc));
+	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
+	if (ret != 0) {
+		bbdd_rx_notify_unx_packet(bfd);
+		return TC_ACT_SHOT;
+	}
+
+	/*
+	ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
+			     CLOCK_MONOTONIC);
+	if (ret && ret != -EBUSY) {
+		BUMP(data->diag_stats.rx_fail_timer);
+		return TC_ACT_SHOT;
+	}
+
+	ret = bpf_timer_set_callback(&data->timer, bfd_session_expired);
+	if (ret) {
+		BUMP(data->diag_stats.rx_fail_timer);
+		return TC_ACT_SHOT;
+	}
+
+	ret = bpf_timer_start(&data->timer, 3 * 10 * NS_PER_MS, 0);
+	if (ret) {
+		bpf_printk("Failed to start timer for BFD session %u\n", key);
+		return TC_ACT_SHOT;
+	}
+	*/
 
 	BUMP(data->stats.rx_packets);
 	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);

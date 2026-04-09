@@ -10,10 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
 #include <linux/if_ether.h>
@@ -21,6 +20,8 @@
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
 #include <netpacket/packet.h>
+#include <sys/socket.h>
+#include <sys/param.h>
 
 #include "bbdd.h"
 #include "bbdd-nl.h"
@@ -71,19 +72,103 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 	return 0;
 }
 
+static struct bbdd_bfd_control_packet
+bbdd_bpf_make_packet(const struct bbdd_d_session_data *state,
+		     uint32_t your_disc)
+{
+	enum { v1 = 1 };
+	return (struct bbdd_bfd_control_packet) {
+		.version_diag = (v1 << 5) | (uint8_t) state->state.diag,
+		.state_bits = (uint8_t) state->state.state << 6,
+		.detection_multiplier = state->detect_mult,
+		.length = sizeof(struct bbdd_bfd_control_packet),
+		.my_disc = htonl(state->discr),
+		.your_disc = htonl(your_disc),
+		.desired_tx = htonl(state->min_tx_us),
+		.required_rx = htonl(state->min_rx_us),
+		.required_echo_rx = 0,
+	};
+}
+
+static int
+bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
+		      struct bbdd_d_session_data *data,
+		      bool *poll)
+{
+	uint8_t bits = bbdd_bpf_control_packet_bits(packet);
+	uint32_t remote_discr = ntohl(packet->my_disc);
+	uint32_t local_discr = ntohl(packet->your_disc);
+	enum bfd_state_value state = bbdd_bpf_control_packet_state(packet);
+
+	// xxx the messages here should either go to char **error, or more
+	// likely bump counters.
+
+	/* Note: Version and length are validated in BPF. */
+
+	if (packet->required_echo_rx != 0) {
+		fprintf(stderr, "echo not supported. Flags=%#x\n", bits);
+		return -1;
+	}
+
+	if (bits & STATE_AUTH_BIT) {
+		fprintf(stderr, "auth not supported. Flags=%#x\n", bits);
+		return -1;
+	}
+
+	if (bits & STATE_DEMAND_BIT) {
+		fprintf(stderr, "demand not supported. Flags=%#x\n", bits);
+		return -1;
+	}
+
+	if (bits & STATE_MULTI_BIT) {
+		fprintf(stderr, "multipoint not supported. Flags=%#x\n", bits);
+		return -1;
+	}
+
+	if (packet->detection_multiplier == 0) {
+		fprintf(stderr, "Invalid detection multiplier of 0\n");
+		return -1;
+	}
+
+	if (remote_discr == 0) {
+		fprintf(stderr, "Invalid my_discr of 0\n");
+		return -1;
+	}
+
+	if (local_discr == 0 &&
+	    state != STATE_ADMINDOWN && state != STATE_DOWN) {
+		fprintf(stderr, "Invalid your_disc of 0 when state not downish\n");
+		return -1;
+	}
+
+	if (remote_discr != 0)
+		data->discr = remote_discr;
+	data->detect_mult = packet->detection_multiplier;
+	data->min_rx_us = ntohl(packet->required_rx);
+	data->min_tx_us = ntohl(packet->desired_tx);
+	data->detect_mult = packet->detection_multiplier;
+	data->state.state = state;
+	data->state.diag = bbdd_bfd_control_packet_diag(packet);
+
+	*poll = bits & STATE_POLL_BIT;
+
+	return 0;
+}
+
 static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
+					const struct bbdd_d_session *dsess,
 					struct bbdd_bpf_session *bsess,
-					uint32_t id,
 					uint32_t ifindex,
-					const struct bbdd_sockaddr *src,
-					const struct bbdd_sockaddr *dst,
 					uint32_t tbid,
 					uint32_t flags,
 					uint32_t min_interval_us,
 					uint32_t max_interval_us,
 					char **error)
 {
+	const struct bbdd_sockaddr *src = &dsess->src;
+	const struct bbdd_sockaddr *dst = &dsess->dst;
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
+	uint32_t discr = dsess->local.discr;
 	struct bbdd_prog_session_config config = {
 		.fib_lookup = {
 			.family = (uint8_t) af,
@@ -98,6 +183,8 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
 		.gen_id = bsess->gen_id,
+		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
+						  dsess->local.discr),
 	};
 	int err;
 
@@ -124,7 +211,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 	}
 
 	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-				   &id, sizeof(id),
+				   &discr, sizeof(discr),
 				   &config, sizeof(config),
 				   BPF_ANY);
 	if (err) {
@@ -137,11 +224,9 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 }
 
 static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
+				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
-				     uint32_t discr,
 				     uint32_t ifindex,
-				     const struct bbdd_sockaddr *src,
-				     const struct bbdd_sockaddr *dst,
 				     uint32_t tbid,
 				     uint32_t flags,
 				     uint32_t min_interval_us,
@@ -149,12 +234,12 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				     char **error)
 {
 	struct bbdd_prog_session_data data = {};
+	uint32_t discr = dsess->local.discr;
 	int err;
 
-	err = bbdd_bpf_session_conf_update(bpf, bsess,
-					   discr, ifindex, src, dst, tbid, flags,
-					   min_interval_us, max_interval_us,
-					   error);
+	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, ifindex,
+					   tbid, flags, min_interval_us,
+					   max_interval_us, error);
 	if (err)
 		return err;
 
@@ -191,36 +276,6 @@ static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t discr)
 	if (err != 0)
 		fprintf(stderr, "Couldn't delete session %u from session_data_hash\n",
 			discr);
-}
-
-static int bbdd_bpf_session_conf_resolve_discr(struct bbdd_bpf *bpf,
-					       uint32_t discr, char **error)
-{
-	struct bbdd_prog_session_config conf;
-	int err;
-
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-				   &discr, sizeof(discr),
-				   &conf, sizeof(conf), 0);
-	if (err != 0) {
-		bbdd_util_fmterr(error, "Failed to update session %u: session not in hash",
-				 discr);
-		return err;
-	}
-
-	conf.discr_resolved = true;
-
-	err = bpf_map__update_elem(bpf->skel->maps.bbdd_prog_session_config_hash,
-				   &discr, sizeof(discr),
-				   &conf, sizeof(conf),
-				   BPF_ANY);
-	if (err) {
-		bbdd_util_fmterr(error, "Failed to update session config: %s",
-				 strerror(-err));
-		return err;
-	}
-
-	return 0;
 }
 
 static int
@@ -330,12 +385,21 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 }
 
 static void
-bbdd_bpf_discr_resolve(struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir,
-		       uint32_t local_discr, uint32_t remote_discr)
+bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
+		       struct bbdd_sess_dir *sdir,
+		       const struct bbdd_bfd_control_packet *packet)
 {
+	uint32_t local_discr = ntohl(packet->your_disc);
+	uint32_t remote_discr = ntohl(packet->my_disc);
+	struct bbdd_d_session_data old_local;
+	struct bbdd_d_session_data old_remote;
 	struct bbdd_d_session *dsess;
 	char *error;
+	bool poll;
 	int err;
+
+	fprintf(stderr, "Process packet: local %u remote %u\n",
+		local_discr, remote_discr);
 
 	/* Errors here are problematic, but not worth killing the daemon
 	 * over. Just eat them. */
@@ -348,31 +412,95 @@ bbdd_bpf_discr_resolve(struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir,
 		return;
 	}
 
-	if (dsess->remote.discr == remote_discr)
+	old_local = dsess->local;
+	old_remote = dsess->remote;
+
+	err = bbdd_bpf_parse_packet(packet, &dsess->remote, &poll);
+	if (err)
 		return;
 
-	fprintf(stderr, "resolve local %u remote %u\n", local_discr, remote_discr);
-	dsess->remote.discr = remote_discr;
+	// xxx note: when our session is admin down, we shouldn't even be
+	// getting these packets, BPF should just shoot them. This is currently
+	// not implemented, so the state machine can act wonky around admin
+	// down.
+
+	if (dsess->remote.state.state == STATE_ADMINDOWN) {
+		if (dsess->local.state.state != STATE_DOWN) {
+			dsess->local.state.state = STATE_DOWN;
+			dsess->local.state.diag = DIAG_DOWN;
+			// xxx should this reset timers to slow? And the same
+			// below.
+		}
+	} else {
+		switch (dsess->local.state.state) {
+		case STATE_ADMINDOWN:
+			break;
+
+		case STATE_DOWN:
+			if (dsess->remote.state.state == STATE_DOWN)
+				dsess->local.state.state = STATE_INIT;
+			else if (dsess->remote.state.state == STATE_INIT)
+				dsess->local.state.state = STATE_UP;
+			break;
+
+		case STATE_INIT:
+			if (dsess->remote.state.state == STATE_INIT ||
+			    dsess->remote.state.state == STATE_UP)
+				dsess->local.state.state = STATE_UP;
+			break;
+
+		case STATE_UP:
+			if (dsess->remote.state.state == STATE_DOWN) {
+				dsess->local.state.state = STATE_DOWN;
+				dsess->local.state.diag = DIAG_DOWN;
+			}
+			break;
+		}
+	}
+
+	if (poll) {
+		fprintf(stderr, "should send final\n");
+	}
+
+	if (memcmp(&old_local, &dsess->local, sizeof(old_local)) == 0 &&
+	    memcmp(&old_remote, &dsess->remote, sizeof(old_remote)) == 0)
+		return;
+
+
+	{
+		struct json_object *obj;
+		bool printed = false;
+
+		obj = bbdd_d_session_json(dsess);
+		if (obj != NULL) {
+			const char *str;
+
+			str = json_object_to_json_string(obj);
+			if (str != NULL) {
+				fprintf(stderr, "state change %s\n", str);
+				printed = true;
+			}
+
+			json_object_put(obj);
+		}
+
+		if (!printed)
+			fprintf(stderr, "state change, but formatting error\n");
+	}
 
 	// xxx this accesses dsess->bpf, which it shouldn't.
 	err = bbdd_bpf_session_update(bpf, dsess, dsess->bpf, &error);
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
-
-	err = bbdd_bpf_session_conf_resolve_discr(bpf, local_discr, &error);
-	if (err != 0)
-		bbdd_util_printerr(err, &error, "discr_resolve: session %u; Failed to update config",
-				   dsess->local.discr);
 }
 
-static int
+static void
 bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 			   struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir)
 {
 	struct bbdd_sockaddr saddr;
 	struct bbdd_sockaddr daddr;
-	uint32_t remote_discr = ntohl(elem->packet.my_disc);
 	uint32_t discr;
 	int err;
 	unsigned int nmatch;
@@ -399,7 +527,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 	nmatch = (unsigned int) err;
 
 	/* xxx I think there should be counters for the various scenarios:
-	 * your_discr given, but not found, your_discr given, but no matches
+	 * your_disc given, but not found, your_disc given, but no matches
 	 * found, or given, but many matches found. Maybe emit a monitor event
 	 * (when that exists). For now just print a message. */
 	if (nmatch != 1) {
@@ -416,29 +544,24 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 		fprintf(stderr, "RX: session lookup for iif %d src %s dst %s ttl %d multihop %d: expected one match, got %u\n",
 			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
-		return 0;
+		return;
 	}
 
 	fprintf(stderr, "Matched session with discrimator %u\n", discr);
 
-	bbdd_bpf_discr_resolve(bpf, sdir, discr, remote_discr);
-
-	/// xxx: this needs to do the usual packet processing that BPF couldn't do
-	return 0;
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet);
 
 error:
 	bbdd_util_printerr(err, &error, "bbdd_bpf_rb_handle_discr_0");
-	return 0;
 }
 
-static int
-bbdd_bpf_rb_handle_discr_resolve(const struct bbdd_bpf_rb_elem_rx_discr_resolve *elem,
-				 struct bbdd_bpf *bpf,
-				 struct bbdd_sess_dir *sdir)
+static void
+bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
+			      struct bbdd_bpf *bpf,
+			      struct bbdd_sess_dir *sdir)
 {
-	bbdd_bpf_discr_resolve(bpf, sdir,
-			       elem->local_discr, elem->remote_discr);
-	return 0;
+	fprintf(stderr, "Unexpected packet\n");
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet);
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
@@ -451,12 +574,11 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl,
 						      rb_ctx->error);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		return bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf,
-						  rb_ctx->sdir);
-	case BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE:
-		return bbdd_bpf_rb_handle_discr_resolve(data, rb_ctx->bpf,
-							rb_ctx->sdir);
+		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir);
+		break;
 	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
+		bbdd_bpf_rb_handle_unx_packet(data, rb_ctx->bpf, rb_ctx->sdir);
+		break;
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
 		fprintf(stderr, "unhandled RB event type %d\n", head->type);
 		break;
@@ -862,23 +984,14 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       struct bbdd_bpf_session *bsess,
 				       uint32_t tx_ifindex, char **error)
 {
-	enum { v1 = 1 };
-	struct bbdd_bfd_control_packet bfd = {
-		.version_diag = (v1 << 5) | (uint8_t) dsess->local.state.diag,
-		.state_bits = (uint8_t) dsess->local.state.state << 6,
-		.detection_multiplier = dsess->local.detect_mult,
-		.length = sizeof(bfd),
-		.my_disc = htonl(dsess->local.discr),
-		.your_disc = htonl(dsess->remote.discr),
-		.desired_tx = htonl(dsess->local.min_tx_us),
-		.required_rx = htonl(dsess->local.min_rx_us),
-		.required_echo_rx = 0,
-	};
+	struct bbdd_bfd_control_packet bfd;
 	union {
 		struct sockaddr    sa;
 		struct sockaddr_ll sll;
 	} dst_sa = {};
 	ssize_t rc;
+
+	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr);
 
 	dst_sa.sll.sll_family  = AF_PACKET;
 	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
@@ -972,16 +1085,23 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t max_interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = BPF_FIB_LOOKUP_SRC;
+	uint32_t interval_us;
 	uint32_t fwd_ifindex;
 	int rc;
 
 	bsess->gen_id++;
 
-	min_interval_us = dsess->remote.min_tx_us * 75 / 100;
+	/* system MUST NOT transmit BFD Control packets at an interval less than
+	 * the larger of bfd.DesiredMinTxInterval and bfd.RemoteMinRxInterval,
+	 * less applied jitter. */
+	interval_us = MAX(dsess->local.min_tx_us, dsess->remote.min_rx_us);
+
+	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9. */
+	min_interval_us = interval_us * 75 / 100;
 	if (dsess->local.detect_mult == 1)
-		max_interval_us = dsess->remote.min_tx_us * 90 / 100;
+		max_interval_us = interval_us * 90 / 100;
 	else
-		max_interval_us = dsess->remote.min_tx_us;
+		max_interval_us = interval_us;
 
 	rc = bbdd_bpf_session_set_mark(bsess, error);
 	if (rc != 0)
@@ -997,17 +1117,16 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		fwd_ifindex = bpf->conf.veth_tx_ifindex;
 	}
 
-#define ARGS	bpf, bsess, dsess->local.discr, fwd_ifindex,	\
-		&dsess->src, &dsess->dst, tbid, flags,			\
-		min_interval_us, max_interval_us, error
-
 	if (add)
-		rc = bbdd_bpf_session_conf_add(ARGS);
+		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
+					       tbid, flags, min_interval_us,
+					       max_interval_us, error);
 	else
-		rc = bbdd_bpf_session_conf_update(ARGS);
+		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
+						  tbid, flags, min_interval_us,
+						  max_interval_us, error);
 	if (rc != 0)
 		return rc;
-#undef ARGS
 
 	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
 					 bpf->conf.veth_tx_ifindex,

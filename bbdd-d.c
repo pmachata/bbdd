@@ -951,23 +951,17 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 #undef ASSIGN
 
+	/* A session marked as `shutdown' needs to be made admin down. On
+	 * contrary, an admin down session that is not `shutdown' anymore can be
+	 * set to INIT again. Otherwise don't touch the state. */
 	if (dsess->flags.shutdown) {
 		dsess->local.state.state = STATE_ADMINDOWN;
 		dsess->local.state.diag = DIAG_ADMIN_DOWN;
-	} else {
-		// xxx Need to implement state machine for proper management of
-		// these states.
+	} else if (dsess->local.state.state == STATE_ADMINDOWN) {
 		dsess->local.state.state = STATE_INIT;
 		dsess->local.state.diag = DIAG_NOTHING;
 	}
 
-	// xxx for now, apply for remote endpoint the same configuration as the
-	// local one so that we can test packet timing before Rx is in place.
-	fprintf(stderr, "xxx warning: overriding session remote configuration\n");
-	dsess->remote.detect_mult = dsess->local.detect_mult;
-	dsess->remote.min_tx_us = dsess->local.min_tx_us;
-	dsess->remote.min_rx_us = dsess->local.min_rx_us;
-	dsess->remote.min_echo_rx = dsess->local.min_echo_rx;
 	return 0;
 }
 
@@ -1170,6 +1164,16 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	}
 
 	dsess->src.sin46.port = sport;
+
+	dsess->local.state.state = STATE_INIT;
+	dsess->local.state.diag = DIAG_NOTHING;
+
+	dsess->remote.discr = 0;
+	dsess->remote.state.state = STATE_DOWN;
+	dsess->remote.state.diag = DIAG_NOTHING;
+	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
+	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
+	dsess->remote.min_echo_rx = 0;
 
 	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
 	if (rc != 0)

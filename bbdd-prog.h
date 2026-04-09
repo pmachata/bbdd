@@ -49,16 +49,37 @@ struct bbdd_prog_global_diag_stats {
 	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
 };
 
+struct bbdd_bfd_control_packet {
+	uint8_t version_diag;
+	uint8_t state_bits;
+	uint8_t detection_multiplier;
+	uint8_t length;
+	__be32 my_disc;
+	__be32 your_disc;
+	__be32 desired_tx;
+	__be32 required_rx;
+	__be32 required_echo_rx;
+};
+
 struct bbdd_prog_session_config {
 	struct bpf_fib_lookup fib_lookup;
 	__u32 bpf_fib_lookup_flags;
 	__u32 min_interval_us;
 	__u32 max_interval_us;
 	__u32 gen_id;
-	bool discr_resolved;
+	bool admin_down; // xxx implement me. Packets need to be discarded when true.
+	struct bbdd_bfd_control_packet rx_expect;
+};
+
+enum {
+	/* When bfd.SessionState is not Up, the system MUST set
+	 * bfd.DesiredMinTxInterval to a value of not less than one second
+	 * (1,000,000 microseconds). */
+	bbdd_prog_slow_interval_us = 1000000,
 };
 
 struct bbdd_prog_session_data {
+	struct bpf_timer timer;
 	struct {
 		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
 	} diag_stats;
@@ -74,6 +95,8 @@ struct bbdd_prog_session_data {
 #define BFD_SINGLE_HOP_PORT	3784
 #define BFD_MULTI_HOP_PORT	4784
 
+// xxx finish migration to full suite of custom enums instead of having part
+// this and part that.
 enum bbdd_bfd_packet_state {
 	BBDD_BFD_PACKET_STATE_ADMINDOWN,
 	BBDD_BFD_PACKET_STATE_DOWN,
@@ -81,28 +104,28 @@ enum bbdd_bfd_packet_state {
 	BBDD_BFD_PACKET_STATE_UP,
 };
 
-struct bbdd_bfd_control_packet {
-	uint8_t version_diag;
-	uint8_t state_bits;
-	uint8_t detection_multiplier;
-	uint8_t length;
-	__be32 my_disc;
-	__be32 your_disc;
-	__be32 desired_tx;
-	__be32 required_rx;
-	__be32 required_echo_rx;
-};
-
 static inline uint8_t
-bbdd_bfd_control_packet_version(struct bbdd_bfd_control_packet *packet)
+bbdd_bfd_control_packet_version(const struct bbdd_bfd_control_packet *packet)
 {
 	return packet->version_diag >> 5;
 }
 
 static inline uint8_t
-bbdd_bpf_control_packet_state(struct bbdd_bfd_control_packet *packet)
+bbdd_bfd_control_packet_diag(const struct bbdd_bfd_control_packet *packet)
+{
+	return packet->version_diag & 0x1f;
+}
+
+static inline uint8_t
+bbdd_bpf_control_packet_state(const struct bbdd_bfd_control_packet *packet)
 {
 	return packet->state_bits >> 6;
+}
+
+static inline uint8_t
+bbdd_bpf_control_packet_bits(const struct bbdd_bfd_control_packet *packet)
+{
+	return packet->state_bits & 0x3f;
 }
 
 struct bbdd_bpf_global_config {
@@ -115,7 +138,6 @@ struct bbdd_bpf_global_config {
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
 	BBDD_BPF_RB_ELEM_RX_DISCR_0,
-	BBDD_BPF_RB_ELEM_RX_DISCR_RESOLVE,
 	BBDD_BPF_RB_ELEM_RX_UNX_PACKET,
 	BBDD_BPF_RB_ELEM_RX_TIMEOUT,
 };
@@ -144,12 +166,6 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bpf_addr saddr;
 	struct bbdd_bpf_addr daddr;
 	struct bbdd_bfd_control_packet packet;
-};
-
-struct bbdd_bpf_rb_elem_rx_discr_resolve {
-	struct bbdd_bpf_rb_elem_head head;
-	__u32 local_discr;
-	__u32 remote_discr;
 };
 
 struct bbdd_bpf_rb_elem_rx_unx_packet {
