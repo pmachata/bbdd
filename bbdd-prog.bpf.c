@@ -12,6 +12,10 @@
 #define TC_ACT_SHOT		2
 #define TC_ACT_REDIRECT		7
 
+#define CLOCK_MONOTONIC			1
+
+#define	EBUSY		16	/* Device or resource busy */
+
 enum { NS_PER_US = 1 * 1000 };
 static const u32 uint32_max = -1U;
 
@@ -79,6 +83,17 @@ static void bbdd_tx_notify_no_neighbor(u16 proto,
 	else
 		__builtin_memcpy(elem->addr.addr, params->ipv6_dst,
 				 sizeof(elem->addr.addr));
+
+	bpf_ringbuf_submit(elem, 0);
+}
+
+static void bbdd_rx_notify_timeout(__u32 discr)
+{
+	struct bbdd_bpf_rb_elem_rx_timeout *elem;
+
+	BBDD_NOTIFY_ELEM_INIT(elem);
+
+	elem->discr = discr;
 
 	bpf_ringbuf_submit(elem, 0);
 }
@@ -445,6 +460,14 @@ SEC("tc")
 int bbdd_xmit_veth_rx(struct __sk_buff *skb)
 {
 	return bpf_redirect(bbdd_veth_tx_ifindex, 0);
+}
+
+static int bfd_session_expired(void *hmap, u32 *key,
+			       struct bbdd_prog_session_data *data)
+{
+	BUMP(data->diag_stats.rx_timeout);
+	bbdd_rx_notify_timeout(*key);
+	return 0;
 }
 
 SEC("socket")

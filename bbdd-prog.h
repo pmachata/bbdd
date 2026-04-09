@@ -35,6 +35,8 @@
 	FIELD(tx_fail_redir)			\
 	FIELD(tx_loopback_filter)		\
 	FIELD(tx_wrong_gen_id)		        \
+	FIELD(rx_timeout)			\
+	FIELD(rx_fail_timer)			\
 	/**/
 
 #define BBDD_SESSION_STATS(FIELD)		\
