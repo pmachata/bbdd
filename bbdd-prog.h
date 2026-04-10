@@ -12,7 +12,6 @@
 	FIELD(rx_multipoint_not_0)		\
 	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0)			\
-	FIELD(rx_admin_down)			\
 	FIELD(rx_discr_not_found)		\
 	FIELD(rx_socket_not_found)		\
 	FIELD(rx_socket_assign_error)		\
@@ -35,6 +34,7 @@
 	FIELD(tx_fail_redir)			\
 	FIELD(tx_loopback_filter)		\
 	FIELD(tx_wrong_gen_id)		        \
+	FIELD(rx_admin_down)			\
 	FIELD(rx_ttl_low)			\
 	FIELD(rx_timeout)			\
 	FIELD(rx_fail_timer)			\

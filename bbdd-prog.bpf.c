@@ -551,7 +551,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	/* These checks are duplicated in bbdd-bpf.c, where they are commented
 	 * as well. */
 	if (config->admin_down) {
-		BUMP(bbdd_prog_global_diag_stats.rx_admin_down);
+		BUMP(data->diag_stats.rx_admin_down);
 		return TC_ACT_SHOT;
 	}
 	if (config->ttl > digest.ttl) {
