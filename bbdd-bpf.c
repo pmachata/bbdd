@@ -637,10 +637,9 @@ static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_sess_dir *sdir,
 		       const struct bbdd_bfd_control_packet *packet,
-		       uint8_t ttl)
+		       uint16_t skb_len, uint8_t ttl)
 {
 	uint32_t local_discr = ntohl(packet->your_disc);
-	uint32_t remote_discr = ntohl(packet->my_disc);
 	struct bbdd_d_session_data old_local;
 	struct bbdd_d_session_data old_remote;
 	struct bbdd_bpf_session *bsess;
@@ -648,9 +647,6 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	char *error;
 	bool poll;
 	int err;
-
-	fprintf(stderr, "Process packet: local %u remote %u\n",
-		local_discr, remote_discr);
 
 	/* Errors here are problematic, but not worth killing the daemon
 	 * over. Just eat them. */
@@ -664,6 +660,8 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		return;
 	}
 
+	++bsess->stats.rx_packets;
+	bsess->stats.rx_bytes += skb_len;
 
 	/* For admin down sessions where your_disc is given, we don't even get
 	 * to see these packets, because BPF shoots them down. But when
@@ -826,7 +824,8 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 	fprintf(stderr, "Matched session with discrimator %u\n", discr);
 
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet, elem->ttl);
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
+				      elem->skb_len, elem->ttl);
 
 error:
 	bbdd_util_printerr(err, &error, "bbdd_bpf_rb_handle_discr_0");
@@ -838,7 +837,8 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 			      struct bbdd_sess_dir *sdir)
 {
 	fprintf(stderr, "Unexpected packet\n");
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet, elem->ttl);
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
+				      elem->skb_len, elem->ttl);
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)

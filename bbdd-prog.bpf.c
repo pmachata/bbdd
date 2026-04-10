@@ -112,6 +112,7 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 	elem->ethtype = bpf_ntohs(skb->protocol);
 	elem->saddr = *saddr;
 	elem->daddr = *daddr;
+	elem->skb_len = skb->len;
 	elem->ttl = ttl;
 	elem->multihop = multihop;
 	elem->packet = *packet;
@@ -120,7 +121,8 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 }
 
 static void
-bbdd_rx_notify_unx_packet(const struct bbdd_bfd_control_packet *packet,
+bbdd_rx_notify_unx_packet(struct __sk_buff *skb,
+			  const struct bbdd_bfd_control_packet *packet,
 			  u8 ttl)
 {
 	struct bbdd_bpf_rb_elem_rx_unx_packet *elem;
@@ -128,6 +130,7 @@ bbdd_rx_notify_unx_packet(const struct bbdd_bfd_control_packet *packet,
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
 	elem->packet = *packet;
+	elem->skb_len = skb->len;
 	elem->ttl = ttl;
 
 	bpf_ringbuf_submit(elem, 0);
@@ -561,9 +564,12 @@ int bbdd_recv(struct __sk_buff *skb)
 
 	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
 	if (ret != 0) {
-		bbdd_rx_notify_unx_packet(bfd, digest.ttl);
+		bbdd_rx_notify_unx_packet(skb, bfd, digest.ttl);
 		return TC_ACT_SHOT;
 	}
+
+	BUMP(data->stats.rx_packets);
+	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
 
 	/*
 	ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
@@ -585,9 +591,6 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 	*/
-
-	BUMP(data->stats.rx_packets);
-	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
 
 	return TC_ACT_SHOT;
 }

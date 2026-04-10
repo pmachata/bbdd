@@ -178,6 +178,7 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bpf_rb_elem_head head;
 	__u32 ifindex;
 	__u16 ethtype;
+	__u16 skb_len;
 	__u8 ttl;
 	__u8 multihop;
 	struct bbdd_bpf_addr saddr;
@@ -187,6 +188,7 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 
 struct bbdd_bpf_rb_elem_rx_unx_packet {
 	struct bbdd_bpf_rb_elem_head head;
+	__u16 skb_len;
 	__u8 ttl;
 	struct bbdd_bfd_control_packet packet;
 };
