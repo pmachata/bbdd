@@ -668,9 +668,10 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	 * your_disc == 0, the packets are processed here, and we need to shoot
 	 * them down ourselves.
 	 */
-	if (dsess->local.state.state == STATE_ADMINDOWN)
-		// xxx bump rx_admin_down
+	if (dsess->local.state.state == STATE_ADMINDOWN) {
+		++bsess->diag_stats.rx_admin_down;
 		return;
+	}
 
 	/* RFC: [For single-hop sessions] TTL or Hop Count MUST be set to the
 	 * maximum on transmit, and checked to be equal to the maximum value on
@@ -680,9 +681,10 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	 * value of incoming TTL they tolerate. The RFC doesn't directly say
 	 * that non-matching packets must be dropped, but what else.
 	 */
-	if (dsess->ttl > ttl)
-		// xxx bump rx_ttl_low
+	if (dsess->ttl > ttl) {
+		++bsess->diag_stats.rx_ttl_low;
 		return;
+	}
 
 	old_local = dsess->local;
 	old_remote = dsess->remote;
@@ -801,28 +803,8 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 	nmatch = (unsigned int) err;
 
-	/* xxx I think there should be counters for the various scenarios:
-	 * your_disc given, but not found, your_disc given, but no matches
-	 * found, or given, but many matches found. Maybe emit a monitor event
-	 * (when that exists). For now just print a message. */
-	if (nmatch != 1) {
-		char src_str[INET6_ADDRSTRLEN] = {};
-		char dst_str[INET6_ADDRSTRLEN] = {};
-
-		err = bbdd_sockaddr_ntop(&saddr, src_str, sizeof(src_str), &error);
-		if (err != 0)
-			goto error;
-
-		err = bbdd_sockaddr_ntop(&daddr, dst_str, sizeof(dst_str), &error);
-		if (err != 0)
-			goto error;
-
-		fprintf(stderr, "RX: session lookup for iif %d src %s dst %s ttl %d multihop %d: expected one match, got %u\n",
-			elem->ifindex, src_str, dst_str, elem->ttl, elem->multihop, nmatch);
-		return;
-	}
-
-	fprintf(stderr, "Matched session with discrimator %u\n", discr);
+	if (nmatch != 1)
+		++bpf->diag_stats.rx_no_unique_session;
 
 	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
 				      elem->skb_len, elem->ttl);

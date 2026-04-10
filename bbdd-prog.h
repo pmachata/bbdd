@@ -12,6 +12,7 @@
 	FIELD(rx_multipoint_not_0)		\
 	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0)			\
+	FIELD(rx_no_unique_session)		\
 	FIELD(rx_discr_not_found)		\
 	FIELD(rx_socket_not_found)		\
 	FIELD(rx_socket_assign_error)		\
