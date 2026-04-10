@@ -119,13 +119,16 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 	bpf_ringbuf_submit(elem, 0);
 }
 
-static void bbdd_rx_notify_unx_packet(struct bbdd_bfd_control_packet *packet)
+static void
+bbdd_rx_notify_unx_packet(const struct bbdd_bfd_control_packet *packet,
+			  u8 ttl)
 {
 	struct bbdd_bpf_rb_elem_rx_unx_packet *elem;
 
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
 	elem->packet = *packet;
+	elem->ttl = ttl;
 
 	bpf_ringbuf_submit(elem, 0);
 }
@@ -545,14 +548,20 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
+	/* These checks are duplicated in bbdd-bpf.c, where they are commented
+	 * as well. */
 	if (config->admin_down) {
 		BUMP(bbdd_prog_global_diag_stats.rx_admin_down);
+		return TC_ACT_SHOT;
+	}
+	if (config->ttl > digest.ttl) {
+		BUMP(data->diag_stats.rx_ttl_low);
 		return TC_ACT_SHOT;
 	}
 
 	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
 	if (ret != 0) {
-		bbdd_rx_notify_unx_packet(bfd);
+		bbdd_rx_notify_unx_packet(bfd, digest.ttl);
 		return TC_ACT_SHOT;
 	}
 

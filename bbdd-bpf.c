@@ -148,7 +148,17 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		struct sockaddr    sa;
 		struct sockaddr_ll sll;
 	} dst_sa = {};
+	uint8_t ttl;
 	ssize_t rc;
+
+	/* RFC: When a BFD session is directly connected across a single link
+	 * (physical, or a secure tunnel such as IPsec), the TTL or Hop Count
+	 * MUST be set to the maximum on transmit.
+	 *
+	 * For multi-hop sessions the RFC recommends auth. We can just set the
+	 * TTL to maximum always.
+	 */
+	ttl = 255;
 
 	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr,
 				   bfd_flags);
@@ -175,9 +185,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		pkt.ip.version  = 4;
 		pkt.ip.ihl      = 5;
 		pkt.ip.tot_len  = htons(sizeof(pkt));
-		pkt.ip.ttl      = dsess->ttl; // xxx 255. dsess->ttl is used for
-					      // bouncing invalid packets.
-					      // Likewise below for hoplimit.
+		pkt.ip.ttl      = ttl;
 		pkt.ip.protocol = IPPROTO_UDP;
 		pkt.ip.saddr    = dsess->src.sin.sin_addr.s_addr;
 		pkt.ip.daddr    = dsess->dst.sin.sin_addr.s_addr;
@@ -203,7 +211,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		pkt.ip6.ip6_vfc  = 0x60; /* version 6 */
 		pkt.ip6.ip6_plen = htons(udp_len);
 		pkt.ip6.ip6_nxt  = IPPROTO_UDP;
-		pkt.ip6.ip6_hlim = dsess->ttl;
+		pkt.ip6.ip6_hlim = ttl;
 		pkt.ip6.ip6_src  = dsess->src.sin6.sin6_addr;
 		pkt.ip6.ip6_dst  = dsess->dst.sin6.sin6_addr;
 		pkt.udp.check    = bbdd_bpf_udp6_cksum(&pkt.ip6, &pkt.udp,
@@ -315,6 +323,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.max_interval_us = max_interval_us,
 		.gen_id = bsess->gen_id,
 		.admin_down = dsess->local.state.state == STATE_ADMINDOWN,
+		.ttl = dsess->ttl,
 		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
 						  dsess->local.discr, 0),
 	};
@@ -519,7 +528,8 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_sess_dir *sdir,
-		       const struct bbdd_bfd_control_packet *packet)
+		       const struct bbdd_bfd_control_packet *packet,
+		       uint8_t ttl)
 {
 	uint32_t local_discr = ntohl(packet->your_disc);
 	uint32_t remote_discr = ntohl(packet->my_disc);
@@ -556,6 +566,18 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	 */
 	if (dsess->local.state.state == STATE_ADMINDOWN)
 		// xxx bump rx_admin_down
+		return;
+
+	/* RFC: [For single-hop sessions] TTL or Hop Count MUST be set to the
+	 * maximum on transmit, and checked to be equal to the maximum value on
+	 * reception.
+	 *
+	 * We always set TTL to 255, and let the user configure per-session what
+	 * value of incoming TTL they tolerate. The RFC doesn't directly say
+	 * that non-matching packets must be dropped, but what else.
+	 */
+	if (dsess->ttl > ttl)
+		// xxx bump rx_ttl_low
 		return;
 
 	old_local = dsess->local;
@@ -698,7 +720,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 	fprintf(stderr, "Matched session with discrimator %u\n", discr);
 
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet);
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet, elem->ttl);
 
 error:
 	bbdd_util_printerr(err, &error, "bbdd_bpf_rb_handle_discr_0");
@@ -710,7 +732,7 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 			      struct bbdd_sess_dir *sdir)
 {
 	fprintf(stderr, "Unexpected packet\n");
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet);
+	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet, elem->ttl);
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)

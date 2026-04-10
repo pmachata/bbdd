@@ -35,6 +35,7 @@
 	FIELD(tx_fail_redir)			\
 	FIELD(tx_loopback_filter)		\
 	FIELD(tx_wrong_gen_id)		        \
+	FIELD(rx_ttl_low)			\
 	FIELD(rx_timeout)			\
 	FIELD(rx_fail_timer)			\
 	/**/
@@ -70,6 +71,7 @@ struct bbdd_prog_session_config {
 	__u32 max_interval_us;
 	__u32 gen_id;
 	bool admin_down; // xxx implement me. Packets need to be discarded when true.
+	__u8 ttl;
 	struct bbdd_bfd_control_packet rx_expect;
 };
 
@@ -181,6 +183,7 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 
 struct bbdd_bpf_rb_elem_rx_unx_packet {
 	struct bbdd_bpf_rb_elem_head head;
+	__u8 ttl;
 	struct bbdd_bfd_control_packet packet;
 };
 
