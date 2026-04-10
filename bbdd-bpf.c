@@ -433,6 +433,95 @@ static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t discr)
 			discr);
 }
 
+static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
+				     char **error)
+{
+	uint32_t mark = bsess->gen_id;
+	int rc;
+
+	rc = setsockopt(bsess->sock_fd, SOL_SOCKET, SO_MARK,
+			&mark, sizeof(mark));
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
+		return -1;
+	}
+	return 0;
+}
+
+enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
+
+static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+				     const struct bbdd_d_session *dsess,
+				     struct bbdd_bpf_session *bsess,
+				     bool add, char **error)
+{
+	uint32_t min_interval_us;
+	uint32_t max_interval_us;
+	uint32_t tbid = 0;    // xxx VRF support
+	uint32_t flags = BPF_FIB_LOOKUP_SRC;
+	uint32_t interval_us;
+	uint32_t fwd_ifindex;
+	int rc;
+
+	bsess->gen_id++;
+
+	/* system MUST NOT transmit BFD Control packets at an interval less than
+	 * the larger of bfd.DesiredMinTxInterval and bfd.RemoteMinRxInterval,
+	 * less applied jitter. */
+	interval_us = MAX(dsess->local.min_tx_us, dsess->remote.min_rx_us);
+
+	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9. */
+	min_interval_us = interval_us * 75 / 100;
+	if (dsess->local.detect_mult == 1)
+		max_interval_us = interval_us * 90 / 100;
+	else
+		max_interval_us = interval_us;
+
+	rc = bbdd_bpf_session_set_mark(bsess, error);
+	if (rc != 0)
+		return rc;
+
+	if (tbid != 0)
+		flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
+
+	if (dsess->ifindex != 0) {
+		fwd_ifindex = dsess->ifindex;
+		flags |= BPF_FIB_LOOKUP_OUTPUT;
+	} else {
+		fwd_ifindex = bpf->conf.veth_tx_ifindex;
+	}
+
+	if (add)
+		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
+					       tbid, flags, min_interval_us,
+					       max_interval_us, error);
+	else
+		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
+						  tbid, flags, min_interval_us,
+						  max_interval_us, error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
+					 bpf->conf.veth_tx_ifindex, 0,
+					 error);
+	if (rc != 0)
+		goto del_session;
+
+	return 0;
+
+	/* There's no reliable way to roll back everything, and e.g. rolling
+	 * back the mark is pointless. Unless everything lines up just right,
+	 * the session is broken. Even if the standard allowed to do something
+	 * like add a new session with new id and then remove the old one, when
+	 * the removal fails, we've got two sessions and it's broken. The only
+	 * thing that we clean up is the session add. */
+del_session:
+	if (add)
+		bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
+	return rc;
+}
+
 static int
 bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 			  const struct bbdd_bpf_addr *bfd_addr,
@@ -662,7 +751,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 			fprintf(stderr, "state change, but formatting error\n");
 	}
 
-	err = bbdd_bpf_session_update(bpf, dsess, &error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
@@ -1113,95 +1202,6 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 err:
 	json_object_put(obj);
 	return NULL;
-}
-
-static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
-				     char **error)
-{
-	uint32_t mark = bsess->gen_id;
-	int rc;
-
-	rc = setsockopt(bsess->sock_fd, SOL_SOCKET, SO_MARK,
-			&mark, sizeof(mark));
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
-		return -1;
-	}
-	return 0;
-}
-
-enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
-
-static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-				     const struct bbdd_d_session *dsess,
-				     struct bbdd_bpf_session *bsess,
-				     bool add, char **error)
-{
-	uint32_t min_interval_us;
-	uint32_t max_interval_us;
-	uint32_t tbid = 0;    // xxx VRF support
-	uint32_t flags = BPF_FIB_LOOKUP_SRC;
-	uint32_t interval_us;
-	uint32_t fwd_ifindex;
-	int rc;
-
-	bsess->gen_id++;
-
-	/* system MUST NOT transmit BFD Control packets at an interval less than
-	 * the larger of bfd.DesiredMinTxInterval and bfd.RemoteMinRxInterval,
-	 * less applied jitter. */
-	interval_us = MAX(dsess->local.min_tx_us, dsess->remote.min_rx_us);
-
-	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9. */
-	min_interval_us = interval_us * 75 / 100;
-	if (dsess->local.detect_mult == 1)
-		max_interval_us = interval_us * 90 / 100;
-	else
-		max_interval_us = interval_us;
-
-	rc = bbdd_bpf_session_set_mark(bsess, error);
-	if (rc != 0)
-		return rc;
-
-	if (tbid != 0)
-		flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
-
-	if (dsess->ifindex != 0) {
-		fwd_ifindex = dsess->ifindex;
-		flags |= BPF_FIB_LOOKUP_OUTPUT;
-	} else {
-		fwd_ifindex = bpf->conf.veth_tx_ifindex;
-	}
-
-	if (add)
-		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
-					       tbid, flags, min_interval_us,
-					       max_interval_us, error);
-	else
-		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
-						  tbid, flags, min_interval_us,
-						  max_interval_us, error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-					 bpf->conf.veth_tx_ifindex, 0,
-					 error);
-	if (rc != 0)
-		goto del_session;
-
-	return 0;
-
-	/* There's no reliable way to roll back everything, and e.g. rolling
-	 * back the mark is pointless. Unless everything lines up just right,
-	 * the session is broken. Even if the standard allowed to do something
-	 * like add a new session with new id and then remove the old one, when
-	 * the removal fails, we've got two sessions and it's broken. The only
-	 * thing that we clean up is the session add. */
-del_session:
-	if (add)
-		bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
-	return rc;
 }
 
 static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
