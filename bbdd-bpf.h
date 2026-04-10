@@ -36,16 +36,13 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 						uint32_t id,
 						char **error);
 
-struct bbdd_bpf_session *
-bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-		     const struct bbdd_d_session *dsess,
-		     char **error);
+int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
+			 const struct bbdd_d_session *dsess,
+			 char **error);
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_d_session *dsess,
-			    struct bbdd_bpf_session *bsess,
 			    char **error);
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
-			  const struct bbdd_d_session *dsess,
-			  struct bbdd_bpf_session *bsess);
+			  const struct bbdd_d_session *dsess);

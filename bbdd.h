@@ -152,9 +152,6 @@ struct bbdd_d_session {
 
 	/* Remote session data. */
 	struct bbdd_d_session_data remote;
-
-	/* BPF-specific data. */
-	struct bbdd_bpf_session *bpf;
 };
 
 int bbdd_d_start(int argc, char **argv);

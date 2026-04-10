@@ -1179,8 +1179,8 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	dsess->bpf = bbdd_bpf_session_add(bpf, dsess, &error);
-	if (dsess->bpf == NULL)
+	rc = bbdd_bpf_session_add(bpf, dsess, &error);
+	if (rc != 0)
 		goto sess_dir_del_session;
 
 	bbdd_d_respond_empty(peer, id);
@@ -1302,7 +1302,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 			goto free_discrs;
 		}
 
-		rc = bbdd_bpf_session_update(bpf, dsess, dsess->bpf, &error);
+		rc = bbdd_bpf_session_update(bpf, dsess, &error);
 		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_discrs;
@@ -1339,7 +1339,7 @@ static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
 		return -1;
 	}
 
-	bbdd_bpf_session_del(bpf, dsess, dsess->bpf);
+	bbdd_bpf_session_del(bpf, dsess);
 
 	sport = dsess->src.sin46.port;
 	bbdd_d_sport_put(spa, sport);

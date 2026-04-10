@@ -22,6 +22,7 @@
 #include <netpacket/packet.h>
 #include <sys/socket.h>
 #include <sys/param.h>
+#include <uthash.h>
 
 #include "bbdd.h"
 #include "bbdd-nl.h"
@@ -56,13 +57,26 @@ struct bbdd_bpf {
 	struct bbdd_bpf_attachment *rx;
 	struct bbdd_bpf_attachment *tx;
 	struct bbdd_bpf_rb_context *rb_ctx;
+	struct bbdd_bpf_session *sdir;
 };
 
 /* Per-session data. */
 struct bbdd_bpf_session {
+	uint32_t discr;
 	uint32_t gen_id;
 	int sock_fd;
+
+	UT_hash_handle hh;
 };
+
+static struct bbdd_bpf_session *
+bbdd_bpf_sdir_get_session(struct bbdd_bpf *bpf, uint32_t discr)
+{
+	struct bbdd_bpf_session *bsess;
+
+	HASH_FIND_INT(bpf->sdir, &discr, bsess);
+	return bsess;
+}
 
 static int bbdd_bpf_print(enum libbpf_print_level level,
 			  const char *fmt, va_list args)
@@ -548,16 +562,14 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	 * over. Just eat them. */
 
 	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
-	if (dsess == NULL) {
+	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
+	if (dsess == NULL || bsess == NULL) {
 		/* I think this can come up when BPF found a session and emit an
 		 * event, but before we got to process it, the session gets
 		 * deleted. So don't even print anything. */
 		return;
 	}
 
-	// xxx this accesses dsess->bpf, which it shouldn't. The fact that -d.c
-	// keeps the pointer in dsess is an implementation detail.
-	bsess = dsess->bpf;
 
 	/* For admin down sessions where your_disc is given, we don't even get
 	 * to see these packets, because BPF shoots them down. But when
@@ -650,7 +662,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 			fprintf(stderr, "state change, but formatting error\n");
 	}
 
-	err = bbdd_bpf_session_update(bpf, dsess, bsess, &error);
+	err = bbdd_bpf_session_update(bpf, dsess, &error);
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
@@ -1239,10 +1251,9 @@ close_fd:
 	return -1;
 }
 
-struct bbdd_bpf_session *
-bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-		     const struct bbdd_d_session *dsess,
-		     char **error)
+int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
+			 const struct bbdd_d_session *dsess,
+			 char **error)
 {
 	struct bbdd_bpf_session *bsess;
 	int sock_fd;
@@ -1251,7 +1262,7 @@ bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 	bsess = malloc(sizeof(*bsess));
 	if (bsess == NULL) {
 		bbdd_util_fmterr(error, "%m");
-		return NULL;
+		return -1;
 	}
 
 	sock_fd = bbdd_d_session_open_sock(dsess, bpf->conf.veth_tx_ifindex,
@@ -1262,6 +1273,7 @@ bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 	}
 
 	*bsess = (struct bbdd_bpf_session) {
+		.discr = dsess->local.discr,
 		.gen_id = 0,
 		.sock_fd = sock_fd,
 	};
@@ -1270,31 +1282,48 @@ bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 	if (err != 0)
 		goto close_sock;
 
-	return bsess;
+	HASH_ADD_INT(bpf->sdir, discr, bsess);
+	return 0;
 
 close_sock:
 	close(sock_fd);
 free_bsess:
 	free(bsess);
-	return NULL;
+	return -1;
 }
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_d_session *dsess,
-			    struct bbdd_bpf_session *bsess,
 			    char **error)
 {
+	uint32_t discr = dsess->local.discr;
+	struct bbdd_bpf_session *bsess;
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
+		return -1;
+	}
+
 	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, error);
 }
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
-			  const struct bbdd_d_session *dsess,
-			  struct bbdd_bpf_session *bsess)
+			  const struct bbdd_d_session *dsess)
 {
+	uint32_t discr = dsess->local.discr;
+	struct bbdd_bpf_session *bsess;
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL)
+		return;
+
+	HASH_DEL(bpf->sdir, bsess);
+
 	/* The packet will be dropped by the looper when no matching session is
 	 * found. */
-
-	bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
+	bbdd_bpf_session_conf_delete(bpf, bsess->discr);
 
 	close(bsess->sock_fd);
 	free(bsess);
