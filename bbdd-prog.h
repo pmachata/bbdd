@@ -82,14 +82,18 @@ enum {
 	bbdd_prog_slow_interval_us = 1000000,
 };
 
+struct bbdd_prog_session_data_stats {
+	BBDD_SESSION_STATS(STAT_FIELD)
+};
+
+struct bbdd_prog_session_data_diag_stats {
+	BBDD_SESSION_DIAG_STATS(STAT_FIELD)
+};
+
 struct bbdd_prog_session_data {
 	struct bpf_timer timer;
-	struct {
-		BBDD_SESSION_DIAG_STATS(STAT_FIELD)
-	} diag_stats;
-	struct {
-		BBDD_SESSION_STATS(STAT_FIELD)
-	} stats;
+	struct bbdd_prog_session_data_stats stats;
+	struct bbdd_prog_session_data_diag_stats diag_stats;
 };
 
 #undef STAT_FIELD

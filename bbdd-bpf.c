@@ -58,6 +58,8 @@ struct bbdd_bpf {
 	struct bbdd_bpf_attachment *tx;
 	struct bbdd_bpf_rb_context *rb_ctx;
 	struct bbdd_bpf_session *sdir;
+
+	struct bbdd_prog_global_diag_stats diag_stats;
 };
 
 /* Per-session data. */
@@ -65,6 +67,9 @@ struct bbdd_bpf_session {
 	uint32_t discr;
 	uint32_t gen_id;
 	int sock_fd;
+
+	struct bbdd_prog_session_data_stats stats;
+	struct bbdd_prog_session_data_diag_stats diag_stats;
 
 	UT_hash_handle hh;
 };
@@ -1114,9 +1119,11 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
-#define FIELD(NAME)						\
-	if (bbdd_bpf_add_stat(obj, #NAME, stats->NAME, error))	\
-		goto err;
+#define FIELD(NAME) {							\
+		uint64_t value = stats->NAME + bpf->diag_stats.NAME;	\
+		if (bbdd_bpf_add_stat(obj, #NAME, value, error))	\
+			goto err;					\
+	}
 
 	BBDD_GLOBAL_DIAG_STATS(FIELD)
 #undef FIELD
@@ -1129,20 +1136,28 @@ err:
 }
 
 struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
-						     uint32_t id,
+						     uint32_t discr,
 						     char **error)
 {
 	struct bbdd_prog_session_data data;
+	struct bbdd_bpf_session *bsess;
 	struct json_object *obj;
 	int err;
 
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
+		return NULL;
+	}
+
 	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &id, sizeof(id),
+				   &discr, sizeof(discr),
 				   &data, sizeof(data), 0);
 	if (err) {
 		bbdd_util_fmterr(error,
-				 "Failed to look up BPF session data for id %u: %s",
-				 id, strerror(-err));
+				 "Failed to look up BPF session data for discr %u: %s",
+				 discr, strerror(-err));
 		return NULL;
 	}
 
@@ -1152,9 +1167,12 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
-#define FIELD(NAME)							\
-	if (bbdd_bpf_add_stat(obj, #NAME, data.diag_stats.NAME, error))	\
-		goto err;
+#define FIELD(NAME) {							\
+		uint64_t value = data.diag_stats.NAME +			\
+				 bsess->diag_stats.NAME;		\
+		if (bbdd_bpf_add_stat(obj, #NAME, value, error))	\
+			goto err;					\
+	}
 
 	BBDD_SESSION_DIAG_STATS(FIELD)
 #undef FIELD
@@ -1167,20 +1185,28 @@ err:
 }
 
 struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
-						uint32_t id,
+						uint32_t discr,
 						char **error)
 {
 	struct bbdd_prog_session_data data;
+	struct bbdd_bpf_session *bsess;
 	struct json_object *obj;
 	int err;
 
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
+		return NULL;
+	}
+
 	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &id, sizeof(id),
+				   &discr, sizeof(discr),
 				   &data, sizeof(data), 0);
 	if (err) {
 		bbdd_util_fmterr(error,
-				 "Failed to look up BPF session data for id %u: %s",
-				 id, strerror(-err));
+				 "Failed to look up BPF session data for discr %u: %s",
+				 discr, strerror(-err));
 		return NULL;
 	}
 
@@ -1190,9 +1216,11 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
-#define FIELD(NAME)							\
-	if (bbdd_bpf_add_stat(obj, #NAME, data.stats.NAME, error))	\
-		goto err;
+#define FIELD(NAME) {							\
+		uint64_t value = data.stats.NAME + bsess->stats.NAME;	\
+		if (bbdd_bpf_add_stat(obj, #NAME, value, error))	\
+			goto err;					\
+	}
 
 	BBDD_SESSION_STATS(FIELD)
 #undef FIELD
