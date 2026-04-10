@@ -106,6 +106,15 @@ enum bbdd_bfd_packet_state {
 	BBDD_BFD_PACKET_STATE_UP,
 };
 
+enum bbdd_bfd_packet_bits {
+	BBDD_BFD_PACKET_BIT_POLL = (1 << 5),
+	BBDD_BFD_PACKET_BIT_FINAL = (1 << 4),
+	BBDD_BFD_PACKET_BIT_CPI = (1 << 3),
+	BBDD_BFD_PACKET_BIT_AUTH = (1 << 2),
+	BBDD_BFD_PACKET_BIT_DEMAND = (1 << 1),
+	BBDD_BFD_PACKET_BIT_MULTI = (1 << 0),
+};
+
 static inline uint8_t
 bbdd_bfd_control_packet_version(const struct bbdd_bfd_control_packet *packet)
 {

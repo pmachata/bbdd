@@ -140,7 +140,8 @@ static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
 
 static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       struct bbdd_bpf_session *bsess,
-				       uint32_t tx_ifindex, char **error)
+				       uint32_t tx_ifindex,
+				       uint8_t bfd_flags, char **error)
 {
 	struct bbdd_bfd_control_packet bfd;
 	union {
@@ -149,7 +150,8 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	} dst_sa = {};
 	ssize_t rc;
 
-	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr, 0);
+	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr,
+				   bfd_flags);
 
 	dst_sa.sll.sll_family  = AF_PACKET;
 	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
@@ -239,17 +241,17 @@ bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
 		return -1;
 	}
 
-	if (bits & STATE_AUTH_BIT) {
+	if (bits & BBDD_BFD_PACKET_BIT_AUTH) {
 		fprintf(stderr, "auth not supported. Flags=%#x\n", bits);
 		return -1;
 	}
 
-	if (bits & STATE_DEMAND_BIT) {
+	if (bits & BBDD_BFD_PACKET_BIT_DEMAND) {
 		fprintf(stderr, "demand not supported. Flags=%#x\n", bits);
 		return -1;
 	}
 
-	if (bits & STATE_MULTI_BIT) {
+	if (bits & BBDD_BFD_PACKET_BIT_MULTI) {
 		fprintf(stderr, "multipoint not supported. Flags=%#x\n", bits);
 		return -1;
 	}
@@ -279,7 +281,7 @@ bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
 	data->state.state = state;
 	data->state.diag = bbdd_bfd_control_packet_diag(packet);
 
-	*poll = bits & STATE_POLL_BIT;
+	*poll = bits & BBDD_BFD_PACKET_BIT_POLL;
 
 	return 0;
 }
@@ -600,13 +602,9 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		}
 	}
 
-	if (poll) {
-		fprintf(stderr, "should send final\n");
-	}
-
 	if (memcmp(&old_local, &dsess->local, sizeof(old_local)) == 0 &&
 	    memcmp(&old_remote, &dsess->remote, sizeof(old_remote)) == 0)
-		return;
+		goto poll_respond;
 
 
 	{
@@ -634,6 +632,16 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
+
+poll_respond:
+	if (poll) {
+		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
+						  bpf->conf.veth_tx_ifindex,
+						  BBDD_BFD_PACKET_BIT_FINAL,
+						  &error);
+		if (err != 0)
+			bbdd_util_printerr(err, &error, "Failed to respond to a poll packet");
+	}
 }
 
 static void
@@ -1143,7 +1151,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return rc;
 
 	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-					 bpf->conf.veth_tx_ifindex,
+					 bpf->conf.veth_tx_ifindex, 0,
 					 error);
 	if (rc != 0)
 		goto del_session;

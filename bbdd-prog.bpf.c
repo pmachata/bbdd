@@ -358,7 +358,9 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	struct bpf_fib_lookup params;
 	u64 interval_us;
 	u16 tot_len;
+	bool final;
 	u32 id;
+	int redir_rc = TC_ACT_SHOT;
 	int ret;
 
 	/* SKB is an Ethernet packet. */
@@ -366,6 +368,8 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len, NULL);
 	if (bfd == NULL)
 		goto tx_not_bfd;
+
+	final = bbdd_bpf_control_packet_bits(bfd) & BBDD_BFD_PACKET_BIT_FINAL;
 
 	id = bpf_ntohl(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &id);
@@ -431,8 +435,12 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		goto out;
 	}
 
-	ret = bpf_clone_redirect(skb, params.ifindex, 0);
-	if (ret) {
+	if (final)
+		redir_rc = bpf_redirect(params.ifindex, 0);
+	else
+		redir_rc = bpf_clone_redirect(skb, params.ifindex, 0);
+
+	if (redir_rc) {
 		BUMP(data->diag_stats.tx_fail_redir);
 		goto out;
 	}
@@ -441,6 +449,9 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	__sync_fetch_and_add(&data->stats.tx_bytes, skb->len);
 
 out:
+	if (final)
+		return redir_rc;
+
 	interval_us = config->max_interval_us - config->min_interval_us;
 	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
 	interval_us += config->min_interval_us;
