@@ -394,6 +394,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	uint32_t remote_discr = ntohl(packet->my_disc);
 	struct bbdd_d_session_data old_local;
 	struct bbdd_d_session_data old_remote;
+	struct bbdd_bpf_session *bsess;
 	struct bbdd_d_session *dsess;
 	char *error;
 	bool poll;
@@ -412,6 +413,10 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		 * deleted. So don't even print anything. */
 		return;
 	}
+
+	// xxx this accesses dsess->bpf, which it shouldn't. The fact that -d.c
+	// keeps the pointer in dsess is an implementation detail.
+	bsess = dsess->bpf;
 
 	/* For admin down sessions where your_disc is given, we don't even get
 	 * to see these packets, because BPF shoots them down. But when
@@ -496,8 +501,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 			fprintf(stderr, "state change, but formatting error\n");
 	}
 
-	// xxx this accesses dsess->bpf, which it shouldn't.
-	err = bbdd_bpf_session_update(bpf, dsess, dsess->bpf, &error);
+	err = bbdd_bpf_session_update(bpf, dsess, bsess, &error);
 	if (err != 0)
 		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
