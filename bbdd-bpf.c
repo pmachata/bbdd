@@ -90,6 +90,135 @@ bbdd_bpf_make_packet(const struct bbdd_d_session_data *state,
 	};
 }
 
+static uint32_t bbdd_bpf_cksum_acc(uint32_t sum, const void *buf, size_t len)
+{
+	const uint16_t *p = buf;
+
+	while (len >= 2) {
+		sum += *p++;
+		len -= 2;
+	}
+	if (len)
+		sum += *(const uint8_t *)p;
+	return sum;
+}
+
+static uint16_t bbdd_bpf_cksum_fold(uint32_t sum)
+{
+	while (sum >> 16)
+		sum = (sum & 0xffff) + (sum >> 16);
+	return ~(uint16_t)sum;
+}
+
+static uint16_t bbdd_bpf_inet_cksum(const void *buf, size_t len)
+{
+	return bbdd_bpf_cksum_fold(bbdd_bpf_cksum_acc(0, buf, len));
+}
+
+/* udp_len is in host byte order; udp points to UDP header followed by data */
+static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
+				    const void *udp, uint16_t udp_len)
+{
+	struct {
+		struct in6_addr src;
+		struct in6_addr dst;
+		__be32 len;
+		uint8_t zeros[3];
+		uint8_t nxt;
+	} pseudo = {
+		.src = ip6->ip6_src,
+		.dst = ip6->ip6_dst,
+		.len = htonl(udp_len),
+		.nxt = IPPROTO_UDP,
+	};
+	uint32_t sum = 0;
+
+	sum = bbdd_bpf_cksum_acc(sum, &pseudo, sizeof(pseudo));
+	sum = bbdd_bpf_cksum_acc(sum, udp, udp_len);
+	return bbdd_bpf_cksum_fold(sum);
+}
+
+static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
+				       struct bbdd_bpf_session *bsess,
+				       uint32_t tx_ifindex, char **error)
+{
+	struct bbdd_bfd_control_packet bfd;
+	union {
+		struct sockaddr    sa;
+		struct sockaddr_ll sll;
+	} dst_sa = {};
+	ssize_t rc;
+
+	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr, 0);
+
+	dst_sa.sll.sll_family  = AF_PACKET;
+	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
+	dst_sa.sll.sll_halen   = ETH_ALEN;
+	memset(dst_sa.sll.sll_addr, 0xff, ETH_ALEN);
+
+	if (dsess->dst.sa.sa_family == AF_INET) {
+		struct {
+			struct iphdr ip;
+			struct udphdr udp;
+			struct bbdd_bfd_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin.sin_port;
+		pkt.udp.dest   = dsess->dst.sin.sin_port;
+		pkt.udp.len    = htons(udp_len);
+		pkt.udp.check  = 0; /* optional for IPv4 */
+
+		pkt.ip.version  = 4;
+		pkt.ip.ihl      = 5;
+		pkt.ip.tot_len  = htons(sizeof(pkt));
+		pkt.ip.ttl      = dsess->ttl; // xxx 255. dsess->ttl is used for
+					      // bouncing invalid packets.
+					      // Likewise below for hoplimit.
+		pkt.ip.protocol = IPPROTO_UDP;
+		pkt.ip.saddr    = dsess->src.sin.sin_addr.s_addr;
+		pkt.ip.daddr    = dsess->dst.sin.sin_addr.s_addr;
+		pkt.ip.check    = bbdd_bpf_inet_cksum(&pkt.ip, sizeof(pkt.ip));
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
+
+		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	} else {
+		struct {
+			struct ip6_hdr ip6;
+			struct udphdr udp;
+			struct bbdd_bfd_control_packet bfd;
+		} pkt = {};
+		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
+
+		pkt.bfd        = bfd;
+		pkt.udp.source = dsess->src.sin6.sin6_port;
+		pkt.udp.dest   = dsess->dst.sin6.sin6_port;
+		pkt.udp.len    = htons(udp_len);
+
+		pkt.ip6.ip6_vfc  = 0x60; /* version 6 */
+		pkt.ip6.ip6_plen = htons(udp_len);
+		pkt.ip6.ip6_nxt  = IPPROTO_UDP;
+		pkt.ip6.ip6_hlim = dsess->ttl;
+		pkt.ip6.ip6_src  = dsess->src.sin6.sin6_addr;
+		pkt.ip6.ip6_dst  = dsess->dst.sin6.sin6_addr;
+		pkt.udp.check    = bbdd_bpf_udp6_cksum(&pkt.ip6, &pkt.udp,
+						       udp_len);
+
+		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
+		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
+			    &dst_sa.sa, sizeof(dst_sa.sll));
+	}
+
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "sendto(bfd_tx): %d %m", errno);
+		return -1;
+	}
+	return 0;
+}
+
 static int
 bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
 		      struct bbdd_d_session_data *data,
@@ -942,133 +1071,6 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 err:
 	json_object_put(obj);
 	return NULL;
-}
-
-static uint32_t bbdd_bpf_cksum_acc(uint32_t sum, const void *buf, size_t len)
-{
-	const uint16_t *p = buf;
-
-	while (len >= 2) {
-		sum += *p++;
-		len -= 2;
-	}
-	if (len)
-		sum += *(const uint8_t *)p;
-	return sum;
-}
-
-static uint16_t bbdd_bpf_cksum_fold(uint32_t sum)
-{
-	while (sum >> 16)
-		sum = (sum & 0xffff) + (sum >> 16);
-	return ~(uint16_t)sum;
-}
-
-static uint16_t bbdd_bpf_inet_cksum(const void *buf, size_t len)
-{
-	return bbdd_bpf_cksum_fold(bbdd_bpf_cksum_acc(0, buf, len));
-}
-
-/* udp_len is in host byte order; udp points to UDP header followed by data */
-static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
-				    const void *udp, uint16_t udp_len)
-{
-	struct {
-		struct in6_addr src;
-		struct in6_addr dst;
-		__be32 len;
-		uint8_t zeros[3];
-		uint8_t nxt;
-	} pseudo = {
-		.src = ip6->ip6_src,
-		.dst = ip6->ip6_dst,
-		.len = htonl(udp_len),
-		.nxt = IPPROTO_UDP,
-	};
-	uint32_t sum = 0;
-
-	sum = bbdd_bpf_cksum_acc(sum, &pseudo, sizeof(pseudo));
-	sum = bbdd_bpf_cksum_acc(sum, udp, udp_len);
-	return bbdd_bpf_cksum_fold(sum);
-}
-
-static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
-				       struct bbdd_bpf_session *bsess,
-				       uint32_t tx_ifindex, char **error)
-{
-	struct bbdd_bfd_control_packet bfd;
-	union {
-		struct sockaddr    sa;
-		struct sockaddr_ll sll;
-	} dst_sa = {};
-	ssize_t rc;
-
-	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr, 0);
-
-	dst_sa.sll.sll_family  = AF_PACKET;
-	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
-	dst_sa.sll.sll_halen   = ETH_ALEN;
-	memset(dst_sa.sll.sll_addr, 0xff, ETH_ALEN);
-
-	if (dsess->dst.sa.sa_family == AF_INET) {
-		struct {
-			struct iphdr ip;
-			struct udphdr udp;
-			struct bbdd_bfd_control_packet bfd;
-		} pkt = {};
-		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
-
-		pkt.bfd        = bfd;
-		pkt.udp.source = dsess->src.sin.sin_port;
-		pkt.udp.dest   = dsess->dst.sin.sin_port;
-		pkt.udp.len    = htons(udp_len);
-		pkt.udp.check  = 0; /* optional for IPv4 */
-
-		pkt.ip.version  = 4;
-		pkt.ip.ihl      = 5;
-		pkt.ip.tot_len  = htons(sizeof(pkt));
-		pkt.ip.ttl      = dsess->ttl;
-		pkt.ip.protocol = IPPROTO_UDP;
-		pkt.ip.saddr    = dsess->src.sin.sin_addr.s_addr;
-		pkt.ip.daddr    = dsess->dst.sin.sin_addr.s_addr;
-		pkt.ip.check    = bbdd_bpf_inet_cksum(&pkt.ip, sizeof(pkt.ip));
-
-		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
-
-		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
-			    &dst_sa.sa, sizeof(dst_sa.sll));
-	} else {
-		struct {
-			struct ip6_hdr ip6;
-			struct udphdr udp;
-			struct bbdd_bfd_control_packet bfd;
-		} pkt = {};
-		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
-
-		pkt.bfd        = bfd;
-		pkt.udp.source = dsess->src.sin6.sin6_port;
-		pkt.udp.dest   = dsess->dst.sin6.sin6_port;
-		pkt.udp.len    = htons(udp_len);
-
-		pkt.ip6.ip6_vfc  = 0x60; /* version 6 */
-		pkt.ip6.ip6_plen = htons(udp_len);
-		pkt.ip6.ip6_nxt  = IPPROTO_UDP;
-		pkt.ip6.ip6_hlim = dsess->ttl;
-		pkt.ip6.ip6_src  = dsess->src.sin6.sin6_addr;
-		pkt.ip6.ip6_dst  = dsess->dst.sin6.sin6_addr;
-		pkt.udp.check    = bbdd_bpf_udp6_cksum(&pkt.ip6, &pkt.udp,
-						       udp_len);
-
-		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
-		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
-			    &dst_sa.sa, sizeof(dst_sa.sll));
-	}
-
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "sendto(bfd_tx): %d %m", errno);
-		return -1;
-	}
-	return 0;
 }
 
 static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
