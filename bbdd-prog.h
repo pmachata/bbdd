@@ -8,14 +8,8 @@
 	FIELD(rx_no_session)			\
 	FIELD(rx_wrong_version_number)		\
 	FIELD(rx_invalid_length)		\
-	FIELD(rx_detection_multiplier_0)	\
-	FIELD(rx_multipoint_not_0)		\
-	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0)			\
 	FIELD(rx_no_unique_session)		\
-	FIELD(rx_discr_not_found)		\
-	FIELD(rx_socket_not_found)		\
-	FIELD(rx_socket_assign_error)		\
 	FIELD(ring_buffer_error)		\
 	/**/
 
@@ -37,8 +31,11 @@
 	FIELD(tx_wrong_gen_id)		        \
 	FIELD(rx_admin_down)			\
 	FIELD(rx_ttl_low)			\
-	FIELD(rx_timeout)			\
-	FIELD(rx_fail_timer)			\
+	FIELD(rx_unsupported)			\
+	FIELD(rx_multipoint_not_0)		\
+	FIELD(rx_detection_multiplier_0)	\
+	FIELD(rx_my_discr_0)			\
+	FIELD(rx_your_discr_0_not_down)		\
 	/**/
 
 #define BBDD_SESSION_STATS(FIELD)		\

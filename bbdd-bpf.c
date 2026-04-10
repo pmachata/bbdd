@@ -249,7 +249,8 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 }
 
 static int
-bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
+bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
+		      const struct bbdd_bfd_control_packet *packet,
 		      struct bbdd_d_session_data *data,
 		      bool *poll)
 {
@@ -258,44 +259,36 @@ bbdd_bpf_parse_packet(const struct bbdd_bfd_control_packet *packet,
 	uint32_t local_discr = ntohl(packet->your_disc);
 	enum bfd_state_value state = bbdd_bpf_control_packet_state(packet);
 
-	// xxx the messages here should either go to char **error, or more
-	// likely bump counters.
-
 	/* Note: Version and length are validated in BPF. */
 
-	if (packet->required_echo_rx != 0) {
-		fprintf(stderr, "echo not supported. Flags=%#x\n", bits);
-		return -1;
-	}
-
-	if (bits & BBDD_BFD_PACKET_BIT_AUTH) {
-		fprintf(stderr, "auth not supported. Flags=%#x\n", bits);
-		return -1;
-	}
-
-	if (bits & BBDD_BFD_PACKET_BIT_DEMAND) {
-		fprintf(stderr, "demand not supported. Flags=%#x\n", bits);
+	if (packet->required_echo_rx != 0 ||
+	    bits & (BBDD_BFD_PACKET_BIT_AUTH |
+		    BBDD_BFD_PACKET_BIT_DEMAND)) {
+		++bsess->diag_stats.rx_unsupported;
 		return -1;
 	}
 
 	if (bits & BBDD_BFD_PACKET_BIT_MULTI) {
-		fprintf(stderr, "multipoint not supported. Flags=%#x\n", bits);
+		/* Technically this is also "not supported", but the
+		 * original RFC call this out explicitly, so let's have an
+		 * explicit counter. */
+		++bsess->diag_stats.rx_multipoint_not_0;
 		return -1;
 	}
 
 	if (packet->detection_multiplier == 0) {
-		fprintf(stderr, "Invalid detection multiplier of 0\n");
+		++bsess->diag_stats.rx_detection_multiplier_0;
 		return -1;
 	}
 
 	if (remote_discr == 0) {
-		fprintf(stderr, "Invalid my_discr of 0\n");
+		++bsess->diag_stats.rx_my_discr_0;
 		return -1;
 	}
 
 	if (local_discr == 0 &&
 	    state != STATE_ADMINDOWN && state != STATE_DOWN) {
-		fprintf(stderr, "Invalid your_disc of 0 when state not downish\n");
+		++bsess->diag_stats.rx_your_discr_0_not_down;
 		return -1;
 	}
 
@@ -689,7 +682,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	old_local = dsess->local;
 	old_remote = dsess->remote;
 
-	err = bbdd_bpf_parse_packet(packet, &dsess->remote, &poll);
+	err = bbdd_bpf_parse_packet(bsess, packet, &dsess->remote, &poll);
 	if (err)
 		return;
 

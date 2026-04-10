@@ -386,9 +386,11 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	if (data == NULL)
 		goto tx_no_session;
 
-	if (skb->mark != config->gen_id)
+	if (skb->mark != config->gen_id) {
 		/* Obsolete packet. */
+		BUMP(data->diag_stats.tx_wrong_gen_id);
 		return TC_ACT_SHOT;
+	}
 
 	if (!skb->hash)
 		bpf_set_hash(skb, id);
@@ -434,6 +436,11 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 			BUMP(data->diag_stats.tx_not_forwarded);
 			goto out;
 		}
+	}
+
+	if (params.ifindex == bbdd_veth_tx_ifindex) {
+		BUMP(data->diag_stats.tx_loopback_filter);
+		goto out;
 	}
 
 	if (!bbdd_tx_update(skb, &params)) {
