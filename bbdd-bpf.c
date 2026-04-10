@@ -74,12 +74,12 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 
 static struct bbdd_bfd_control_packet
 bbdd_bpf_make_packet(const struct bbdd_d_session_data *state,
-		     uint32_t your_disc)
+		     uint32_t your_disc, uint8_t flags)
 {
 	enum { v1 = 1 };
 	return (struct bbdd_bfd_control_packet) {
 		.version_diag = (v1 << 5) | (uint8_t) state->state.diag,
-		.state_bits = (uint8_t) state->state.state << 6,
+		.state_bits = (uint8_t) (state->state.state << 6 | flags),
 		.detection_multiplier = state->detect_mult,
 		.length = sizeof(struct bbdd_bfd_control_packet),
 		.my_disc = htonl(state->discr),
@@ -185,7 +185,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.gen_id = bsess->gen_id,
 		.admin_down = dsess->local.state.state == STATE_ADMINDOWN,
 		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
-						  dsess->local.discr),
+						  dsess->local.discr, 0),
 	};
 	int err;
 
@@ -999,7 +999,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	} dst_sa = {};
 	ssize_t rc;
 
-	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr);
+	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr, 0);
 
 	dst_sa.sll.sll_family  = AF_PACKET;
 	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
