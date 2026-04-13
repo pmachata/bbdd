@@ -102,7 +102,7 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 				   const struct bbdd_bpf_addr *saddr,
 				   const struct bbdd_bpf_addr *daddr,
 				   u8 ttl, u8 multihop,
-				   struct bbdd_bfd_control_packet *packet)
+				   struct bbdd_bfd_pkt *packet)
 {
 	struct bbdd_bpf_rb_elem_rx_discr_0 *elem;
 
@@ -122,7 +122,7 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 
 static void
 bbdd_rx_notify_unx_packet(struct __sk_buff *skb,
-			  const struct bbdd_bfd_control_packet *packet,
+			  const struct bbdd_bfd_pkt *packet,
 			  u8 ttl)
 {
 	struct bbdd_bpf_rb_elem_rx_unx_packet *elem;
@@ -198,7 +198,7 @@ static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off,
 	return true;
 }
 
-static struct bbdd_bfd_control_packet *
+static struct bbdd_bfd_pkt *
 bbdd_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
 	     u16 *tot_len, struct bbdd_bfd_rx_pkt_digest *digest)
 {
@@ -357,8 +357,8 @@ static bool bbdd_tx_update(struct __sk_buff *skb,
 SEC("tc")
 int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 {
-	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
-	struct bbdd_bfd_control_packet *bfd;
+	u8 bfd_buf[sizeof(struct bbdd_bfd_pkt)] = {};
+	struct bbdd_bfd_pkt *bfd;
 	struct bbdd_prog_session_config *config;
 	struct bbdd_prog_session_data *data;
 	struct bpf_fib_lookup params;
@@ -375,7 +375,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	if (bfd == NULL)
 		goto tx_not_bfd;
 
-	final = bbdd_bpf_control_packet_bits(bfd) & BBDD_BFD_PACKET_BIT_FINAL;
+	final = bbdd_bpf_pkt_bits(bfd) & BBDD_BFD_PKT_BIT_FINAL;
 
 	id = bpf_ntohl(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &id);
@@ -486,6 +486,7 @@ int bbdd_xmit_veth_rx(struct __sk_buff *skb)
 	return bpf_redirect(bbdd_veth_tx_ifindex, 0);
 }
 
+/*
 static int bfd_session_expired(void *hmap, u32 *key,
 			       struct bbdd_prog_session_data *data)
 {
@@ -493,15 +494,16 @@ static int bfd_session_expired(void *hmap, u32 *key,
 	bbdd_rx_notify_timeout(*key);
 	return 0;
 }
+*/
 
 SEC("socket")
 int bbdd_recv(struct __sk_buff *skb)
 {
-	u8 bfd_buf[sizeof(struct bbdd_bfd_control_packet)] = {};
+	u8 bfd_buf[sizeof(struct bbdd_bfd_pkt)] = {};
 	struct bbdd_bfd_rx_pkt_digest digest = {};
 	struct bbdd_prog_session_data *data;
 	struct bbdd_prog_session_config *config;
-	struct bbdd_bfd_control_packet *bfd;
+	struct bbdd_bfd_pkt *bfd;
 	struct bpf_dynptr p = {};
 	struct udphdr *udph;
 	struct iphdr *iph;
@@ -522,7 +524,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	 * discarded. We need to check this here, because the payload
 	 * interpretation depends on the version.
 	 */
-	if (bbdd_bfd_control_packet_version(bfd) != 1) {
+	if (bbdd_bfd_pkt_version(bfd) != 1) {
 		BUMP(bbdd_prog_global_diag_stats.rx_wrong_version_number);
 		return TC_ACT_SHOT;
 	}
@@ -533,8 +535,8 @@ int bbdd_recv(struct __sk_buff *skb)
          * encapsulating protocol, the packet MUST be discarded.
 	 *
 	 * We know there was enough data to at least access the payload as
-	 * represented by struct bbdd_bfd_control_packet. Since that's all that
-	 * we ever support, we can simply validate that the length matches.
+	 * represented by struct bbdd_bfd_pkt. Since that's all that we ever
+	 * support, we can simply validate that the length matches.
 	 */
 	if (bfd->length != sizeof(*bfd)) {
 		BUMP(bbdd_prog_global_diag_stats.rx_invalid_length);

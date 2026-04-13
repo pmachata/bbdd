@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 #pragma once
 
+#include "bbdd-prog-pkt.h"
+
 #define BBDD_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(tx_no_session)			\
 	FIELD(tx_not_bfd)			\
@@ -50,18 +52,6 @@ struct bbdd_prog_global_diag_stats {
 	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
 };
 
-struct bbdd_bfd_control_packet {
-	uint8_t version_diag;
-	uint8_t state_bits;
-	uint8_t detection_multiplier;
-	uint8_t length;
-	__be32 my_disc;
-	__be32 your_disc;
-	__be32 desired_tx;
-	__be32 required_rx;
-	__be32 required_echo_rx;
-};
-
 struct bbdd_prog_session_config {
 	struct bpf_fib_lookup fib_lookup;
 	__u32 bpf_fib_lookup_flags;
@@ -70,7 +60,7 @@ struct bbdd_prog_session_config {
 	__u32 gen_id;
 	bool admin_down;
 	__u8 ttl;
-	struct bbdd_bfd_control_packet rx_expect;
+	struct bbdd_bfd_pkt rx_expect;
 };
 
 enum {
@@ -96,52 +86,8 @@ struct bbdd_prog_session_data {
 
 #undef STAT_FIELD
 
-/* A copy of subset of bfddp_packet.h that does not include system headers. */
-
 #define BFD_SINGLE_HOP_PORT	3784
 #define BFD_MULTI_HOP_PORT	4784
-
-// xxx finish migration to full suite of custom enums instead of having part
-// this and part that.
-enum bbdd_bfd_packet_state {
-	BBDD_BFD_PACKET_STATE_ADMINDOWN,
-	BBDD_BFD_PACKET_STATE_DOWN,
-	BBDD_BFD_PACKET_STATE_INIT,
-	BBDD_BFD_PACKET_STATE_UP,
-};
-
-enum bbdd_bfd_packet_bits {
-	BBDD_BFD_PACKET_BIT_POLL = (1 << 5),
-	BBDD_BFD_PACKET_BIT_FINAL = (1 << 4),
-	BBDD_BFD_PACKET_BIT_CPI = (1 << 3),
-	BBDD_BFD_PACKET_BIT_AUTH = (1 << 2),
-	BBDD_BFD_PACKET_BIT_DEMAND = (1 << 1),
-	BBDD_BFD_PACKET_BIT_MULTI = (1 << 0),
-};
-
-static inline uint8_t
-bbdd_bfd_control_packet_version(const struct bbdd_bfd_control_packet *packet)
-{
-	return packet->version_diag >> 5;
-}
-
-static inline uint8_t
-bbdd_bfd_control_packet_diag(const struct bbdd_bfd_control_packet *packet)
-{
-	return packet->version_diag & 0x1f;
-}
-
-static inline uint8_t
-bbdd_bpf_control_packet_state(const struct bbdd_bfd_control_packet *packet)
-{
-	return packet->state_bits >> 6;
-}
-
-static inline uint8_t
-bbdd_bpf_control_packet_bits(const struct bbdd_bfd_control_packet *packet)
-{
-	return packet->state_bits & 0x3f;
-}
 
 struct bbdd_bpf_global_config {
 	__u32 veth_rx_ifindex;
@@ -181,14 +127,14 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 	__u8 multihop;
 	struct bbdd_bpf_addr saddr;
 	struct bbdd_bpf_addr daddr;
-	struct bbdd_bfd_control_packet packet;
+	struct bbdd_bfd_pkt packet;
 };
 
 struct bbdd_bpf_rb_elem_rx_unx_packet {
 	struct bbdd_bpf_rb_elem_head head;
 	__u16 skb_len;
 	__u8 ttl;
-	struct bbdd_bfd_control_packet packet;
+	struct bbdd_bfd_pkt packet;
 };
 
 struct bbdd_bpf_rb_elem_rx_timeout {

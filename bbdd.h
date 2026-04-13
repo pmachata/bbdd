@@ -7,8 +7,8 @@
 #include <json-c/json_object.h>
 
 #include "bbdd-nl.h"
+#include "bbdd-pkt.h"
 #include "bbdd-sock.h"
-#include "bfddp_packet.h"
 
 #define NEXT_ARG() do { argv++; if (--argc <= 0) goto incomplete_command; } while (0)
 #define NEXT_ARG_OK() (argc - 1 > 0)
@@ -117,8 +117,8 @@ struct bbdd_d_session_flags {
 #undef BBDD_C_SESSION_EXPAND_FIELD
 
 struct bbdd_d_session_state_end {
-	enum bfd_state_value state;
-	enum bfd_diagnostic_value diag;
+	enum bbdd_bfd_pkt_state state;
+	enum bbdd_bfd_pkt_diag diag;
 };
 
 struct bbdd_d_session_data {
@@ -160,10 +160,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
 				    char **error);
 
-const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv);
-int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv);
+const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
+int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
 
-const char *bbdd_d_bfd_diag_to_str(enum bfd_diagnostic_value sv);
-int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv);
+const char *bbdd_d_bfd_diag_to_str(enum bbdd_bfd_pkt_diag dv);
+int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv);
 
 struct json_object *bbdd_d_session_json(struct bbdd_d_session *dsess);

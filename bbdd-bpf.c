@@ -91,16 +91,16 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 	return 0;
 }
 
-static struct bbdd_bfd_control_packet
+static struct bbdd_bfd_pkt
 bbdd_bpf_make_packet(const struct bbdd_d_session_data *state,
 		     uint32_t your_disc, uint8_t flags)
 {
 	enum { v1 = 1 };
-	return (struct bbdd_bfd_control_packet) {
+	return (struct bbdd_bfd_pkt) {
 		.version_diag = (v1 << 5) | (uint8_t) state->state.diag,
 		.state_bits = (uint8_t) (state->state.state << 6 | flags),
 		.detection_multiplier = state->detect_mult,
-		.length = sizeof(struct bbdd_bfd_control_packet),
+		.length = sizeof(struct bbdd_bfd_pkt),
 		.my_disc = htonl(state->discr),
 		.your_disc = htonl(your_disc),
 		.desired_tx = htonl(state->min_tx_us),
@@ -162,7 +162,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error)
 {
-	struct bbdd_bfd_control_packet bfd;
+	struct bbdd_bfd_pkt bfd;
 	union {
 		struct sockaddr    sa;
 		struct sockaddr_ll sll;
@@ -191,7 +191,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		struct {
 			struct iphdr ip;
 			struct udphdr udp;
-			struct bbdd_bfd_control_packet bfd;
+			struct bbdd_bfd_pkt bfd;
 		} pkt = {};
 		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
 
@@ -218,7 +218,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		struct {
 			struct ip6_hdr ip6;
 			struct udphdr udp;
-			struct bbdd_bfd_control_packet bfd;
+			struct bbdd_bfd_pkt bfd;
 		} pkt = {};
 		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
 
@@ -250,25 +250,27 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 
 static int
 bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
-		      const struct bbdd_bfd_control_packet *packet,
+		      const struct bbdd_bfd_pkt *packet,
 		      struct bbdd_d_session_data *data,
 		      bool *poll)
 {
-	uint8_t bits = bbdd_bpf_control_packet_bits(packet);
+	uint8_t bits = bbdd_bpf_pkt_bits(packet);
 	uint32_t remote_discr = ntohl(packet->my_disc);
 	uint32_t local_discr = ntohl(packet->your_disc);
-	enum bfd_state_value state = bbdd_bpf_control_packet_state(packet);
+	enum bbdd_bfd_pkt_state state;
 
 	/* Note: Version and length are validated in BPF. */
 
+	state = bbdd_bpf_pkt_state(packet);
+
 	if (packet->required_echo_rx != 0 ||
-	    bits & (BBDD_BFD_PACKET_BIT_AUTH |
-		    BBDD_BFD_PACKET_BIT_DEMAND)) {
+	    bits & (BBDD_BFD_PKT_BIT_AUTH |
+		    BBDD_BFD_PKT_BIT_DEMAND)) {
 		++bsess->diag_stats.rx_unsupported;
 		return -1;
 	}
 
-	if (bits & BBDD_BFD_PACKET_BIT_MULTI) {
+	if (bits & BBDD_BFD_PKT_BIT_MULTI) {
 		/* Technically this is also "not supported", but the
 		 * original RFC call this out explicitly, so let's have an
 		 * explicit counter. */
@@ -287,7 +289,8 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 	}
 
 	if (local_discr == 0 &&
-	    state != STATE_ADMINDOWN && state != STATE_DOWN) {
+	    state != BBDD_BFD_PKT_STATE_ADMINDOWN &&
+	    state != BBDD_BFD_PKT_STATE_DOWN) {
 		++bsess->diag_stats.rx_your_discr_0_not_down;
 		return -1;
 	}
@@ -299,9 +302,9 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 	data->min_tx_us = ntohl(packet->desired_tx);
 	data->detect_mult = packet->detection_multiplier;
 	data->state.state = state;
-	data->state.diag = bbdd_bfd_control_packet_diag(packet);
+	data->state.diag = bbdd_bfd_pkt_diag(packet);
 
-	*poll = bits & BBDD_BFD_PACKET_BIT_POLL;
+	*poll = bits & BBDD_BFD_PKT_BIT_POLL;
 
 	return 0;
 }
@@ -334,7 +337,8 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
 		.gen_id = bsess->gen_id,
-		.admin_down = dsess->local.state.state == STATE_ADMINDOWN,
+		.admin_down = (dsess->local.state.state ==
+			       BBDD_BFD_PKT_STATE_ADMINDOWN),
 		.ttl = dsess->ttl,
 		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
 						  dsess->local.discr, 0),
@@ -629,7 +633,7 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_sess_dir *sdir,
-		       const struct bbdd_bfd_control_packet *packet,
+		       const struct bbdd_bfd_pkt *packet,
 		       uint16_t skb_len, uint8_t ttl)
 {
 	uint32_t local_discr = ntohl(packet->your_disc);
@@ -661,7 +665,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	 * your_disc == 0, the packets are processed here, and we need to shoot
 	 * them down ourselves.
 	 */
-	if (dsess->local.state.state == STATE_ADMINDOWN) {
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
 		++bsess->diag_stats.rx_admin_down;
 		return;
 	}
@@ -686,10 +690,10 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (err)
 		return;
 
-	if (dsess->remote.state.state == STATE_ADMINDOWN) {
-		if (dsess->local.state.state != STATE_DOWN) {
-			dsess->local.state.state = STATE_DOWN;
-			dsess->local.state.diag = DIAG_DOWN;
+	if (dsess->remote.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
+		if (dsess->local.state.state != BBDD_BFD_PKT_STATE_DOWN) {
+			dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
+			dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
 			// xxx should this reset timers to slow? And the same
 			// below.
 			// xxx should we at some point reset the remote
@@ -698,26 +702,36 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		}
 	} else {
 		switch (dsess->local.state.state) {
-		case STATE_ADMINDOWN:
+		case BBDD_BFD_PKT_STATE_ADMINDOWN:
 			break;
 
-		case STATE_DOWN:
-			if (dsess->remote.state.state == STATE_DOWN)
-				dsess->local.state.state = STATE_INIT;
-			else if (dsess->remote.state.state == STATE_INIT)
-				dsess->local.state.state = STATE_UP;
+		case BBDD_BFD_PKT_STATE_DOWN:
+			if (dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_DOWN)
+				dsess->local.state.state =
+					BBDD_BFD_PKT_STATE_INIT;
+			else if (dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_INIT)
+				dsess->local.state.state =
+					BBDD_BFD_PKT_STATE_UP;
 			break;
 
-		case STATE_INIT:
-			if (dsess->remote.state.state == STATE_INIT ||
-			    dsess->remote.state.state == STATE_UP)
-				dsess->local.state.state = STATE_UP;
+		case BBDD_BFD_PKT_STATE_INIT:
+			if (dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_INIT ||
+			    dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_UP)
+				dsess->local.state.state =
+					BBDD_BFD_PKT_STATE_UP;
 			break;
 
-		case STATE_UP:
-			if (dsess->remote.state.state == STATE_DOWN) {
-				dsess->local.state.state = STATE_DOWN;
-				dsess->local.state.diag = DIAG_DOWN;
+		case BBDD_BFD_PKT_STATE_UP:
+			if (dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_DOWN) {
+				dsess->local.state.state =
+					BBDD_BFD_PKT_STATE_DOWN;
+				dsess->local.state.diag =
+					BBDD_BFD_PKT_DIAG_DOWN;
 			}
 			break;
 		}
@@ -758,7 +772,7 @@ poll_respond:
 	if (poll) {
 		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
 						  bpf->conf.veth_tx_ifindex,
-						  BBDD_BFD_PACKET_BIT_FINAL,
+						  BBDD_BFD_PKT_BIT_FINAL,
 						  &error);
 		if (err != 0)
 			bbdd_util_printerr(err, &error, "Failed to respond to a poll packet");

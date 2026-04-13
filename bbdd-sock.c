@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +19,8 @@
 #include <linux/types.h>
 
 #include "bbdd-util.h"
-#include "bfddp_packet.h"
+
+#define BBDD_BFDDP_DEFAULT_PORT 50700
 
 static int bbdd_sock_parse_range(const char *str, long long *ret,
 				 long long min, long long max,
@@ -221,7 +223,7 @@ static int bbdd_sock_parse_addr_ipv4(const char *addr_in, bool allow_port,
 				     struct bbdd_sockaddr *bsa,
 				     char **error)
 {
-	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
+	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
 	char *addr;
 	char *port;
 	int rc;
@@ -246,7 +248,7 @@ static int bbdd_sock_parse_addr_ipv6_port(const char *addr_in,
 					  struct bbdd_sockaddr *bsa,
 					  char **error)
 {
-	uint16_t port_num = BFD_DATA_PLANE_DEFAULT_PORT;
+	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
 	char *addr;
 	char *saux;
 	int rc;

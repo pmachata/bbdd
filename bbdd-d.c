@@ -553,13 +553,13 @@ static int bbdd_d_strtab_str_to_val(const char *str, int *ret,
 }
 
 static const char *bbdd_d_jrpc_session_state_str[] = {
-	[STATE_ADMINDOWN] = "admindown",
-	[STATE_DOWN] = "down",
-	[STATE_INIT] = "init",
-	[STATE_UP] = "up",
+	[BBDD_BFD_PKT_STATE_ADMINDOWN] = "admindown",
+	[BBDD_BFD_PKT_STATE_DOWN] = "down",
+	[BBDD_BFD_PKT_STATE_INIT] = "init",
+	[BBDD_BFD_PKT_STATE_UP] = "up",
 };
 
-const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv)
+const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv)
 {
 	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_state_str);
 	const char **tab = bbdd_d_jrpc_session_state_str;
@@ -567,7 +567,7 @@ const char *bbdd_d_bfd_state_to_str(enum bfd_state_value sv)
 	return bbdd_d_strtab_val_to_str(sv, tab, sz);
 }
 
-int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv)
+int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv)
 {
 	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_state_str);
 	const char **tab = bbdd_d_jrpc_session_state_str;
@@ -580,7 +580,7 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bfd_state_value *sv)
 }
 
 static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
-						  enum bfd_state_value sv)
+						  enum bbdd_bfd_pkt_state sv)
 {
 	const char *str = bbdd_d_bfd_state_to_str(sv);
 
@@ -590,26 +590,26 @@ static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
 }
 
 static const char *bbdd_d_jrpc_session_diag_str[] = {
-	[DIAG_NOTHING] = "nothing",
-	[DIAG_CONTROL_EXPIRED] = "control_expired",
-	[DIAG_ECHO_FAILED] = "echo_failed",
-	[DIAG_DOWN] = "down",
-	[DIAG_FP_RESET] = "fp_reset",
-	[DIAG_PATH_DOWN] = "path_down",
-	[DIAG_CONCAT_PATH_DOWN] = "concat_path_down",
-	[DIAG_ADMIN_DOWN] = "admin_down",
-	[DIAG_REV_CONCAT_PATH_DOWN] = "rev_concat_path_down",
+	[BBDD_BFD_PKT_DIAG_NOTHING] = "nothing",
+	[BBDD_BFD_PKT_DIAG_CONTROL_EXPIRED] = "control_expired",
+	[BBDD_BFD_PKT_DIAG_ECHO_FAILED] = "echo_failed",
+	[BBDD_BFD_PKT_DIAG_DOWN] = "down",
+	[BBDD_BFD_PKT_DIAG_FP_RESET] = "fp_reset",
+	[BBDD_BFD_PKT_DIAG_PATH_DOWN] = "path_down",
+	[BBDD_BFD_PKT_DIAG_CONCAT_PATH_DOWN] = "concat_path_down",
+	[BBDD_BFD_PKT_DIAG_ADMIN_DOWN] = "admin_down",
+	[BBDD_BFD_PKT_DIAG_REV_CONCAT_PATH_DOWN] = "rev_concat_path_down",
 };
 
-const char *bbdd_d_bfd_diag_to_str(enum bfd_diagnostic_value sv)
+const char *bbdd_d_bfd_diag_to_str(enum bbdd_bfd_pkt_diag dv)
 {
 	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_diag_str);
 	const char **tab = bbdd_d_jrpc_session_diag_str;
 
-	return bbdd_d_strtab_val_to_str(sv, tab, sz);
+	return bbdd_d_strtab_val_to_str(dv, tab, sz);
 }
 
-int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv)
+int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv)
 {
 	size_t sz = ARRAY_SIZE(bbdd_d_jrpc_session_diag_str);
 	const char **tab = bbdd_d_jrpc_session_diag_str;
@@ -617,12 +617,12 @@ int bbdd_d_bfd_diag_from_str(const char *str, enum bfd_diagnostic_value *sv)
 
 	if (bbdd_d_strtab_str_to_val(str, &tmp, tab, sz) < 0)
 		return -EINVAL;
-	*sv = tmp;
+	*dv = tmp;
 	return 0;
 }
 
 static int bbdd_d_jrpc_session_state_attach_diag(struct json_object *obj,
-						 enum bfd_diagnostic_value dv)
+						 enum bbdd_bfd_pkt_diag dv)
 {
 	const char *str = bbdd_d_bfd_diag_to_str(dv);
 
@@ -955,11 +955,11 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	 * contrary, an admin down session that is not `shutdown' anymore can be
 	 * set to INIT again. Otherwise don't touch the state. */
 	if (dsess->flags.shutdown) {
-		dsess->local.state.state = STATE_ADMINDOWN;
-		dsess->local.state.diag = DIAG_ADMIN_DOWN;
-	} else if (dsess->local.state.state == STATE_ADMINDOWN) {
-		dsess->local.state.state = STATE_INIT;
-		dsess->local.state.diag = DIAG_NOTHING;
+		dsess->local.state.state = BBDD_BFD_PKT_STATE_ADMINDOWN;
+		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_ADMIN_DOWN;
+	} else if (dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
+		dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
+		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 	}
 
 	return 0;
@@ -1165,12 +1165,12 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 
 	dsess->src.sin46.port = sport;
 
-	dsess->local.state.state = STATE_INIT;
-	dsess->local.state.diag = DIAG_NOTHING;
+	dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
+	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 
 	dsess->remote.discr = 0;
-	dsess->remote.state.state = STATE_DOWN;
-	dsess->remote.state.diag = DIAG_NOTHING;
+	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
+	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_echo_rx = 0;
