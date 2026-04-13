@@ -68,7 +68,7 @@ struct bbdd_prog_session_config {
 	__u32 min_interval_us;
 	__u32 max_interval_us;
 	__u32 gen_id;
-	bool admin_down; // xxx implement me. Packets need to be discarded when true.
+	bool admin_down;
 	__u8 ttl;
 	struct bbdd_bfd_control_packet rx_expect;
 };
