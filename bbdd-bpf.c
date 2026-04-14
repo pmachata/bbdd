@@ -470,14 +470,29 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
+	bool downish;
 	int rc;
 
 	bsess->gen_id++;
 
-	/* system MUST NOT transmit BFD Control packets at an interval less than
-	 * the larger of bfd.DesiredMinTxInterval and bfd.RemoteMinRxInterval,
-	 * less applied jitter. */
-	interval_us = MAX(dsess->local.min_tx_us, dsess->remote.min_rx_us);
+	// xxx the RFC requires only Down to be treated specially, but it's
+	// odd to me that an admin down session would need to flood packet
+	// full speed. For now treat both the same, but this needs
+	// attention to resolve for good.
+	downish = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN ||
+		  dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
+
+	if (downish)
+		/* If the session goes Down, the transmission of Echo
+		 * packets (if any) ceases, and the transmission of Control
+		 * packets goes back to the slow rate. */
+		interval_us = bbdd_prog_slow_interval_us;
+	else
+		/* system MUST NOT transmit BFD Control packets at an
+		 * interval less than the larger of bfd.RemoteMinRxInterval
+		 * and bfd.DesiredMinTxInterval, less applied jitter. */
+		interval_us = MAX(dsess->local.min_tx_us,
+				  dsess->remote.min_rx_us);
 
 	/* In Asynchronous mode, the Detection Time calculated in the local
 	 * system is equal to the value of Detect Mult received from the remote
@@ -492,12 +507,17 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	else
 		detect_time_us *= dsess->remote.detect_mult;
 
-	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9. */
-	min_interval_us = interval_us * 75 / 100;
-	if (dsess->local.detect_mult == 1)
-		max_interval_us = interval_us * 90 / 100;
-	else
-		max_interval_us = interval_us;
+	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9.
+	 * For downish sessions, just take the slow rate verbatim. */
+	if (downish) {
+		min_interval_us = max_interval_us = interval_us;
+	} else {
+		min_interval_us = interval_us * 75 / 100;
+		if (dsess->local.detect_mult == 1)
+			max_interval_us = interval_us * 90 / 100;
+		else
+			max_interval_us = interval_us;
+	}
 
 	rc = bbdd_bpf_session_set_mark(bsess, error);
 	if (rc != 0)
@@ -749,8 +769,6 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		if (dsess->local.state.state != BBDD_BFD_PKT_STATE_DOWN) {
 			dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 			dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
-			// xxx should this reset timers to slow? And the same
-			// below.
 			// xxx should we at some point reset the remote
 			// discriminator? Otherwise we'll keep referring to
 			// a your_disc that may be long gone.
@@ -855,7 +873,9 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 			      struct bbdd_bpf *bpf,
 			      struct bbdd_sess_dir *sdir)
 {
-	fprintf(stderr, "Unexpected packet\n");
+	uint32_t local_discr = ntohl(elem->packet.your_disc);
+
+	fprintf(stderr, "Unexpected packet in session %u\n", local_discr);
 	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
 				      elem->skb_len, elem->ttl);
 }
@@ -888,7 +908,6 @@ bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 	 */
 	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_INIT ||
 	    dsess->local.state.state == BBDD_BFD_PKT_STATE_UP) {
-		// xxx should this reset timers to slow? And the same below.
 		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_TIME_EXPIRED;
 
