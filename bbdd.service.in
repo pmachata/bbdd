@@ -1,0 +1,7 @@
+[Unit]
+Description=bbdd, the BPF-based BFD Dataplane Daemon
+
+[Service]
+Type=notify
+ExecStart=@BINDIR@/bbdd start
+ExecStop=@BINDIR@/bbdd stop
