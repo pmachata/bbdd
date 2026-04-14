@@ -38,6 +38,8 @@
 	FIELD(rx_detection_multiplier_0)	\
 	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0_not_down)		\
+	FIELD(rx_fail_timer)			\
+	FIELD(rx_timeout)			\
 	/**/
 
 #define BBDD_SESSION_STATS(FIELD)		\
@@ -57,6 +59,7 @@ struct bbdd_prog_session_config {
 	__u32 bpf_fib_lookup_flags;
 	__u32 min_interval_us;
 	__u32 max_interval_us;
+	__u32 detect_time_us;
 	__u32 gen_id;
 	bool admin_down;
 	__u8 ttl;

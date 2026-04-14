@@ -179,6 +179,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	 */
 	ttl = 255;
 
+	assert(dsess->local.detect_mult != 0);
 	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr,
 				   bfd_flags);
 
@@ -196,6 +197,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
 
 		pkt.bfd        = bfd;
+
 		pkt.udp.source = dsess->src.sin.sin_port;
 		pkt.udp.dest   = dsess->dst.sin.sin_port;
 		pkt.udp.len    = htons(udp_len);
@@ -223,6 +225,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		uint16_t udp_len = sizeof(pkt.udp) + sizeof(pkt.bfd);
 
 		pkt.bfd        = bfd;
+
 		pkt.udp.source = dsess->src.sin6.sin6_port;
 		pkt.udp.dest   = dsess->dst.sin6.sin6_port;
 		pkt.udp.len    = htons(udp_len);
@@ -297,7 +300,6 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 
 	if (remote_discr != 0)
 		data->discr = remote_discr;
-	data->detect_mult = packet->detection_multiplier;
 	data->min_rx_us = ntohl(packet->required_rx);
 	data->min_tx_us = ntohl(packet->desired_tx);
 	data->detect_mult = packet->detection_multiplier;
@@ -317,6 +319,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					uint32_t flags,
 					uint32_t min_interval_us,
 					uint32_t max_interval_us,
+					uint32_t detect_time_us,
 					char **error)
 {
 	const struct bbdd_sockaddr *src = &dsess->src;
@@ -336,6 +339,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.bpf_fib_lookup_flags = flags,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
+		.detect_time_us = detect_time_us,
 		.gen_id = bsess->gen_id,
 		.admin_down = (dsess->local.state.state ==
 			       BBDD_BFD_PKT_STATE_ADMINDOWN),
@@ -388,6 +392,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				     uint32_t flags,
 				     uint32_t min_interval_us,
 				     uint32_t max_interval_us,
+				     uint32_t detect_time_us,
 				     char **error)
 {
 	struct bbdd_prog_session_data data = {};
@@ -396,7 +401,8 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 
 	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, ifindex,
 					   tbid, flags, min_interval_us,
-					   max_interval_us, error);
+					   max_interval_us, detect_time_us,
+					   error);
 	if (err)
 		return err;
 
@@ -459,9 +465,10 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 {
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
+	uint32_t detect_time_us;
+	uint32_t interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t flags = BPF_FIB_LOOKUP_SRC;
-	uint32_t interval_us;
 	uint32_t fwd_ifindex;
 	int rc;
 
@@ -471,6 +478,19 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * the larger of bfd.DesiredMinTxInterval and bfd.RemoteMinRxInterval,
 	 * less applied jitter. */
 	interval_us = MAX(dsess->local.min_tx_us, dsess->remote.min_rx_us);
+
+	/* In Asynchronous mode, the Detection Time calculated in the local
+	 * system is equal to the value of Detect Mult received from the remote
+	 * system, multiplied by the agreed transmit interval of the remote
+	 * system (the greater of bfd.RequiredMinRxInterval and the last
+	 * received Desired Min TX Interval).
+	 */
+	assert(dsess->remote.detect_mult != 0);
+	detect_time_us = MAX(dsess->local.min_rx_us, dsess->remote.min_tx_us);
+	if (detect_time_us > UINT32_MAX / dsess->remote.detect_mult)
+		detect_time_us = UINT32_MAX;
+	else
+		detect_time_us *= dsess->remote.detect_mult;
 
 	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9. */
 	min_interval_us = interval_us * 75 / 100;
@@ -496,11 +516,14 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	if (add)
 		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
 					       tbid, flags, min_interval_us,
-					       max_interval_us, error);
+					       max_interval_us, detect_time_us,
+					       error);
 	else
 		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
 						  tbid, flags, min_interval_us,
-						  max_interval_us, error);
+						  max_interval_us,
+						  detect_time_us,
+						  error);
 	if (rc != 0)
 		return rc;
 
@@ -830,6 +853,13 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 				      elem->skb_len, elem->ttl);
 }
 
+static void
+bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem)
+{
+	// xxx
+	fprintf(stderr, "Timeout in session %u\n", elem->discr);
+}
+
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = ctx;
@@ -846,7 +876,7 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		bbdd_bpf_rb_handle_unx_packet(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
-		fprintf(stderr, "unhandled RB event type %d\n", head->type);
+		bbdd_bpf_rb_handle_timeout(data);
 		break;
 	}
 	return 0;

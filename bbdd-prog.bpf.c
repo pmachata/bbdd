@@ -486,7 +486,6 @@ int bbdd_xmit_veth_rx(struct __sk_buff *skb)
 	return bpf_redirect(bbdd_veth_tx_ifindex, 0);
 }
 
-/*
 static int bfd_session_expired(void *hmap, u32 *key,
 			       struct bbdd_prog_session_data *data)
 {
@@ -494,7 +493,6 @@ static int bfd_session_expired(void *hmap, u32 *key,
 	bbdd_rx_notify_timeout(*key);
 	return 0;
 }
-*/
 
 SEC("socket")
 int bbdd_recv(struct __sk_buff *skb)
@@ -507,6 +505,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	struct bpf_dynptr p = {};
 	struct udphdr *udph;
 	struct iphdr *iph;
+	u64 detect_time_ns;
 	u32 discr;
 	u32 off;
 	u16 tot_len;
@@ -580,7 +579,8 @@ int bbdd_recv(struct __sk_buff *skb)
 	BUMP(data->stats.rx_packets);
 	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
 
-	/*
+	/* Rearm timer. */
+	// xxx should only be done when userspace says so
 	ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
 			     CLOCK_MONOTONIC);
 	if (ret && ret != -EBUSY) {
@@ -594,12 +594,12 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	ret = bpf_timer_start(&data->timer, 3 * 10 * NS_PER_MS, 0);
+	detect_time_ns = config->detect_time_us * NS_PER_US;
+	ret = bpf_timer_start(&data->timer, detect_time_ns, 0);
 	if (ret) {
-		bpf_printk("Failed to start timer for BFD session %u\n", key);
+		BUMP(data->diag_stats.rx_fail_timer);
 		return TC_ACT_SHOT;
 	}
-	*/
 
 	return TC_ACT_SHOT;
 }
