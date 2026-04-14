@@ -943,8 +943,8 @@ static void bbdd_c_session_help(void)
 		"	discr U32 	-- session discriminator\n"
 		"	src ADDR	-- source address\n"
 		"	dst ADDR	-- destination address\n"
-		"	min-tx U32	-- minimum tx interval in microseconds\n"
-		"	min-rx U32	-- minimum rx interval in microseconds\n"
+		"	min-tx TIME	-- minimum tx interval (e.g. 100us, 10ms, 1s)\n"
+		"	min-rx TIME	-- minimum rx interval (e.g. 100us, 10ms, 1s)\n"
 		"	hold-time U32	-- session start wait time in miliseconds\n"
 		"	ttl U8		-- minimum packet TTL\n"
 		"	detect-mult U8	-- detection multiplier\n"
@@ -955,6 +955,8 @@ static void bbdd_c_session_help(void)
 		"	U32 := 32-bit numerical value (0..4Gi)\n"
 		"	STR := a string value\n"
 		"	ADDR := an IPv4 or IPv6 network address\n"
+		"	TIME := <U32>[<UNIT>], amount of time with a unit attached (e.g. 100ms)\n"
+		"	UNIT := {us | ms | s} for microseconds (default), miliseconds, seconds\n"
 		"\n"
 		"FLAG details:\n"
 		"	multihop	-- multi-hop session\n"
@@ -1166,6 +1168,57 @@ static int bbdd_c_parse_kw_u32(int *up_argc, char ***up_argv, const char *kw,
 {
 	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_seen,
 			       bbdd_c_parse_u32);
+}
+
+static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
+				  const char *what)
+{
+	unsigned long long val;
+	uint32_t mult;
+	char *end;
+
+	val = strtoull(str, &end, 10);
+	if (end == str) {
+		fprintf(stderr, "Can't parse %s `%s': not a valid number.\n",
+			what, str);
+		return -1;
+	}
+	if (val <= 0 || val > UINT32_MAX) {
+	oob:
+		fprintf(stderr, "Can't parse %s `%s': value out of bounds (0, uint32_max].\n",
+			what, str);
+		return -1;
+	}
+
+	if (strcmp(end, "us") == 0 || *end == '\0') {
+		mult = 1;
+	} else if (strcmp(end, "ms") == 0) {
+		mult = 1000;
+	} else if (strcmp(end, "s") == 0) {
+		mult = 1000000;
+	} else {
+		fprintf(stderr, "Can't parse %s `%s': unknown unit `%s' (use us, ms, s).\n",
+			what, str, end);
+		return -1;
+	}
+
+	if (val > UINT32_MAX / mult)
+		goto oob;
+
+	*ret = (uint32_t)(val * mult);
+	return 0;
+}
+
+static int bbdd_c_parse_time_us(const char *str, void *ret, const char *what)
+{
+	return __bbdd_c_parse_time_us(str, ret, what);
+}
+
+static int bbdd_c_parse_kw_time_us(int *up_argc, char ***up_argv, const char *kw,
+				   uint32_t *ret, int *ret_seen)
+{
+	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_seen,
+			       bbdd_c_parse_time_us);
 }
 
 static int bbdd_c_parse_kw_ifname(int *up_argc, char ***up_argv, const char *kw,
@@ -1452,12 +1505,12 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "discr",
 					      &sess->discr,
 					      &sess->discr_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-tx",
-					      &sess->min_tx_us,
-					      &sess->min_tx_us_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-rx",
-					      &sess->min_rx_us,
-					      &sess->min_rx_us_seen)) ||
+		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-tx",
+						  &sess->min_tx_us,
+						  &sess->min_tx_us_seen)) ||
+		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-rx",
+						  &sess->min_rx_us,
+						  &sess->min_rx_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "hold-time",
 					      &sess->hold_time,
 					      &sess->hold_time_seen)) ||
