@@ -23,8 +23,10 @@ static int bbdd_help(void)
 	     "\n"
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
-	     "                    -V | --version | --sockdir <DIR> | --json ]\n"
+	     "                    -V | --version | --sockdir <DIR> | --json | -N ]\n"
 	     "	     COMMAND := { start | stop | ping | session | global }\n"
+	     "\n"
+	     "  -N   suppress human-readable unit conversion (show raw microseconds)\n"
 	     );
 	return 0;
 }
@@ -73,7 +75,7 @@ int main(int argc, char **argv)
 	int rc;
 
 	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
-	while ((opt = getopt_long(argc, argv, "hqvV",
+	while ((opt = getopt_long(argc, argv, "hqvVN",
 				  long_options, NULL)) >= 0) {
 		switch (opt) {
 		case 'V':
@@ -93,6 +95,9 @@ int main(int argc, char **argv)
 			break;
 		case opt_json:
 			bbdd_env.show_json = true;
+			break;
+		case 'N':
+			bbdd_env.numeric = true;
 			break;
 		default:
 			fprintf(stderr, "Unknown option.\n");

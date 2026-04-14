@@ -689,13 +689,27 @@ bbdd_c_session_show_state_end(const struct bbdd_d_session_state_end *end)
 	       bbdd_d_bfd_diag_to_str(end->diag));
 }
 
+static void bbdd_c_show_time_us(const char *label, uint32_t us)
+{
+	if (bbdd_env.numeric) {
+		printf("%s %u ", label, us);
+		return;
+	}
+	if (us % 1000000 == 0)
+		printf("%s %us ", label, us / 1000000);
+	else if (us % 1000 == 0)
+		printf("%s %ums ", label, us / 1000);
+	else
+		printf("%s %uus ", label, us);
+}
+
 static void
 bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 {
 	printf("discr %u ", data->discr);
 	printf("detect-mult %u ", data->detect_mult);
-	printf("min_tx %u us ", data->min_tx_us);
-	printf("min_rx %u us ", data->min_rx_us);
+	bbdd_c_show_time_us("min-tx", data->min_tx_us);
+	bbdd_c_show_time_us("min-rx", data->min_rx_us);
 	bbdd_c_session_show_state_end(&data->state);
 }
 
@@ -716,11 +730,11 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		seen = true;
 	}
 	if (sess->min_tx_us_seen) {
-		printf("min_tx %u us ", sess->min_tx_us);
+		bbdd_c_show_time_us("min-tx", sess->min_tx_us);
 		seen = true;
 	}
 	if (sess->min_rx_us_seen) {
-		printf("min_rx_us %u ", sess->min_rx_us);
+		bbdd_c_show_time_us("min-rx", sess->min_rx_us);
 		seen = true;
 	}
 	if (sess->hold_time_seen) {

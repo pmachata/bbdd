@@ -21,6 +21,7 @@ extern struct bbdd_env {
 	const char *sockdir;
 	int verbosity;
 	bool show_json;
+	bool numeric;
 } bbdd_env;
 
 int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
