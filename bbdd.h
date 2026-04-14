@@ -36,7 +36,6 @@ int bbdd_c_global(int argc, char **argv);
 	X(MULTIHOP, multihop)		\
 	X(DEMAND, demand)		\
 	X(CBIT, cbit)			\
-	X(ECHO, echo)			\
 	X(IPV6, ipv6)			\
 	X(PASSIVE, passive)		\
 	X(SHUTDOWN, shutdown)		\
@@ -91,7 +90,6 @@ struct bbdd_c_session {
 	uint32_t discr;			int discr_seen;
 	uint32_t min_tx_us;		int min_tx_us_seen;
 	uint32_t min_rx_us;		int min_rx_us_seen;
-	uint32_t min_echo_rx;		int min_echo_rx_seen;
 	uint32_t hold_time;		int hold_time_seen;
 	uint8_t ttl;			int ttl_seen;
 	uint8_t detect_mult;		int detect_mult_seen;
@@ -126,7 +124,6 @@ struct bbdd_d_session_data {
 	uint8_t detect_mult;
 	uint32_t min_tx_us;
 	uint32_t min_rx_us;
-	uint32_t min_echo_rx;
 	struct bbdd_d_session_state_end state;
 };
 

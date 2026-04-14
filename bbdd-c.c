@@ -415,7 +415,6 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 		pol_detect_mult,
 		pol_min_tx_us,
 		pol_min_rx_us,
-		pol_min_echo_rx,
 		polsize_full,
 	};
 	struct bbdd_jrpc_policy policy[] = {
@@ -431,8 +430,6 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 				    .type = json_type_int, .required = true },
 		[pol_min_rx_us] = { .key = "min_rx_us",
 				    .type = json_type_int, .required = true },
-		[pol_min_echo_rx] = { .key = "min_echo_rx",
-				      .type = json_type_int, .required = true },
 	};
 	const size_t polsize = state_only ? polsize_state_only : polsize_full;
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -474,7 +471,6 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 	DISSECT_U8(detect_mult);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
-	DISSECT_U32(min_echo_rx);
 
 #undef DISSECT_U8
 #undef DISSECT_U32
@@ -700,7 +696,6 @@ bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 	printf("detect-mult %u ", data->detect_mult);
 	printf("min_tx %u us ", data->min_tx_us);
 	printf("min_rx %u us ", data->min_rx_us);
-	printf("min_echo_rx %u ", data->min_echo_rx);
 	bbdd_c_session_show_state_end(&data->state);
 }
 
@@ -726,10 +721,6 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	}
 	if (sess->min_rx_us_seen) {
 		printf("min_rx_us %u ", sess->min_rx_us);
-		seen = true;
-	}
-	if (sess->min_echo_rx_seen) {
-		printf("min_echo_rx %u ", sess->min_echo_rx);
 		seen = true;
 	}
 	if (sess->hold_time_seen) {
@@ -944,8 +935,8 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
-		"	KEY ::= { discr | src | dst | min-tx | min-rx | min-echo-tx | min-echo-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
-		"	FLAG ::= { multihop | demand | cbit | echo | ipv6 | passive | shutdown }\n"
+		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
+		"	FLAG ::= { multihop | demand | cbit | ipv6 | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value"
 		"\n"
 		"Parameter KEY and VALUE details:\n"
@@ -954,8 +945,6 @@ static void bbdd_c_session_help(void)
 		"	dst ADDR	-- destination address\n"
 		"	min-tx U32	-- minimum tx interval in microseconds\n"
 		"	min-rx U32	-- minimum rx interval in microseconds\n"
-		"	min-echo-tx U32	-- minimum tx echo interval in microseconds\n"
-		"	min-echo-rx U32	-- minimum rx echo interval in microseconds\n"
 		"	hold-time U32	-- session start wait time in miliseconds\n"
 		"	ttl U8		-- minimum packet TTL\n"
 		"	detect-mult U8	-- detection multiplier\n"
@@ -971,7 +960,6 @@ static void bbdd_c_session_help(void)
 		"	multihop	-- multi-hop session\n"
 		"	demand		-- demand mode\n"
 		"	cbit		-- control-plane independent\n"
-		"	echo		-- echo mode\n"
 		"	ipv6		-- session is running over IPv6\n"
 		"	passive		-- passive mode\n"
 		"	shutdown	-- session is admin down\n"
@@ -1241,9 +1229,6 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	     bbdd_jrpc_append_int(params_obj, "min_tx_us", sess->min_tx_us)) ||
 	    (sess->min_rx_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_rx_us", sess->min_rx_us)) ||
-	    (sess->min_echo_rx_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_echo_rx",
-				  sess->min_echo_rx)) ||
 	    (sess->hold_time_seen &&
 	     bbdd_jrpc_append_int(params_obj, "hold_time", sess->hold_time)) ||
 	    (sess->ttl_seen &&
@@ -1451,8 +1436,6 @@ int bbdd_c_session(int argc, char **argv)
 					       &sess->flags.demand)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
 					       &sess->flags.cbit)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "echo",
-					       &sess->flags.echo)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",
 					       &sess->flags.ipv6)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
@@ -1475,9 +1458,6 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-rx",
 					      &sess->min_rx_us,
 					      &sess->min_rx_us_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "min-echo-rx",
-					      &sess->min_echo_rx,
-					      &sess->min_echo_rx_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "hold-time",
 					      &sess->hold_time,
 					      &sess->hold_time_seen)) ||

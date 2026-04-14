@@ -281,7 +281,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		pol_min_tx_us,
 		pol_min_rx_us,
-		pol_min_echo_rx,
 
 		pol_hold_time,
 		pol_ttl,
@@ -300,8 +299,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		[pol_min_tx_us] = { .key = "min_tx_us", .type = json_type_int },
 		[pol_min_rx_us] = { .key = "min_rx_us", .type = json_type_int },
-		[pol_min_echo_rx] = { .key = "min_echo_rx",
-				      .type = json_type_int },
 
 		[pol_hold_time] = { .key = "hold_time", .type = json_type_int },
 		[pol_ttl] = { .key = "ttl", .type = json_type_int },
@@ -378,7 +375,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	DISSECT_U32_NON0(discr);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
-	DISSECT_U32(min_echo_rx);
 	DISSECT_U32(hold_time);
 	DISSECT_U8(ttl);
 	DISSECT_U8(detect_mult);
@@ -525,7 +521,6 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 
 	ASSIGN_NON0(min_tx_us, local.min_tx_us);
 	ASSIGN_NON0(min_rx_us, local.min_rx_us);
-	ASSIGN_NON0(min_echo_rx, local.min_echo_rx);
 	ASSIGN_NON0(detect_mult, local.detect_mult);
 
 #undef ASSIGN_NON0
@@ -679,7 +674,6 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	 *     "detect_mult": INT,
 	 *     "min_tx_us": INT,
 	 *     "min_rx_us": INT,
-	 *     "min_echo_rx": INT,
 	 * }
 	 */
 
@@ -697,9 +691,7 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	    bbdd_jrpc_append_int(entry_obj, "min_tx_us",
 				 remote->min_tx_us) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_rx_us",
-				 remote->min_rx_us) != 0 ||
-	    bbdd_jrpc_append_int(entry_obj, "min_echo_rx",
-				 remote->min_echo_rx) != 0)
+				 remote->min_rx_us) != 0)
 		goto put_entry_obj;
 
 	return entry_obj;
@@ -939,7 +931,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(local.detect_mult, detect_mult);
 	ASSIGN(local.min_tx_us, min_tx_us);
 	ASSIGN(local.min_rx_us, min_rx_us);
-	ASSIGN(local.min_echo_rx, min_echo_rx);
 	ASSIGN(hold_time, hold_time);
 	ASSIGN(ttl, ttl);
 
@@ -1031,7 +1022,6 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	FIELD(local.discr, discr);
 	FIELD(local.min_tx_us, min_tx_us);
 	FIELD(local.min_rx_us, min_rx_us);
-	FIELD(local.min_echo_rx, min_echo_rx);
 	FIELD(hold_time, hold_time);
 	FIELD(ttl, ttl);
 	FIELD(local.detect_mult, detect_mult);
@@ -1174,7 +1164,6 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
-	dsess->remote.min_echo_rx = 0;
 
 	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
 	if (rc != 0)
