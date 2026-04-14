@@ -654,6 +654,38 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 }
 
 static void
+bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
+			       struct bbdd_d_session *dsess,
+			       struct bbdd_bpf_session *bsess)
+{
+	struct json_object *obj;
+	bool printed = false;
+	char *error;
+	int err;
+
+	obj = bbdd_d_session_json(dsess);
+	if (obj != NULL) {
+		const char *str;
+
+		str = json_object_to_json_string(obj);
+		if (str != NULL) {
+			fprintf(stderr, "state change %s\n", str);
+			printed = true;
+		}
+
+		json_object_put(obj);
+	}
+
+	if (!printed)
+		fprintf(stderr, "state change, but formatting error\n");
+
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
+	if (err != 0)
+		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
+				   dsess->local.discr);
+}
+
+static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_sess_dir *sdir,
 		       const struct bbdd_bfd_pkt *packet,
@@ -764,32 +796,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	    memcmp(&old_remote, &dsess->remote, sizeof(old_remote)) == 0)
 		goto poll_respond;
 
-
-	{
-		struct json_object *obj;
-		bool printed = false;
-
-		obj = bbdd_d_session_json(dsess);
-		if (obj != NULL) {
-			const char *str;
-
-			str = json_object_to_json_string(obj);
-			if (str != NULL) {
-				fprintf(stderr, "state change %s\n", str);
-				printed = true;
-			}
-
-			json_object_put(obj);
-		}
-
-		if (!printed)
-			fprintf(stderr, "state change, but formatting error\n");
-	}
-
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
-	if (err != 0)
-		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
-				   dsess->local.discr);
+	bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 
 poll_respond:
 	if (poll) {
@@ -854,10 +861,39 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 }
 
 static void
-bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem)
+bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
+			   struct bbdd_bpf *bpf,
+			   struct bbdd_sess_dir *sdir)
 {
-	// xxx
-	fprintf(stderr, "Timeout in session %u\n", elem->discr);
+	uint32_t local_discr = elem->discr;
+	struct bbdd_bpf_session *bsess;
+	struct bbdd_d_session *dsess;
+
+	fprintf(stderr, "Timeout in session %u\n", local_discr);
+
+	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
+	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
+	if (dsess == NULL || bsess == NULL) {
+		/* As when processing unexpected packets, this can probably
+		 * come up due to a race. */
+		return;
+	}
+
+	/* If Demand mode is not active, and a period of time equal to the
+	 * Detection Time passes without receiving a BFD Control packet
+	 * from the remote system, and bfd.SessionState is Init or Up, the
+	 * session has gone down -- the local system MUST set
+	 * bfd.SessionState to Down and bfd.LocalDiag to 1 (Control
+	 * Detection Time Expired).
+	 */
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_INIT ||
+	    dsess->local.state.state == BBDD_BFD_PKT_STATE_UP) {
+		// xxx should this reset timers to slow? And the same below.
+		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
+		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_TIME_EXPIRED;
+
+		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
+	}
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
@@ -876,7 +912,7 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		bbdd_bpf_rb_handle_unx_packet(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
-		bbdd_bpf_rb_handle_timeout(data);
+		bbdd_bpf_rb_handle_timeout(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
 	}
 	return 0;

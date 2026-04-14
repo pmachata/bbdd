@@ -591,7 +591,7 @@ static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
 
 static const char *bbdd_d_jrpc_session_diag_str[] = {
 	[BBDD_BFD_PKT_DIAG_NOTHING] = "nothing",
-	[BBDD_BFD_PKT_DIAG_CONTROL_EXPIRED] = "control_expired",
+	[BBDD_BFD_PKT_DIAG_TIME_EXPIRED] = "time_expired",
 	[BBDD_BFD_PKT_DIAG_ECHO_FAILED] = "echo_failed",
 	[BBDD_BFD_PKT_DIAG_DOWN] = "down",
 	[BBDD_BFD_PKT_DIAG_FP_RESET] = "fp_reset",
