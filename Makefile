@@ -20,7 +20,9 @@ endif
 
 OUTPUT := .output
 INCLUDES := -I $(OUTPUT)
-CFLAGS := -g -Wall -Wunused
+
+WARN_CFLAGS = -Wall -Wunused
+CFLAGS := -g $(WARN_CFLAGS)
 
 APPS := bbdd
 bbdd-OBJECTS :=					\
@@ -125,7 +127,7 @@ $(OUTPUT)/vmlinux.h: /sys/kernel/btf/vmlinux
 .PRECIOUS: $(OUTPUT)/%.bpf.o
 $(OUTPUT)/%.bpf.o: %.bpf.c bbdd.h $(OUTPUT)/vmlinux.h
 	$(call msg,BPF,$@)
-	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES) -c $< -o $@
+	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(WARN_CFLAGS) -c $< -o $@
 	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
 
 $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o
