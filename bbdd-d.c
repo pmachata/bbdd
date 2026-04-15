@@ -6,6 +6,7 @@
 #include <sys/resource.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/signalfd.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -1887,6 +1888,29 @@ bbdd_d_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
 	return bbdd_sock_open_udp(addr, sock, error);
 }
 
+static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, void *data,
+			 char **/*error*/)
+{
+	struct signalfd_siginfo info;
+	sigset_t mask;
+	int fd = *(int *) data;
+
+	read(fd, &info, sizeof(info));
+
+	/* Graceful shutdown on first signal. Restore the default disposition
+	 * and unblock so that a subsequent signal (e.g. a repeated Ctrl-C)
+	 * terminates the process immediately. */
+	signal(SIGINT, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
+	sigprocmask(SIG_UNBLOCK, &mask, NULL);
+
+	bbdd_poll_request_quit(pctx);
+	return 0;
+}
+
 static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
@@ -1898,7 +1922,9 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
+	sigset_t sig_mask;
 	char *error;
+	int sig_fd;
 	int err;
 
 	// xxx need to handle dplane_sa
@@ -1979,9 +2005,29 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 		goto sock_close_d;
 	}
 
+	sigemptyset(&sig_mask);
+	sigaddset(&sig_mask, SIGINT);
+	sigaddset(&sig_mask, SIGTERM);
+	sigprocmask(SIG_BLOCK, &sig_mask, NULL);
+
+	sig_fd = signalfd(-1, &sig_mask, SFD_NONBLOCK | SFD_CLOEXEC);
+	if (sig_fd < 0) {
+		fprintf(stderr, "Failed to create signalfd: %m\n");
+		goto sock_close_d;
+	}
+
+	err = bbdd_poll_push_fd(pctx, sig_fd, POLLIN,
+				bbdd_d_sig_cb, &sig_fd, &error);
+	if (err != 0) {
+		bbdd_util_printerr(err, &error, "Failed to register signal fd");
+		goto sig_fd_close;
+	}
+
 	err = bbdd_poll_loop(pctx, &error);
 	bbdd_util_printerr(err, &error, NULL);
 
+sig_fd_close:
+	close(sig_fd);
 sock_close_d:
 	bbdd_sock_close_d(&bbdd.ctl);
 bpf_destroy:
