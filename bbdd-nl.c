@@ -127,10 +127,17 @@ socket_close:
 	return NULL;
 }
 
+struct bbdd_nl_resolve_ethtool {
+	struct bbdd_nl_cb base;
+	uint16_t family_id;
+};
+
 static int bbdd_nl_ethtool_family_attr(const struct nlattr *attr, void *data)
 {
+	struct bbdd_nl_resolve_ethtool *cb = data;
+
 	if (mnl_attr_get_type(attr) == CTRL_ATTR_FAMILY_ID)
-		*(uint16_t *) data = mnl_attr_get_u16(attr);
+		cb->family_id = mnl_attr_get_u16(attr);
 	return MNL_CB_OK;
 }
 
@@ -144,9 +151,9 @@ static int bbdd_nl_ethtool_family_cb(const struct nlmsghdr *nlh, void *data)
 
 static int bbdd_nl_resolve_ethtool(struct bbdd_nl *nl)
 {
+	struct bbdd_nl_resolve_ethtool cb_data = {};
 	struct nlmsghdr *nlh;
 	struct genlmsghdr *genl;
-	uint16_t family_id = 0;
 	ssize_t rc;
 
 	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
@@ -165,11 +172,11 @@ static int bbdd_nl_resolve_ethtool(struct bbdd_nl *nl)
 		return -1;
 
 	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq,
-				  bbdd_nl_ethtool_family_cb, &family_id);
+				  bbdd_nl_ethtool_family_cb, &cb_data);
 	if (rc < 0)
 		return -1;
 
-	return family_id;
+	return cb_data.family_id;
 }
 
 struct bbdd_nl *bbdd_nl_create(void)
