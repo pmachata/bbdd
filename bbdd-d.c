@@ -1786,10 +1786,6 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 {
 	int err;
 
-	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
-	if (err)
-		return err;
-
 	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
 		err = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
 		if (err)
@@ -1808,10 +1804,6 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 
 	err = bbdd_nl_add_qdisc(nl, ifindex, bbdd_nl_tc_h_root(),
 				bbdd_d_veth_tx_mq_handle, "mq", error);
-	if (err)
-		return err;
-
-	err = bbdd_nl_set_channels(nl, ifindex, ncpus, error);
 	if (err)
 		return err;
 
@@ -1851,7 +1843,7 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 	err = bbdd_nl_add_veth(nl,
 			       bbdd_d_veth_rx_name, rx_ifindex,
 			       bbdd_d_veth_tx_name, tx_ifindex,
-			       error);
+			       ncpus, error);
 	if (err)
 		return err;
 

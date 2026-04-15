@@ -271,6 +271,7 @@ static int bbdd_nl_maybe_get_ifindex(uint32_t *ifindex, const char *name,
 int bbdd_nl_add_veth(struct bbdd_nl *nl,
 		     const char *name, uint32_t *ifindex,
 		     const char *peer_name, uint32_t *peer_ifindex,
+		     unsigned int nqueues,
 		     char **error)
 {
 	struct nlattr *linkinfo, *infodata, *peer_attr;
@@ -288,6 +289,8 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 	ifi->ifi_family = AF_UNSPEC;
 
 	mnl_attr_put_strz(nlh, IFLA_IFNAME, name);
+	mnl_attr_put_u32(nlh, IFLA_NUM_TX_QUEUES, nqueues);
+	mnl_attr_put_u32(nlh, IFLA_NUM_RX_QUEUES, nqueues);
 
 	linkinfo = mnl_attr_nest_start(nlh, IFLA_LINKINFO);
 	mnl_attr_put_strz(nlh, IFLA_INFO_KIND, "veth");
@@ -297,6 +300,8 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 	peer_attr = mnl_attr_nest_start(nlh, VETH_INFO_PEER);
 	mnl_nlmsg_put_extra_header(nlh, sizeof(struct ifinfomsg));
 	mnl_attr_put_strz(nlh, IFLA_IFNAME, peer_name);
+	mnl_attr_put_u32(nlh, IFLA_NUM_TX_QUEUES, nqueues);
+	mnl_attr_put_u32(nlh, IFLA_NUM_RX_QUEUES, nqueues);
 	mnl_attr_nest_end(nlh, peer_attr);
 
 	mnl_attr_nest_end(nlh, infodata);
@@ -485,49 +490,6 @@ int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 		}
 		bbdd_util_wraperr(error, "Failed to refresh neighbor: %m, `%s'",
 				  *error ?: "");
-		return -1;
-	}
-
-	return 0;
-}
-
-int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
-			 unsigned int nqueues, char **error)
-{
-	struct nlattr *header;
-	struct nlmsghdr *nlh;
-	struct genlmsghdr *genl;
-	ssize_t rc;
-
-	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
-	nlh->nlmsg_type = nl->ethtool_family;
-	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nlh->nlmsg_seq = (uint32_t) time(NULL);
-
-	genl = mnl_nlmsg_put_extra_header(nlh, sizeof(*genl));
-	genl->cmd = ETHTOOL_MSG_CHANNELS_SET;
-	genl->version = ETHTOOL_GENL_VERSION;
-
-	header = mnl_attr_nest_start(nlh, ETHTOOL_A_CHANNELS_HEADER);
-	mnl_attr_put_u32(nlh, ETHTOOL_A_HEADER_DEV_INDEX, ifindex);
-	mnl_attr_nest_end(nlh, header);
-
-	mnl_attr_put_u32(nlh, ETHTOOL_A_CHANNELS_TX_COUNT, nqueues);
-	mnl_attr_put_u32(nlh, ETHTOOL_A_CHANNELS_RX_COUNT, nqueues);
-	mnl_attr_put_u32(nlh, ETHTOOL_A_CHANNELS_COMBINED_COUNT, 0);
-
-	rc = mnl_socket_sendto(nl->genl_sk, nlh, nlh->nlmsg_len);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
-		return -1;
-	}
-
-	*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to set channels on ifindex %u: %m, `%s'",
-				 ifindex, *error ?: "");
 		return -1;
 	}
 
