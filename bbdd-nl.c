@@ -40,10 +40,19 @@ static int bbdd_mnl_cb_noop(const struct nlmsghdr *, void *)
 	return MNL_CB_OK;
 }
 
-static int bbdd_mnl_cb_error(const struct nlmsghdr *nlh, void *)
+static int bbdd_nl_extack_attr(const struct nlattr *attr, void *data)
 {
-	//xxx for extack: struct bbdd_nl_cb *cb = data;
+	struct bbdd_nl_cb *cb = data;
+
+	if (mnl_attr_get_type(attr) == NLMSGERR_ATTR_MSG)
+		bbdd_util_fmterr(cb->error, "%s", mnl_attr_get_str(attr));
+	return MNL_CB_OK;
+}
+
+static int bbdd_mnl_cb_error(const struct nlmsghdr *nlh, void *data)
+{
 	const struct nlmsgerr *err;
+	size_t hdrlen;
 
 	if (mnl_nlmsg_get_payload_len(nlh) < sizeof(*err))
 		return MNL_CB_STOP;
@@ -55,12 +64,17 @@ static int bbdd_mnl_cb_error(const struct nlmsghdr *nlh, void *)
 	else
 		errno = err->error;
 
-	// xxx extack
+	if (err->error != 0 && (nlh->nlmsg_flags & NLM_F_ACK_TLVS)) {
+		hdrlen = sizeof(*err);
+		if (!(nlh->nlmsg_flags & NLM_F_CAPPED))
+			hdrlen += NLMSG_ALIGN(err->msg.nlmsg_len - NLMSG_HDRLEN);
+		mnl_attr_parse(nlh, hdrlen, bbdd_nl_extack_attr, data);
+	}
 
 	return err->error == 0 ? MNL_CB_STOP : MNL_CB_ERROR;
 }
 
-static int bbdd_mnl_cb_stop(const struct nlmsghdr *nlh, void *)
+static int bbdd_mnl_cb_stop(const struct nlmsghdr *nlh, void *data)
 {
 	int len;
 
@@ -70,7 +84,9 @@ static int bbdd_mnl_cb_stop(const struct nlmsghdr *nlh, void *)
 	len = *(int *)mnl_nlmsg_get_payload(nlh);
 	if (len < 0) {
 		errno = -len;
-		// xxx extack
+		if (nlh->nlmsg_flags & NLM_F_ACK_TLVS)
+			mnl_attr_parse(nlh, sizeof(len),
+				       bbdd_nl_extack_attr, data);
 		return MNL_CB_ERROR;
 	}
 
@@ -293,11 +309,13 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_fmterr(error,
-				 "Failed to create veth pair `%s'<->`%s': %m",
-				 name, peer_name);
+		bbdd_util_wraperr(error,
+				  "Failed to create veth pair `%s'<->`%s': %m, `%s'",
+				  name, peer_name, *error ?: "");
 		return -1;
 	}
 
@@ -330,10 +348,12 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to delete interface `%s': %m",
-				 name);
+		bbdd_util_wraperr(error, "Failed to delete interface `%s': %m, `%s'",
+				  name, *error ?: "");
 		return -1;
 	}
 
@@ -363,11 +383,13 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_fmterr(error,
-				 "Failed to bring up interface %u: %m",
-				 ifindex);
+		bbdd_util_wraperr(error,
+				  "Failed to bring up interface %u: %m, `%s'",
+				  ifindex, *error ?: "");
 		return -1;
 	}
 
@@ -402,11 +424,13 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_fmterr(error,
-				 "Failed to create `%s' qdisc on ifindex %u: %m",
-				 kind, ifindex);
+		bbdd_util_wraperr(error,
+				  "Failed to create `%s' qdisc on ifindex %u: %m, `%s'",
+				  kind, ifindex, *error ?: "");
 		return -1;
 	}
 
@@ -450,11 +474,17 @@ int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 		return -errno;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		if (errno == EEXIST)
+		if (errno == EEXIST) {
+			free(*error);
+			*error = NULL;
 			return 0;
-		bbdd_util_fmterr(error, "Failed to refresh neighbor: %m");
+		}
+		bbdd_util_wraperr(error, "Failed to refresh neighbor: %m, `%s'",
+				  *error ?: "");
 		return -1;
 	}
 
@@ -492,11 +522,12 @@ int bbdd_nl_set_channels(struct bbdd_nl *nl, uint32_t ifindex,
 		return -1;
 	}
 
-	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq, NULL, NULL);
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->genl_sk, nlh->nlmsg_seq, NULL,
+				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_fmterr(error,
-				 "Failed to set channels on ifindex %u: %m",
-				 ifindex);
+		bbdd_util_fmterr(error, "Failed to set channels on ifindex %u: %m, `%s'",
+				 ifindex, *error ?: "");
 		return -1;
 	}
 
