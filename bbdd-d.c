@@ -197,70 +197,56 @@ put_result:
 }
 
 static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
-					     struct bbdd_nl *nl,
 					     char **error)
 {
-	struct bbdd_nl_if *ifindex_if = NULL;
-	struct bbdd_nl_if *ifname_if = NULL;
-	struct bbdd_nl_if *ifs;
-	size_t nifs;
-	int rc;
+	char ifname[IFNAMSIZ] = {};
+	unsigned int ifindex = 0;
 
 	if (!sess->ifindex_seen && !sess->ifname_seen)
 		return 0;
 
-	rc = bbdd_nl_list_ifs(nl, &ifs, &nifs, error);
-	if (rc < 0)
-		return -1;
-
-	for (size_t i = 0; i < nifs; i++) {
-		if (sess->ifindex_seen &&
-		    ifs[i].ifindex == sess->ifindex)
-			ifindex_if = &ifs[i];
-		if (sess->ifname_seen &&
-		    strcmp(sess->ifname, ifs[i].ifname) == 0)
-			ifname_if = &ifs[i];
+	if (sess->ifindex_seen) {
+		if (!if_indextoname(sess->ifindex, ifname)) {
+			bbdd_util_fmterr(error,
+					 "No interface with ifindex %u found",
+					 sess->ifindex);
+			return -1;
+		}
 	}
 
-	if (!sess->ifindex_seen)
-		ifindex_if = ifname_if;
-	else if (!sess->ifname_seen)
-		ifname_if = ifindex_if;
+	if (sess->ifname_seen) {
+		ifindex = if_nametoindex(sess->ifname);
+		if (ifindex == 0) {
+			bbdd_util_fmterr(error,
+					 "No interface named `%s' found",
+					 sess->ifname);
+			return -1;
+		}
+	}
 
-	if (ifindex_if == NULL) {
-		bbdd_util_fmterr(error, "No interface with ifindex %u found",
-				 sess->ifindex);
-		rc = -1;
-		goto free_ifs;
+	if (sess->ifindex_seen && sess->ifname_seen) {
+		if (sess->ifindex != ifindex ||
+		    strcmp(ifname, sess->ifname) != 0) {
+			bbdd_util_fmterr(error,
+					 "No interface with ifindex `%u' and name `%s' found",
+					 sess->ifindex, sess->ifname);
+			return -1;
+		}
 	}
-	if (ifname_if == NULL) {
-		bbdd_util_fmterr(error, "No interface named `%s' found",
-				 sess->ifname);
-		rc = -1;
-		goto free_ifs;
-	}
-	if (ifindex_if != ifname_if) {
-		bbdd_util_fmterr(error,
-				 "No interface with ifindex `%u' and name `%s' found",
-				 sess->ifindex, sess->ifname);
-		rc = -1;
-		goto free_ifs;
+
+	if (!sess->ifname_seen) {
+		assert(ifname[0] != 0);
+		sess->ifname_seen = 1;
+		strcpy(sess->ifname, ifname);
 	}
 
 	if (!sess->ifindex_seen) {
+		assert(ifindex != 0);
 		sess->ifindex_seen = 1;
-		sess->ifindex = ifindex_if->ifindex;
-	}
-	if (!sess->ifname_seen) {
-		sess->ifname_seen = 1;
-		strcpy(sess->ifname, ifname_if->ifname);
+		sess->ifindex = ifindex;
 	}
 
-	rc = 0;
-
-free_ifs:
-	free(ifs);
-	return rc;
+	return 0;
 }
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
@@ -434,14 +420,14 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	    (bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
 					     error) != 0 ||
 	     ((select->ifindex_seen || select->ifname_seen) &&
-	      bbdd_d_session_validate_interface(select, nl, error) != 0)))
+	      bbdd_d_session_validate_interface(select, error) != 0)))
 		return -1;
 
 	if (seen[pol_change] &&
 	    (bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
 					     error) != 0 ||
 	     ((change->ifindex_seen || change->ifname_seen) &&
-	      bbdd_d_session_validate_interface(change, nl, error) < 0)))
+	      bbdd_d_session_validate_interface(change, error) < 0)))
 		return -1;
 
 	if (seen[pol_bulk])

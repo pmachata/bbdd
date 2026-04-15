@@ -2,6 +2,7 @@
 #include "bbdd-nl.h"
 
 #include <errno.h>
+#include <net/if.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -226,104 +227,6 @@ void bbdd_nl_destroy(struct bbdd_nl *nl)
 	mnl_socket_close(nl->genl_sk);
 	mnl_socket_close(nl->sk);
 	free(nl);
-}
-
-struct bbdd_nl_list_ifs {
-	struct bbdd_nl_cb base;
-	struct bbdd_nl_if *ifs;
-	size_t nifs;
-	size_t cap;
-};
-
-static int bbdd_nl_list_ifs_attr(const struct nlattr *attr, void *attr_data)
-{
-	struct bbdd_nl_if *entry = attr_data;
-
-	if (mnl_attr_get_type(attr) == IFLA_IFNAME)
-		strncpy(entry->ifname, mnl_attr_get_str(attr),
-			sizeof(entry->ifname) - 1);
-	return MNL_CB_OK;
-}
-
-static int bbdd_nl_list_ifs_cb(const struct nlmsghdr *nlh, void *cb_data)
-{
-	struct bbdd_nl_list_ifs *data = cb_data;
-	struct ifinfomsg *ifi = mnl_nlmsg_get_payload(nlh);
-	struct bbdd_nl_if entry = {
-		.ifindex = (uint32_t) ifi->ifi_index,
-	};
-	struct bbdd_nl_if *new_ifs;
-	int rc;
-
-	rc = mnl_attr_parse(nlh, sizeof(struct ifinfomsg),
-			    bbdd_nl_list_ifs_attr, &entry);
-	if (rc != MNL_CB_OK)
-		return rc;
-
-	if (entry.ifname[0] == '\0') {
-		bbdd_util_fmterr(data->base.error,
-				 "Netlink gave no name for interface with ifindex `%d'",
-				 entry.ifindex);
-		errno = EPROTO;
-		return MNL_CB_ERROR;
-	}
-
-	if (data->nifs >= data->cap) {
-		size_t new_cap = data->cap ? data->cap * 2 : 8;
-
-		new_ifs = realloc(data->ifs, new_cap * sizeof(*new_ifs));
-		if (!new_ifs) {
-			errno = ENOMEM;
-			return MNL_CB_ERROR;
-		}
-		data->ifs = new_ifs;
-		data->cap = new_cap;
-	}
-
-	data->ifs[data->nifs++] = entry;
-	return MNL_CB_OK;
-}
-
-int bbdd_nl_list_ifs(struct bbdd_nl *nl, struct bbdd_nl_if **p_ifs,
-		     size_t *p_nifs, char **error)
-{
-	struct bbdd_nl_list_ifs cb_data;
-	struct nlmsghdr *nlh;
-	struct ifinfomsg *ifi;
-	ssize_t rc;
-
-	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
-	nlh->nlmsg_type = RTM_GETLINK;
-	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-	nlh->nlmsg_seq = (uint32_t) time(NULL);
-
-	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof(*ifi));
-	ifi->ifi_family = AF_PACKET;
-
-	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
-		return -1;
-	}
-
-	cb_data = (struct bbdd_nl_list_ifs) {
-		.base = {
-			.error = error,
-		},
-	};
-	errno = 0;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq,
-				  bbdd_nl_list_ifs_cb, &cb_data);
-	if (rc < 0) {
-		free(cb_data.ifs);
-		if (!errno)
-			bbdd_util_fmterr(error, "Failed to obtain list of interfaces: %m");
-		return -1;
-	}
-
-	*p_ifs = cb_data.ifs;
-	*p_nifs = cb_data.nifs;
-	return 0;
 }
 
 static int bbdd_nl_maybe_get_ifindex(uint32_t *ifindex, const char *name,
