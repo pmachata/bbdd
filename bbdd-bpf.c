@@ -780,22 +780,30 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 
 		case BBDD_BFD_PKT_STATE_DOWN:
 			if (dsess->remote.state.state ==
-				    BBDD_BFD_PKT_STATE_DOWN)
+				    BBDD_BFD_PKT_STATE_DOWN) {
 				dsess->local.state.state =
 					BBDD_BFD_PKT_STATE_INIT;
-			else if (dsess->remote.state.state ==
-				    BBDD_BFD_PKT_STATE_INIT)
+				dsess->local.state.diag =
+					BBDD_BFD_PKT_DIAG_NOTHING;
+			} else if (dsess->remote.state.state ==
+				    BBDD_BFD_PKT_STATE_INIT) {
 				dsess->local.state.state =
 					BBDD_BFD_PKT_STATE_UP;
+				dsess->local.state.diag =
+					BBDD_BFD_PKT_DIAG_NOTHING;
+			}
 			break;
 
 		case BBDD_BFD_PKT_STATE_INIT:
 			if (dsess->remote.state.state ==
 				    BBDD_BFD_PKT_STATE_INIT ||
 			    dsess->remote.state.state ==
-				    BBDD_BFD_PKT_STATE_UP)
+				    BBDD_BFD_PKT_STATE_UP) {
 				dsess->local.state.state =
 					BBDD_BFD_PKT_STATE_UP;
+				dsess->local.state.diag =
+					BBDD_BFD_PKT_DIAG_NOTHING;
+			}
 			break;
 
 		case BBDD_BFD_PKT_STATE_UP:
