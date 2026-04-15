@@ -1913,9 +1913,10 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 {
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
-	struct bbdd_sock ipv4_sk;
-	struct bbdd_sock ipv6_sk;
-	struct bbdd_sock ipv4_shop;
+	struct bbdd_sock ipv4_shop_sk;
+	struct bbdd_sock ipv6_shop_sk;
+	struct bbdd_sock ipv4_mhop_sk;
+	struct bbdd_sock ipv6_mhop_sk;
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
@@ -1939,29 +1940,30 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	if (pctx == NULL)
 		goto nl_destroy;
 
-	err = bbdd_sock_open_raw(AF_INET, &ipv4_sk, &error);
+	err = bbdd_d_sock_open_udp(&ipv4_shop_sk, AF_INET,
+				   BFD_SINGLE_HOP_PORT, &error);
 	if (err != 0)
 		goto poll_fini;
 
-	err = bbdd_sock_open_raw(AF_INET6, &ipv6_sk, &error);
+	err = bbdd_d_sock_open_udp(&ipv6_shop_sk, AF_INET6,
+				   BFD_SINGLE_HOP_PORT, &error);
 	if (err != 0)
-		goto ipv4_close;
+		goto ipv4_shop_close;
 
-	// xxx When we don't open a UDP socket, the stack generates ICMP port
-	// unreachable messages. So for now only open IPv4 port so that these go
-	// away. Long-term we need to either open all of the variants or find
-	// another solution. I think just keeping the sockets open is enough,
-	// the ipv4/ipv6 raw socket program takes care of shooting down all the
-	// BPF packets, so the UDP sockets should never see any traffic.
-	err = bbdd_d_sock_open_udp(&ipv4_shop, AF_INET, BFD_SINGLE_HOP_PORT,
-				   &error);
+	err = bbdd_d_sock_open_udp(&ipv4_mhop_sk, AF_INET,
+				   BFD_MULTI_HOP_PORT, &error);
 	if (err != 0)
-		goto ipv6_close;
+		goto ipv6_shop_close;
+
+	err = bbdd_d_sock_open_udp(&ipv6_mhop_sk, AF_INET6,
+				   BFD_MULTI_HOP_PORT, &error);
+	if (err != 0)
+		goto ipv4_mhop_close;
 
 	bbdd.sdir = bbdd_sess_dir_create();
 	if (bbdd.sdir == NULL) {
 		fprintf(stderr, "Failed to create session directory: %m\n");
-		goto ipv4_shop_close;
+		goto ipv6_mhop_close;
 	}
 
 	err = bbdd_d_start_init_veth(bbdd.nl,
@@ -1974,8 +1976,10 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	}
 
 	bpf_conf = (struct bbdd_bpf_global_config) {
-		.ipv4_fd = ipv4_sk.fd,
-		.ipv6_fd = ipv6_sk.fd,
+		.ipv4_shop_fd = ipv4_shop_sk.fd,
+		.ipv6_shop_fd = ipv6_shop_sk.fd,
+		.ipv4_mhop_fd = ipv4_mhop_sk.fd,
+		.ipv6_mhop_fd = ipv6_mhop_sk.fd,
 		.veth_rx_ifindex = veth_rx_ifindex,
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
@@ -2008,12 +2012,14 @@ fini_veth:
 	bbdd_d_start_fini_veth(bbdd.nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
+ipv6_mhop_close:
+	bbdd_sock_close_udp(&ipv6_mhop_sk);
+ipv4_mhop_close:
+	bbdd_sock_close_udp(&ipv4_mhop_sk);
+ipv6_shop_close:
+	bbdd_sock_close_udp(&ipv6_shop_sk);
 ipv4_shop_close:
-	bbdd_sock_close_udp(&ipv4_shop);
-ipv6_close:
-	bbdd_sock_close_raw(&ipv6_sk);
-ipv4_close:
-	bbdd_sock_close_raw(&ipv4_sk);
+	bbdd_sock_close_udp(&ipv4_shop_sk);
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:

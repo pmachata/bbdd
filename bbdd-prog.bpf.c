@@ -143,9 +143,8 @@ struct bbdd_bfd_rx_pkt_digest {
 	struct bbdd_bpf_addr daddr;
 };
 
-static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off,
-			     u16 *tot_len,
-			     struct bbdd_bfd_rx_pkt_digest *digest)
+static bool bbdd_tx_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off,
+				u16 *tot_len)
 {
 	u8 iph_buf[sizeof(struct iphdr)];
 	struct iphdr *iph;
@@ -157,23 +156,13 @@ static bool bbdd_is_bfd_ipv4(struct bpf_dynptr *p, u32 *off,
 	if (iph->protocol != IPPROTO_UDP)
 		return false;
 
-	if (tot_len != NULL)
-		*tot_len = bpf_ntohs(iph->tot_len);
-	if (digest != NULL) {
-		digest->ttl = iph->ttl;
-		__builtin_memcpy(&digest->saddr, &iph->saddr,
-				 sizeof(iph->saddr));
-		__builtin_memcpy(&digest->daddr, &iph->daddr,
-				 sizeof(iph->daddr));
-	}
-
+	*tot_len = bpf_ntohs(iph->tot_len);
 	*off += sizeof(struct iphdr);
 	return true;
 }
 
-static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off,
-			     u16 *tot_len,
-			     struct bbdd_bfd_rx_pkt_digest *digest)
+static bool bbdd_tx_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off,
+				u16 *tot_len)
 {
 	u8 ip6h_buf[sizeof(struct ipv6hdr)];
 	struct ipv6hdr *ip6h;
@@ -184,23 +173,14 @@ static bool bbdd_is_bfd_ipv6(struct bpf_dynptr *p, u32 *off,
 	if (ip6h->nexthdr != IPPROTO_UDP)
 		return false;
 
-	if (tot_len != NULL)
-		*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
-	if (digest != NULL) {
-		digest->ttl = ip6h->hop_limit;
-		__builtin_memcpy(&digest->saddr, &ip6h->saddr,
-				 sizeof(ip6h->saddr));
-		__builtin_memcpy(&digest->daddr, &ip6h->daddr,
-				 sizeof(ip6h->daddr));
-	}
-
+	*tot_len = bpf_ntohs(ip6h->payload_len) + sizeof(struct ipv6hdr);
 	*off += sizeof(struct ipv6hdr);
 	return true;
 }
 
 static struct bbdd_bfd_pkt *
-bbdd_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
-	     u16 *tot_len, struct bbdd_bfd_rx_pkt_digest *digest)
+bbdd_tx_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
+		u16 *tot_len)
 {
 	u8 udph_buf[sizeof(struct udphdr)] = {};
 	u16 proto = skb->protocol;
@@ -217,10 +197,10 @@ bbdd_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
 
 	off = sizeof(struct ethhdr);
 	if (proto == bpf_htons(ETH_P_IP)) {
-		if (!bbdd_is_bfd_ipv4(&p, &off, tot_len, digest))
+		if (!bbdd_tx_is_bfd_ipv4(&p, &off, tot_len))
 			return NULL;
 	} else {
-		if (!bbdd_is_bfd_ipv6(&p, &off, tot_len, digest))
+		if (!bbdd_tx_is_bfd_ipv6(&p, &off, tot_len))
 			return NULL;
 	}
 
@@ -231,9 +211,6 @@ bbdd_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
 	if (udph->dest != bpf_htons(BFD_SINGLE_HOP_PORT) &&
 	    udph->dest != bpf_htons(BFD_MULTI_HOP_PORT))
 		return NULL;
-
-	if (digest != NULL)
-		digest->multihop = udph->dest == bpf_htons(BFD_MULTI_HOP_PORT);
 
 	off += sizeof(*udph);
 	return bpf_dynptr_slice(&p, off, bfd_buf, bfd_buf_size);
@@ -371,7 +348,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 
 	/* SKB is an Ethernet packet. */
 
-	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len, NULL);
+	bfd = bbdd_tx_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len);
 	if (bfd == NULL)
 		goto tx_not_bfd;
 
@@ -494,6 +471,78 @@ static int bfd_session_expired(void *hmap, u32 *key,
 	return 0;
 }
 
+static bool bbdd_recv_parse_ipv4(struct __sk_buff *skb,
+				 struct bbdd_bfd_rx_pkt_digest *digest)
+{
+	struct iphdr iph;
+	long ret;
+
+	ret = bpf_skb_load_bytes_relative(skb, 0, &iph, sizeof(iph),
+					  BPF_HDR_START_NET);
+	if (ret < 0)
+		return false;
+
+	digest->ttl = iph.ttl;
+	__builtin_memcpy(&digest->saddr, &iph.saddr, sizeof(iph.saddr));
+	__builtin_memcpy(&digest->daddr, &iph.daddr, sizeof(iph.daddr));
+
+	return true;
+}
+
+static bool bbdd_recv_parse_ipv6(struct __sk_buff *skb,
+				 struct bbdd_bfd_rx_pkt_digest *digest)
+{
+	struct ipv6hdr ip6h;
+	long ret;
+
+	ret = bpf_skb_load_bytes_relative(skb, 0, &ip6h, sizeof(ip6h),
+					  BPF_HDR_START_NET);
+	if (ret < 0)
+		return false;
+
+	digest->ttl = ip6h.hop_limit;
+	__builtin_memcpy(&digest->saddr, &ip6h.saddr, sizeof(ip6h.saddr));
+	__builtin_memcpy(&digest->daddr, &ip6h.daddr, sizeof(ip6h.daddr));
+
+	return true;
+}
+
+static struct bbdd_bfd_pkt *
+bbdd_get_bfd_recv(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
+		  struct bbdd_bfd_rx_pkt_digest *digest)
+{
+	u8 udph_buf[sizeof(struct udphdr)] = {};
+	struct udphdr *udph;
+	struct bpf_dynptr p;
+	u32 off;
+
+	if (skb->protocol == bpf_htons(ETH_P_IP)) {
+		if (!bbdd_recv_parse_ipv4(skb, digest))
+			return NULL;
+	} else {
+		if (!bbdd_recv_parse_ipv6(skb, digest))
+			return NULL;
+	}
+
+	if (bpf_dynptr_from_skb(skb, 0, &p))
+		return NULL;
+
+	off = 0;
+	udph = bpf_dynptr_slice(&p, off, udph_buf, sizeof(udph_buf));
+	if (!udph)
+		return NULL;
+
+	digest->multihop = udph->dest == bpf_htons(BFD_MULTI_HOP_PORT);
+
+	off += sizeof(*udph);
+	return bpf_dynptr_slice(&p, off, bfd_buf, bfd_buf_size);
+}
+
+/* This is attached to a UDP socket, so we can skip IPv4/v6/UDP validation,
+ * because we know those layers are correct. It also means we need to access
+ * IPv4 fields through bpf_skb_load_bytes_relative(), because the
+ * bpf_dynptr_slice() interface assumes offset 0 is the UDP header.
+ */
 SEC("socket")
 int bbdd_recv(struct __sk_buff *skb)
 {
@@ -502,18 +551,11 @@ int bbdd_recv(struct __sk_buff *skb)
 	struct bbdd_prog_session_data *data;
 	struct bbdd_prog_session_config *config;
 	struct bbdd_bfd_pkt *bfd;
-	struct bpf_dynptr p = {};
-	struct udphdr *udph;
-	struct iphdr *iph;
 	u64 detect_time_ns;
 	u32 discr;
-	u32 off;
-	u16 tot_len;
 	int ret;
 
-	/* SKB is an Ethernet packet. */
-
-	bfd = bbdd_get_bfd(skb, bfd_buf, sizeof bfd_buf, NULL, &digest);
+	bfd = bbdd_get_bfd_recv(skb, bfd_buf, sizeof bfd_buf, &digest);
 	if (bfd == NULL) {
 		BUMP(bbdd_prog_global_diag_stats.rx_not_bfd);
 		return TC_ACT_OK;

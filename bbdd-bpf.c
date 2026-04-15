@@ -1126,19 +1126,33 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto detach_rx;
 
 	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv4_fd, error);
+				   conf->ipv4_shop_fd, error);
 	if (err != 0)
 		goto detach_tx;
 
 	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv6_fd, error);
+				   conf->ipv6_shop_fd, error);
 	if (err != 0)
-		goto detach_ipv4;
+		goto detach_ipv4_shop;
+
+	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
+				   conf->ipv4_mhop_fd, error);
+	if (err != 0)
+		goto detach_ipv6_shop;
+
+	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
+				   conf->ipv6_mhop_fd, error);
+	if (err != 0)
+		goto detach_ipv4_mhop;
 
 	return bpf;
 
-detach_ipv4:
-	bbdd_bpf_detach_sock(conf->ipv4_fd);
+detach_ipv4_mhop:
+	bbdd_bpf_detach_sock(conf->ipv4_mhop_fd);
+detach_ipv6_shop:
+	bbdd_bpf_detach_sock(conf->ipv6_shop_fd);
+detach_ipv4_shop:
+	bbdd_bpf_detach_sock(conf->ipv4_shop_fd);
 detach_tx:
 	bbdd_bpf_detach(bpf->tx);
 detach_rx:
@@ -1154,8 +1168,10 @@ free_bpf:
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
-	bbdd_bpf_detach_sock(bpf->conf.ipv6_fd);
-	bbdd_bpf_detach_sock(bpf->conf.ipv4_fd);
+	bbdd_bpf_detach_sock(bpf->conf.ipv6_mhop_fd);
+	bbdd_bpf_detach_sock(bpf->conf.ipv4_mhop_fd);
+	bbdd_bpf_detach_sock(bpf->conf.ipv6_shop_fd);
+	bbdd_bpf_detach_sock(bpf->conf.ipv4_shop_fd);
 	bbdd_bpf_detach(bpf->tx);
 	bbdd_bpf_detach(bpf->rx);
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
