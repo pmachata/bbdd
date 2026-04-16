@@ -50,10 +50,10 @@ int bbdd_sockaddr_is_zero(const struct bbdd_sockaddr *sa, char **error);
 int bbdd_sockaddr_eq(const struct bbdd_sockaddr *sa,
 		     const struct bbdd_sockaddr *sb, char **error);
 
-/* Parse a string in format of <proto>://<address>:<port>, with IPv6 address
- * enclosed in [brackets]. */
-int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *sa,
+int bbdd_sock_split_addr_proto(char *arg, const char **proto,
+			       const char **addr, const char **port,
 			       char **error);
+int bbdd_sock_name_to_af(const char *proto, char **error);
 
 /* Parse a string in format of <address> */
 int bbdd_sock_parse_addr_af(int af, const char *arg, struct bbdd_sockaddr *sa,

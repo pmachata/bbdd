@@ -219,48 +219,50 @@ int bbdd_sockaddr_ntop(socklen_t bufsize;
 	return 0;
 }
 
-static int bbdd_sock_parse_addr_ipv4(const char *addr_in, bool allow_port,
-				     struct bbdd_sockaddr *bsa,
+static int bbdd_sock_split_addr_unix(char *addr,
+				     const char **ret_addr,
+				     const char **ret_port)
+{
+	*ret_addr = addr;
+	*ret_port = NULL;
+	return 0;
+}
+
+static int bbdd_sock_split_addr_ipv4(char *addr, bool allow_port,
+				     const char **ret_addr,
+				     const char **ret_port,
 				     char **error)
 {
-	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
-	char *addr;
 	char *port;
-	int rc;
-
-	addr = strdupa(addr_in);
 
 	port = allow_port ? strchr(addr, ':') : NULL;
 	if (port != NULL) {
+		if (!allow_port) {
+			bbdd_util_fmterr(error, "Port disallowed");
+			return -EINVAL;
+		}
 		*port++ = '\0';
-		rc = bbdd_sock_parse_port(port, &port_num, error);
-		if (rc != 0)
-			return rc;
 	}
 
-	bsa->len = sizeof(bsa->sin);
-	bsa->sin.sin_family = AF_INET;
-	bsa->sin.sin_port = htons(port_num);
-	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr, error);
+	*ret_addr = addr;
+	*ret_port = port;
+	return 0;
 }
 
-static int bbdd_sock_parse_addr_ipv6_port(const char *addr_in,
-					  struct bbdd_sockaddr *bsa,
+static int bbdd_sock_split_addr_ipv6_port(char *addr,
+					  const char **ret_addr,
+					  const char **ret_port,
 					  char **error)
 {
-	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
-	char *addr;
+	const char *port = NULL;
 	char *saux;
-	int rc;
 
 	/* Check & skip '['. */
-	if (*addr_in++ != '[') {
+	if (*addr++ != '[') {
 	no_brackets:
 		bbdd_util_fmterr(error, "IPv6 address needs to be []-enclosed");
 		return -1;
 	}
-
-	addr = strdupa(addr_in);
 
 	/* Check ']' and ... */
 	saux = strrchr(addr, ']');
@@ -271,19 +273,49 @@ static int bbdd_sock_parse_addr_ipv6_port(const char *addr_in,
 	/* Check & skip ':', parse port if any. */
 	if (*saux == ':') {
 		saux++;
-		rc = bbdd_sock_parse_port(saux, &port_num, error);
-		if (rc != 0)
-			return rc;
+		port = saux;
 	} else if (*saux != '\0') {
 		bbdd_util_fmterr(error, "Invalid address `%s': Garbage after closing bracket",
-				 addr_in);
-		return -1;
+				 addr);
+		return -EINVAL;
 	}
 
-	bsa->len = sizeof(bsa->sin6);
-	bsa->sin6.sin6_family = AF_INET6;
-	bsa->sin6.sin6_port = htons(port_num);
-	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr, error);
+	*ret_addr = addr;
+	*ret_port = port;
+	return 0;
+}
+
+static int bbdd_sock_parse_addr_ipv4(const char *str_in, bool allow_port,
+				     struct bbdd_sockaddr *bsa,
+				     char **error)
+{
+	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
+	size_t maxlen = INET_ADDRSTRLEN + 6; /* + : + 5-digit port number. */
+	const char *addr;
+	const char *port;
+	char *copy;
+	int rc;
+
+	if (strlen(str_in) > maxlen) {
+		bbdd_util_fmterr(error, "IPv4 address+port too long");
+		return -EINVAL;
+	}
+
+	copy = strdupa(str_in);
+	rc = bbdd_sock_split_addr_ipv4(copy, allow_port, &addr, &port, error);
+	if (rc < 0)
+		return rc;
+
+	if (port != NULL) {
+		rc = bbdd_sock_parse_port(port, &port_num, error);
+		if (rc != 0)
+			return rc;
+	}
+
+	bsa->len = sizeof(bsa->sin);
+	bsa->sin.sin_family = AF_INET;
+	bsa->sin.sin_port = htons(port_num);
+	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr, error);
 }
 
 static int bbdd_sock_parse_addr_ipv6(const char *addr,
@@ -296,12 +328,33 @@ static int bbdd_sock_parse_addr_ipv6(const char *addr,
 	return bbdd_inet_pton(AF_INET6, addr, &bsa->sin6.sin6_addr, error);
 }
 
-int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *bsa,
+struct bbdd_sock_proto {
+	int af;
+	const char *name;
+};
+static struct bbdd_sock_proto bbdd_sock_protos[] = {
+	{ AF_UNIX, "unix" },
+	{ AF_INET, "ipv4" },
+	{ AF_INET6, "ipv6" },
+};
+
+int bbdd_sock_name_to_af(const char *proto, char **error)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(bbdd_sock_protos); i++)
+		if (strcmp(proto, bbdd_sock_protos[i].name) == 0)
+			return bbdd_sock_protos[i].af;
+
+	bbdd_util_fmterr(error, "invalid socket protocol `%s'", proto);
+	return -1;
+}
+
+int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
+			       const char **ret_addr, const char **ret_port,
 			       char **error)
 {
-	const char *colon;
-	const char *addr;
-	size_t type_len;
+	char *colon;
+	char *rest;
+	int af;
 
 	colon = strchr(arg, ':');
 	if (colon == NULL) {
@@ -309,22 +362,26 @@ int bbdd_sock_parse_addr_proto(const char *arg, struct bbdd_sockaddr *bsa,
 		return -1;
 	}
 
-	type_len = (size_t)(colon - arg);
-	addr = colon + 1;
+	rest = colon + 1;
+	*colon = '\0';
+	*ret_proto = arg;
 
-	memset(bsa, 0, sizeof(*bsa));
+	af = bbdd_sock_name_to_af(arg, error);
+	if (af < 0)
+		return af;
 
-	if (strncmp(arg, "unix", type_len) == 0)
-		return bbdd_sock_parse_addr_unix("", addr, bsa, error);
+	switch (af) {
+	case AF_UNIX:
+		return bbdd_sock_split_addr_unix(rest, ret_addr, ret_port);
+	case AF_INET:
+		return bbdd_sock_split_addr_ipv4(rest, true, ret_addr, ret_port,
+						 error);
+	case AF_INET6:
+		return bbdd_sock_split_addr_ipv6_port(rest, ret_addr, ret_port,
+						      error);
+	}
 
-	else if (strncmp(arg, "ipv4", type_len) == 0)
-		return bbdd_sock_parse_addr_ipv4(addr, true, bsa, error);
-
-	else if (strncmp(arg, "ipv6", type_len) == 0)
-		return bbdd_sock_parse_addr_ipv6_port(addr, bsa, error);
-
-	bbdd_util_fmterr(error, "invalid BFD data plane socket type in `%s'",
-			 arg);
+	bbdd_util_fmterr(error, "unhandled address family `%d'", af);
 	return -1;
 }
 
@@ -333,7 +390,7 @@ int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
 {
 	switch (af) {
 	case AF_INET:
-		return bbdd_sock_parse_addr_ipv4(addr, true, bsa, error);
+		return bbdd_sock_parse_addr_ipv4(addr, false, bsa, error);
 	case AF_INET6:
 		return bbdd_sock_parse_addr_ipv6(addr, bsa, error);
 	}
