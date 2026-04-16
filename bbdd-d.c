@@ -1546,6 +1546,54 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 	return bbdd_d_handle_session_show_do(peer, id, sdir, discrs, ndiscrs);
 }
 
+static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
+				       struct json_object *params_obj,
+				       struct json_object *id)
+{
+	enum {
+		pol_proto,
+		pol_addr,
+		pol_port,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_proto] = { .key = "proto", .type = json_type_string,
+				.required = true },
+		[pol_addr]  = { .key = "addr",  .type = json_type_string,
+				.required = true },
+		[pol_port]  = { .key = "port",  .type = json_type_string,
+				.required = false },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	const char *proto;
+	const char *addr;
+	const char *port;
+	char *error = NULL;
+	int af;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), &error);
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	proto = json_object_get_string(values[pol_proto]);
+	addr = json_object_get_string(values[pol_addr]);
+	port = json_object_get_string(values[pol_port]);
+
+	af = bbdd_sock_name_to_af(proto, &error);
+	if (af < 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	if (af != AF_UNIX)
+		return __bbdd_d_respond_invalid_params(peer, id, "Only `unix' protocol supported");
+
+	fprintf(stderr, "bfdd-connect: proto=%s addr=%s port=%s\n",
+		proto, addr, port ?: "(none)");
+
+	bbdd_d_respond_empty(peer, id);
+}
+
 static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
@@ -1578,6 +1626,8 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_d_handle_session_stats(peer, params_obj, id, nl,
 					    sdir, bpf);
+	else if (strcmp(method, "bfdd-connect") == 0)
+		bbdd_d_handle_bfdd_connect(peer, params_obj, id);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }

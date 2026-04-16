@@ -15,6 +15,8 @@
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
+#define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
+
 static bool bbdd_c_validate_id(struct json_object *id_obj, int expect_id)
 {
 	int64_t id;
@@ -1574,4 +1576,127 @@ int bbdd_c_session(int argc, char **argv)
 		return -1;
 
 	return bbdd_c_session_jrpc(command, &select, &change, bulk, diag);
+}
+
+static int bbdd_c_bfdd_connect_jrpc(const char *proto,
+				    const char *addr,
+				    const char *port)
+{
+	struct json_object *params_obj;
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *result;
+	const int id = 1;
+	int err;
+
+	request = bbdd_jrpc_new_request(id, "bfdd-connect");
+	if (request == NULL)
+		return -1;
+
+	params_obj = json_object_new_object();
+	if (params_obj == NULL)
+		goto put_request;
+
+	if (bbdd_jrpc_object_add_str(params_obj, "proto", proto) != 0 ||
+	    bbdd_jrpc_object_add_str(params_obj, "addr", addr) != 0 ||
+	    (port != NULL &&
+	     bbdd_jrpc_object_add_str(params_obj, "port", port))) {
+		err = bbdd_c_enomem();
+		goto put_params_obj;
+	}
+
+	if (json_object_object_add(request, "params", params_obj) != 0) {
+		err = bbdd_c_enomem();
+		goto put_params_obj;
+	}
+	params_obj = NULL;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL) {
+		err = -1;
+		goto put_request;
+	}
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_null,
+					    &result)) {
+		err = -1;
+		goto put_response;
+	}
+
+	bbdd_c_result_show_json(result);
+	err = 0;
+
+	json_object_put(result);
+put_response:
+	json_object_put(response);
+put_params_obj:
+	json_object_put(params_obj);
+put_request:
+	json_object_put(request);
+	return err;
+}
+
+static void bbdd_c_bfdd_connect_help(void)
+{
+	fprintf(stderr, "%s",
+		"Usage: bbdd bfdd connect [TYPE:ADDRESS[:PORT]]\n"
+		"TYPE ::= {ipv4 | ipv6 | unix}\n"
+		"Default connect address is `" BBDD_D_DEFAULT_DPLANEADDR "'.\n"
+		"\n"
+	);
+}
+
+static int bbdd_c_bfdd_connect(int argc, char **argv)
+{
+	const char *proto;
+	const char *addr;
+	const char *port;
+	const char *arg;
+	char *copy;
+	char *error;
+	int rc;
+
+	if (!argc) {
+		arg = BBDD_D_DEFAULT_DPLANEADDR;
+	} else if (strcmp(*argv, "help") == 0) {
+		bbdd_c_bfdd_connect_help();
+		return 0;
+	} else {
+		arg = *argv;
+	}
+
+	copy = strdup(arg);
+	rc = bbdd_sock_split_addr_proto(copy, &proto, &addr, &port, &error);
+	if (rc < 0) {
+		bbdd_util_printerr(rc, &error, "bfdd connect");
+		goto out;
+	}
+
+	rc = bbdd_c_bfdd_connect_jrpc(proto, addr, port);
+
+out:
+	free(copy);
+	return rc;
+}
+
+static void bbdd_c_bfdd_help(void)
+{
+	fprintf(stderr,
+		"Usage: bbdd bfdd { connect | help }\n"
+		"\n"
+	);
+}
+
+int bbdd_c_bfdd(int argc, char **argv)
+{
+	if (!argc || strcmp(*argv, "help") == 0) {
+		bbdd_c_bfdd_help();
+		return 0;
+	} else if (strcmp(*argv, "connect") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_bfdd_connect(argc, argv);
+	}
+
+	fprintf(stderr, "What is \"%s\"?\n", *argv);
+	return -1;
 }
