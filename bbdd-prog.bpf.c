@@ -343,7 +343,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	u16 tot_len;
 	bool final;
 	u32 id;
-	int redir_rc = TC_ACT_SHOT;
+	int final_rc = TC_ACT_SHOT;
 	int ret;
 
 	/* SKB is an Ethernet packet. */
@@ -425,14 +425,23 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		goto out;
 	}
 
-	if (final)
-		redir_rc = bpf_redirect(params.ifindex, 0);
-	else
-		redir_rc = bpf_clone_redirect(skb, params.ifindex, 0);
-
-	if (redir_rc) {
-		BUMP(data->diag_stats.tx_fail_redir);
-		goto out;
+	if (final) {
+		/* bpf_redirect() return TC_ACT_REDIRECT on success, and
+		 * TC_ACT_SHOT on failure. */
+		final_rc = bpf_redirect(params.ifindex, 0);
+		if (final_rc == TC_ACT_SHOT) {
+			/* Final packets shouldn't spin around. */
+			BUMP(data->diag_stats.tx_fail_redir);
+			return final_rc;
+		}
+	} else {
+		/* bpf_clone_redirect() returns 0 on success and <0 on
+		 * failure. */
+		ret = bpf_clone_redirect(skb, params.ifindex, 0);
+		if (ret < 0) {
+			BUMP(data->diag_stats.tx_fail_redir);
+			goto out;
+		}
 	}
 
 	BUMP(data->stats.tx_packets);
@@ -440,7 +449,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 
 out:
 	if (final)
-		return redir_rc;
+		return final_rc;
 
 	interval_us = config->max_interval_us - config->min_interval_us;
 	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
