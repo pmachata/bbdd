@@ -205,36 +205,6 @@ ssize_t bfddp_write(struct bfddp_ctx *bctx);
  */
 size_t bfddp_write_pending(struct bfddp_ctx *bctx);
 
-/** Logging abstraction layer definitions. */
-struct bfddp_log {
-	/** "err" logging function used by the library. */
-	void (*err_log)(int err_val, const char *_format, ...);
-
-	/** "errx" logging function used by the library. */
-	void (*errx_log)(int err_val, const char *_format, ...);
-
-	/** "warn" logging function used by the library. */
-	void (*warn_log)(const char *_format, ...);
-
-	/** general logging function used by the library. */
-	int (*log)(const char *_format, ...);
-};
-
-/** Initialize the general logging functions used by the library. */
-void bfddp_logging_init(struct bfddp_log *_this);
-
-/** General "err" logging function. */
-extern void (*bfddp_err)(int err_val, const char *_format, ...);
-
-/** General "errx" logging function. */
-extern void (*bfddp_errx)(int err_val, const char *_format, ...);
-
-/** General "warn" logging function. */
-extern void (*bfddp_warn)(const char *_format, ...);
-
-/** General logging function. */
-extern int (*bfddp_log)(const char *_format, ...);
-
 LIBBFDDP_END_DECLS
 
 #endif /* BFD_DP_H */
