@@ -32,7 +32,6 @@
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
-#define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
@@ -1911,7 +1910,7 @@ static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, void *data,
 	return 0;
 }
 
-static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
+static int bbdd_d_do_start(void)
 {
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
@@ -1926,8 +1925,6 @@ static int bbdd_d_do_start(struct bbdd_sockaddr */*dplane_sa*/)
 	char *error;
 	int sig_fd;
 	int err;
-
-	// xxx need to handle dplane_sa
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
@@ -2053,48 +2050,17 @@ closelog:
 	return err;
 }
 
-static void bbdd_d_start_help(void)
-{
-	fprintf(stderr,
-		"Usage: bbdd start [dplaneaddr TYPE:ADDRESS[:PORT]]\n"
-		"TYPE ::= {ipv4 | ipv6 | unix}\n"
-		"Default dplaneaddr is `%s'.\n",
-		BBDD_D_DEFAULT_DPLANEADDR);
-}
-
 int bbdd_d_start(int argc, char **argv)
 {
-	const char *dplaneaddr = BBDD_D_DEFAULT_DPLANEADDR;
-	struct bbdd_sockaddr dplane_sa = {};
-	char *error;
-	int err;
+	if (argc > 0 && strcmp(*argv, "help") == 0) {
+		fprintf(stderr, "Usage: bbdd start\n");
+		return 0;
+	}
 
-	while (argc > 0) {
-		if (strcmp(*argv, "help") == 0) {
-			bbdd_d_start_help();
-			return 0;
-
-		} else if (strcmp(*argv, "dplaneaddr") == 0) {
-			NEXT_ARG();
-			dplaneaddr = *argv;
-			NEXT_ARG_FWD();
-
-		} else {
-			fprintf(stderr, "What is \"%s\"?\n", *argv);
-			return -1;
-		}
-		continue;
-
-incomplete_command:
-		fprintf(stderr, "Command line is not complete. Try option \"help\"\n");
+	if (argc > 0) {
+		fprintf(stderr, "What is \"%s\"?\n", *argv);
 		return -1;
 	}
 
-	err = bbdd_sock_parse_addr_proto(dplaneaddr, &dplane_sa, &error);
-	if (err) {
-		bbdd_util_printerr(err, &error, NULL);
-		return -1;
-	}
-
-	return bbdd_d_do_start(&dplane_sa);
+	return bbdd_d_do_start();
 }
