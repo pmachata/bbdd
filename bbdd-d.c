@@ -381,7 +381,6 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      struct bbdd_c_session *select,
 					      struct bbdd_c_session *change,
 					      bool *bulk,
-					      struct bbdd_nl *nl,
 					      char **error)
 {
 	enum {
@@ -1103,7 +1102,6 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
-				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf,
 				      struct bbdd_d_sport_alloc *spa)
@@ -1115,7 +1113,7 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &csess, NULL,
-						nl, &error);
+						&error);
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
@@ -1176,7 +1174,6 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 					struct bbdd_c_session *select,
 					struct bbdd_c_session *change,
 					bool *bulk,
-					struct bbdd_nl *nl,
 					struct bbdd_sess_dir *sdir,
 					uint32_t **discrs,
 					size_t *ndiscrs)
@@ -1185,7 +1182,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj,
-						select, change, bulk, nl, &error);
+						select, change, bulk, &error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, &error);
 		return -1;
@@ -1221,7 +1218,6 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
-				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf)
 {
@@ -1237,8 +1233,7 @@ static void bbdd_d_handle_session_set(struct bbdd_sock *peer,
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &select, &change, &bulk,
-					  nl, sdir,
-					  &discrs, &ndiscrs);
+					  sdir, &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
@@ -1428,7 +1423,6 @@ put_obj:
 static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
 					     struct json_object *params_obj,
 					     struct json_object *id,
-					     struct bbdd_nl *nl,
 					     struct bbdd_sess_dir *sdir,
 					     struct bbdd_bpf *bpf)
 {
@@ -1438,7 +1432,7 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, nl, sdir,
+					  &sess, NULL, NULL, sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1451,7 +1445,6 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_sock *peer,
 static void bbdd_d_handle_session_stats(struct bbdd_sock *peer,
 					struct json_object *params_obj,
 					struct json_object *id,
-					struct bbdd_nl *nl,
 					struct bbdd_sess_dir *sdir,
 					struct bbdd_bpf *bpf)
 {
@@ -1461,7 +1454,7 @@ static void bbdd_d_handle_session_stats(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, nl, sdir,
+					  &sess, NULL, NULL, sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1474,7 +1467,6 @@ static void bbdd_d_handle_session_stats(struct bbdd_sock *peer,
 static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
-				      struct bbdd_nl *nl,
 				      struct bbdd_sess_dir *sdir,
 				      struct bbdd_bpf *bpf,
 				      struct bbdd_d_sport_alloc *spa)
@@ -1488,7 +1480,7 @@ static void bbdd_d_handle_session_del(struct bbdd_sock *peer,
 	size_t num_errors = 0;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &bulk, nl, sdir,
+					  &sess, NULL, &bulk, sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1529,7 +1521,6 @@ free_discrs:
 static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id,
-				       struct bbdd_nl *nl,
 				       struct bbdd_sess_dir *sdir)
 {
 	struct bbdd_c_session sess;
@@ -1538,7 +1529,7 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, nl, sdir,
+					  &sess, NULL, NULL, sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1601,8 +1592,7 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
-				 struct json_object *id,
-				 struct bbdd_nl *nl)
+				 struct json_object *id)
 {
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(pctx, peer, params_obj, id);
@@ -1611,20 +1601,20 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(bpf, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
-		bbdd_d_handle_session_show(peer, params_obj, id, nl, sdir);
+		bbdd_d_handle_session_show(peer, params_obj, id, sdir);
 	else if (strcmp(method, "session-add") == 0)
-		bbdd_d_handle_session_add(peer, params_obj, id, nl,
+		bbdd_d_handle_session_add(peer, params_obj, id,
 					  sdir, bpf, spa);
 	else if (strcmp(method, "session-set") == 0)
-		bbdd_d_handle_session_set(peer, params_obj, id, nl, sdir, bpf);
+		bbdd_d_handle_session_set(peer, params_obj, id, sdir, bpf);
 	else if (strcmp(method, "session-del") == 0)
-		bbdd_d_handle_session_del(peer, params_obj, id, nl,
+		bbdd_d_handle_session_del(peer, params_obj, id,
 					  sdir, bpf, spa);
 	else if (strcmp(method, "session-stats-diag") == 0)
-		bbdd_d_handle_session_stats_diag(peer, params_obj, id, nl,
+		bbdd_d_handle_session_stats_diag(peer, params_obj, id,
 						 sdir, bpf);
 	else if (strcmp(method, "session-stats") == 0)
-		bbdd_d_handle_session_stats(peer, params_obj, id, nl,
+		bbdd_d_handle_session_stats(peer, params_obj, id,
 					    sdir, bpf);
 	else if (strcmp(method, "bfdd-connect") == 0)
 		bbdd_d_handle_bfdd_connect(peer, params_obj, id);
@@ -1636,8 +1626,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 				struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
-				struct bbdd_sock *ctl,
-				struct bbdd_nl *nl)
+				struct bbdd_sock *ctl)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -1669,7 +1658,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 	}
 
 	bbdd_d_handle_method(pctx, sdir, bpf, spa,
-			     &peer, method, params, id, nl);
+			     &peer, method, params, id);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -1681,7 +1670,6 @@ struct bbdd_context {
 	struct bbdd_bpf *bpf;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
-	struct bbdd_nl *nl;
 	struct bbdd_sock ctl;
 };
 
@@ -1690,7 +1678,7 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, void *arg, char **)
 	struct bbdd_context *bbdd = arg;
 
 	bbdd_d_ctl_activity(pctx, bbdd->sdir, bbdd->bpf, &bbdd->spa,
-			    &bbdd->ctl, bbdd->nl);
+			    &bbdd->ctl);
 	return 0;
 }
 
@@ -1962,6 +1950,7 @@ static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, void *data,
 
 static int bbdd_d_do_start(void)
 {
+	struct bbdd_nl *nl;
 	struct bbdd_context bbdd = {};
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_sock ipv4_shop_sk;
@@ -1981,8 +1970,8 @@ static int bbdd_d_do_start(void)
 	if (bbdd_d_raise_nofile() < 0)
 		goto closelog;
 
-	bbdd.nl = bbdd_nl_create();
-	if (bbdd.nl == NULL) {
+	nl = bbdd_nl_create();
+	if (nl == NULL) {
 		fprintf(stderr, "Failed to open netlink socket: %m\n");
 		goto closelog;
 	}
@@ -2017,7 +2006,7 @@ static int bbdd_d_do_start(void)
 		goto ipv6_mhop_close;
 	}
 
-	err = bbdd_d_start_init_veth(bbdd.nl,
+	err = bbdd_d_start_init_veth(nl,
 				     &veth_rx_ifindex,
 				     &veth_tx_ifindex,
 				     &error);
@@ -2035,7 +2024,7 @@ static int bbdd_d_do_start(void)
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
 
-	bbdd.bpf = bbdd_bpf_create(pctx, bbdd.nl, &bpf_conf, bbdd.sdir, &error);
+	bbdd.bpf = bbdd_bpf_create(pctx, nl, &bpf_conf, bbdd.sdir, &error);
 	if (bbdd.bpf == NULL) {
 		bbdd_util_printerr(err, &error,  "Failed to initialize BPF");
 		goto fini_veth;
@@ -2080,7 +2069,7 @@ sock_close_d:
 bpf_destroy:
 	bbdd_bpf_destroy(bbdd.bpf);
 fini_veth:
-	bbdd_d_start_fini_veth(bbdd.nl);
+	bbdd_d_start_fini_veth(nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(bbdd.sdir);
 ipv6_mhop_close:
@@ -2094,7 +2083,7 @@ ipv4_shop_close:
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:
-	bbdd_nl_destroy(bbdd.nl);
+	bbdd_nl_destroy(nl);
 closelog:
 	closelog();
 	return err;
