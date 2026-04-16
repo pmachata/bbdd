@@ -104,7 +104,7 @@ static int bbdd_sock_parse_addr_unix(const char *sockdir,
 	const char *maybe_slash = "/";
 	int len;
 
-	if (sockdir[0] == '0' || sockdir[strlen(sockdir) - 1] == '/')
+	if (sockdir[0] == '\0' || sockdir[strlen(sockdir) - 1] == '/')
 		maybe_slash++;
 
 	bsa->len = sizeof(bsa->sun);
