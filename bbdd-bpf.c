@@ -711,10 +711,10 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_sess_dir *sdir,
+		       uint32_t local_discr,
 		       const struct bbdd_bfd_pkt *packet,
 		       uint16_t skb_len, uint8_t ttl)
 {
-	uint32_t local_discr = ntohl(packet->your_disc);
 	struct bbdd_d_session_data old_local;
 	struct bbdd_d_session_data old_remote;
 	struct bbdd_bpf_session *bsess;
@@ -870,14 +870,16 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 	nmatch = (unsigned int) err;
 
-	if (nmatch != 1)
+	if (nmatch != 1) {
 		++bpf->diag_stats.rx_no_unique_session;
+		return;
+	}
 
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
+	return bbdd_bpf_handle_packet(bpf, sdir, discr, &elem->packet,
 				      elem->skb_len, elem->ttl);
 
 error:
-	bbdd_util_printerr(err, &error, "bbdd_bpf_rb_handle_discr_0");
+	bbdd_util_printerr(err, &error, "`your_discr' of 0");
 }
 
 static void
@@ -888,7 +890,7 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 	uint32_t local_discr = ntohl(elem->packet.your_disc);
 
 	fprintf(stderr, "Unexpected packet in session %u\n", local_discr);
-	return bbdd_bpf_handle_packet(bpf, sdir, &elem->packet,
+	return bbdd_bpf_handle_packet(bpf, sdir, local_discr, &elem->packet,
 				      elem->skb_len, elem->ttl);
 }
 
