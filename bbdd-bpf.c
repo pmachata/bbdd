@@ -615,7 +615,7 @@ static int
 bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 				struct bbdd_sess_dir *sdir,
 				uint32_t ifindex,
-				bool multihop,
+				uint8_t ttl, bool multihop,
 				const struct bbdd_sockaddr *pk_src,
 				const struct bbdd_sockaddr *pk_dst,
 				char **error)
@@ -632,6 +632,9 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 			continue;
 
 		if (dsess->ifindex != 0 && dsess->ifindex != ifindex)
+			continue;
+
+		if (ttl < dsess->ttl)
 			continue;
 
 		/* This is incoming packet aimed at us, so we need to match
@@ -859,7 +862,8 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 		goto error;
 
 	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
-					      elem->ifindex, elem->multihop,
+					      elem->ifindex, elem->ttl,
+					      elem->multihop,
 					      &saddr, &daddr, &error);
 	if (err < 0)
 		goto error;
