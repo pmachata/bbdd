@@ -37,6 +37,7 @@ bbdd-OBJECTS :=					\
 	$(OUTPUT)/bbdd-sock.o			\
 	$(OUTPUT)/bbdd-util.o			\
 	$(OUTPUT)/bbdd-util.o			\
+	$(OUTPUT)/bfddp.o			\
 	#
 SYSTEMD_UNITS :=				\
 	$(OUTPUT)/bbdd.service			\
