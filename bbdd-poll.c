@@ -4,8 +4,10 @@
 #include <assert.h>
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h>
 #include <stdlib.h>
 
+#include "bbdd.h"
 #include "bbdd-util.h"
 
 struct bbdd_poll_cb {
@@ -22,6 +24,8 @@ struct bbdd_poll_ctx {
 
 void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx)
 {
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "requested stop\n");
 	ctx->should_quit = true;
 }
 

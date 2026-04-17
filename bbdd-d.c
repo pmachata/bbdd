@@ -1634,9 +1634,8 @@ static void bbdd_d_bfdd_read_event(struct bbdd_d_bfdd_ctx *ctx,
 	rv = bfddp_read(*ctx->bctxp);
 	if (rv == -1)
 		return bbdd_d_bfdd_socket_error(ctx, pctx);
-	if (rv > 0)
-		// xxx verbosity
-		fprintf(stderr, "<= Received %zd bytes\n", rv);
+	if (rv > 0 && bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: received %zd bytes\n", rv);
 
 	bbdd_d_bfdd_handle_messages(ctx);
 }
@@ -1650,9 +1649,8 @@ static void bbdd_d_bfdd_write_event(struct bbdd_d_bfdd_ctx *ctx,
 	rv = bfddp_write(*bctxp);
 	if (rv == -1)
 		return bbdd_d_bfdd_socket_error(ctx, pctx);
-	if (rv > 0)
-		// xxx verbosity
-		fprintf(stderr, "=> Sent %zd bytes\n", rv);
+	if (rv > 0 && bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: sent %zd bytes\n", rv);
 }
 
 static int bbdd_d_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
@@ -1663,7 +1661,6 @@ static int bbdd_d_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 	char *error;
 	int rc;
 
-	fprintf(stderr, "BFD event %d\n", revents);
 	if (revents & POLLOUT)
 		bbdd_d_bfdd_write_event(ctx, pctx);
 	if (revents & POLLIN)
@@ -1727,8 +1724,8 @@ static int bbdd_d_bfdd_unix_connected(struct bbdd_poll_ctx *pctx, short,
 	if (rv < 0)
 		goto error;
 
-	// xxx say this only when verbose
-	fprintf(stderr, "connected\n");
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Connected.\n");
 	bbdd_d_respond_empty(&cctx->peer, cctx->id);
 
 out:
