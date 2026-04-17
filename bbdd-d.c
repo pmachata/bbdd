@@ -5,10 +5,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <sys/resource.h>
 #include <poll.h>
 #include <signal.h>
-#include <sys/signalfd.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -18,6 +16,9 @@
 
 #include <arpa/inet.h>
 #include <netpacket/packet.h>
+#include <sys/resource.h>
+#include <sys/signalfd.h>
+
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
 #include <json-c/json_tokener.h>
@@ -421,7 +422,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	    (bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
 					     error) != 0 ||
 	     ((select->ifindex_seen || select->ifname_seen) &&
-	      bbdd_d_session_validate_interface(select, error) != 0)))
+	      bbdd_d_session_validate_interface(select, error) < 0)))
 		return -1;
 
 	if (seen[pol_change] &&
@@ -1101,6 +1102,57 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 	alloc->occ[i] &= ~(1L << f);
 }
 
+static int bbdd_d_session_add(const struct bbdd_c_session *csess,
+			      struct bbdd_sess_dir *sdir,
+			      struct bbdd_bpf *bpf,
+			      struct bbdd_d_sport_alloc *spa,
+			      char **error)
+{
+	struct bbdd_d_session *dsess;
+	uint16_t sport;
+	int rc;
+
+	rc = bbdd_d_sport_get(spa, &sport);
+	if (rc) {
+		bbdd_util_fmterr(error, "Failed to allocate a unique source port for the new session");
+		return -1;
+	}
+
+	dsess = bbdd_sess_dir_add_session(sdir, csess->discr);
+	if (dsess == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		goto put_port;
+	}
+
+	dsess->src.sin46.port = sport;
+
+	dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
+	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
+
+	dsess->remote.discr = 0;
+	dsess->remote.detect_mult = 1;
+	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
+	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
+	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
+	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
+
+	rc = bbdd_d_session_apply_c(dsess, csess, error);
+	if (rc != 0)
+		goto sess_dir_del_session;
+
+	rc = bbdd_bpf_session_add(bpf, dsess, error);
+	if (rc != 0)
+		goto sess_dir_del_session;
+
+	return 0;
+
+sess_dir_del_session:
+	bbdd_sess_dir_del_session(sdir, dsess);
+put_port:
+	bbdd_d_sport_put(spa, sport);
+	return -1;
+}
+
 static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id,
@@ -1109,8 +1161,6 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 				      struct bbdd_d_sport_alloc *spa)
 {
 	struct bbdd_c_session csess;
-	struct bbdd_d_session *dsess;
-	uint16_t sport;
 	char *error;
 	int rc;
 
@@ -1127,47 +1177,11 @@ static void bbdd_d_handle_session_add(struct bbdd_sock *peer,
 		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
 	}
 
-	rc = bbdd_d_sport_get(spa, &sport);
-	if (rc) {
-		bbdd_util_fmterr(&error, "Failed to allocate a unique source port for the new session");
-		goto out;
-	}
-
-	dsess = bbdd_sess_dir_add_session(sdir, csess.discr);
-	if (dsess == NULL) {
-		bbdd_util_fmterr(&error, "%m");
-		goto put_port;
-	}
-
-	dsess->src.sin46.port = sport;
-
-	dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
-	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
-
-	dsess->remote.discr = 0;
-	dsess->remote.detect_mult = 1;
-	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
-	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
-	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
-	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
-
-	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
-	if (rc != 0)
-		goto sess_dir_del_session;
-
-	rc = bbdd_bpf_session_add(bpf, dsess, &error);
-	if (rc != 0)
-		goto sess_dir_del_session;
+	rc = bbdd_d_session_add(&csess, sdir, bpf, spa, &error);
+	if (rc < 0)
+		return bbdd_d_respond_interr(peer, id, &error);
 
 	bbdd_d_respond_empty(peer, id);
-	return;
-
-sess_dir_del_session:
-	bbdd_sess_dir_del_session(sdir, dsess);
-put_port:
-	bbdd_d_sport_put(spa, sport);
-out:
-	bbdd_d_respond_interr(peer, id, &error);
 }
 
 static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
