@@ -389,6 +389,8 @@ int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
 			    char **error)
 {
 	switch (af) {
+	case AF_UNIX:
+		return bbdd_sock_parse_addr_unix("", addr, bsa, error);
 	case AF_INET:
 		return bbdd_sock_parse_addr_ipv4(addr, false, bsa, error);
 	case AF_INET6:
