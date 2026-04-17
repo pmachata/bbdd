@@ -10,7 +10,7 @@ void bbdd_poll_fini(struct bbdd_poll_ctx *ctx);
 
 int bbdd_poll_push_fd(struct bbdd_poll_ctx *ctx,
 		      int fd, short events,
-		      int (*fn)(struct bbdd_poll_ctx *, void *, char **),
+		      int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
 		      void *data, char **error);
 void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx);
 

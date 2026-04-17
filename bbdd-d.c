@@ -1673,7 +1673,8 @@ struct bbdd_context {
 	struct bbdd_sock ctl;
 };
 
-static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, void *arg, char **)
+static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
+			   char **)
 {
 	struct bbdd_context *bbdd = arg;
 
@@ -1925,8 +1926,8 @@ bbdd_d_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
 	return bbdd_sock_open_udp(addr, sock, error);
 }
 
-static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, void *data,
-			 char **/*error*/)
+static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, short, void *data,
+			 char **)
 {
 	struct signalfd_siginfo info;
 	sigset_t mask;

@@ -8,7 +8,7 @@
 #include "bbdd-util.h"
 
 struct bbdd_poll_cb {
-	int (*fn)(struct bbdd_poll_ctx *, void *, char **);
+	int (*fn)(struct bbdd_poll_ctx *, short, void *, char **);
 	void *data;
 };
 
@@ -109,7 +109,8 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 			if (pollfd->revents & pollfd->events) {
 				struct bbdd_poll_cb *cb = &pctx->cbs[i];
 
-				err = cb->fn(pctx, cb->data, error);
+				err = cb->fn(pctx, pollfd->revents, cb->data,
+					     error);
 				if (err)
 					goto out;
 			}

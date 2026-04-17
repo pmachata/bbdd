@@ -951,7 +951,8 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	return 0;
 }
 
-static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, void *data, char **error)
+static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data,
+			    char **error)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = data;
 	int ret;
@@ -989,8 +990,8 @@ bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 	}
 
 	rb_fd = ring_buffer__epoll_fd(rb);
-	err = bbdd_poll_push_fd(pctx, rb_fd, POLLIN, bbdd_bpf_rb_recv, rb_ctx,
-				error);
+	err = bbdd_poll_set_fd(pctx, rb_fd, POLLIN, bbdd_bpf_rb_recv, rb_ctx,
+			       error);
 	if (err != 0)
 		goto free_ring_buffer;
 
