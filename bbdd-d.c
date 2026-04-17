@@ -2113,7 +2113,7 @@ static int
 bbdd_d_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
 		     char **error)
 {
-	struct bbdd_sockaddr addr;
+	struct bbdd_sockaddr addr = {};
 
 	addr.sa.sa_family = af;
 	switch (af) {
