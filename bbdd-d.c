@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include "bbdd.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -22,7 +24,7 @@
 #include <json-c/json_util.h>
 #include <linux/if_ether.h>
 
-#include "bbdd.h"
+#include "bbdd-bfdd.h"
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
@@ -31,7 +33,7 @@
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
-#include "bfddp.h"
+#include "bfddp_packet.h"
 
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
@@ -1537,296 +1539,177 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 	return bbdd_d_handle_session_show_do(peer, id, sdir, discrs, ndiscrs);
 }
 
-static void bbdd_d_bfddp_free(struct bfddp_ctx **bctxp)
-{
-	bfddp_free(*bctxp);
-	*bctxp = NULL;
-}
-
-struct bbdd_d_bfdd_ctx {
-	int fd;
-
-	/* Track the storage point of bctx so that we can uninitialize and NULL
-	 * the pointer. */
-	struct bfddp_ctx **bctxp;
+struct bbdd_d_bfdd_socket_ctx {
+	struct bbdd_bfdd **bfddp;
 };
 
-static void
-bbdd_d_bfdd_handle_messages(struct bbdd_d_bfdd_ctx *ctx)
+static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
+				  struct bfddp_message *msg,
+				  void *data, char **error)
 {
-	struct bfddp_message *msg;
+	//struct bbdd_d_bfdd_socket_ctx *sctx = data;
 	enum bfddp_message_type bmt;
 
-	do {
-		msg = bfddp_next_message(*ctx->bctxp);
-		if (msg == NULL)
-			return;
+	bmt = ntohs(msg->header.type);
+	switch (bmt) {
+	case ECHO_REQUEST:
+		fprintf(stderr, "echo_request\n");
+		break;
 
-		bmt = ntohs(msg->header.type);
-		switch (bmt) {
-		case ECHO_REQUEST:
-			fprintf(stderr, "echo_request\n");
-			break;
+	case ECHO_REPLY:
+		fprintf(stderr, "echo_reply\n");
+		break;
 
-		case ECHO_REPLY:
-			fprintf(stderr, "echo_reply\n");
-			break;
+	case DP_ADD_SESSION:
+		fprintf(stderr, "add_session\n");
+		break;
 
-		case DP_ADD_SESSION:
-			fprintf(stderr, "add_session\n");
-			break;
+	case DP_DELETE_SESSION:
+		fprintf(stderr, "delete_session\n");
+		break;
 
-		case DP_DELETE_SESSION:
-			fprintf(stderr, "delete_session\n");
-			break;
+	case DP_REQUEST_SESSION_COUNTERS:
+		fprintf(stderr, "request_session_counters\n");
+		break;
 
-		case DP_REQUEST_SESSION_COUNTERS:
-			fprintf(stderr, "request_session_counters\n");
-			break;
+	case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
+	case BFD_STATE_CHANGE:
+		fprintf(stderr, "Received wrong state-change mesage\n");
+		break;
 
-		case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
-		case BFD_STATE_CHANGE:
-			fprintf(stderr, "Received wrong state-change mesage\n");
-			break;
+	default:
+		fprintf(stderr, "Unhandled message type %d\n", bmt);
+		break;
+	}
 
-		default:
-			fprintf(stderr, "Unhandled message type %d\n", bmt);
-			break;
-		}
-	} while (msg != NULL);
-
-	/* We are done reading the messages, reorganize the buffer. */
-	bfddp_read_finish(*ctx->bctxp);
-}
-
-static void bbdd_d_bfddp_close(struct bbdd_d_bfdd_ctx *ctx,
-			       struct bbdd_poll_ctx *pctx)
-{
-	int rc;
-
-	rc = bbdd_poll_unset_fd(pctx, ctx->fd);
-	if (rc < 0)
-		fprintf(stderr, "Couldn't unset BFD poll FD\n");
-
-	bbdd_d_bfddp_free(ctx->bctxp);
-}
-
-static void bbdd_d_bfdd_socket_error(struct bbdd_d_bfdd_ctx *ctx,
-				     struct bbdd_poll_ctx *pctx)
-{
-	// xxx monitor event, when we have a monitor bus
-	if (errno != 0)
-		/* Error on socket. */
-		fprintf(stderr, "BFD socket closed: %m\n");
-	else
-		/* bfdd just closed. */
-		fprintf(stderr, "BFD socket closed\n");
-
-	bbdd_d_bfddp_close(ctx, pctx);
-}
-
-static void bbdd_d_bfdd_read_event(struct bbdd_d_bfdd_ctx *ctx,
-				   struct bbdd_poll_ctx *pctx)
-{
-	ssize_t rv;
-
-	/* Read as much as we can. */
-	rv = bfddp_read(*ctx->bctxp);
-	if (rv == -1)
-		return bbdd_d_bfdd_socket_error(ctx, pctx);
-	if (rv > 0 && bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: received %zd bytes\n", rv);
-
-	bbdd_d_bfdd_handle_messages(ctx);
-}
-
-static void bbdd_d_bfdd_write_event(struct bbdd_d_bfdd_ctx *ctx,
-				    struct bbdd_poll_ctx *pctx)
-{
-	struct bfddp_ctx **bctxp = ctx->bctxp;
-	ssize_t rv;
-
-	rv = bfddp_write(*bctxp);
-	if (rv == -1)
-		return bbdd_d_bfdd_socket_error(ctx, pctx);
-	if (rv > 0 && bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: sent %zd bytes\n", rv);
-}
-
-static int bbdd_d_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
-			     void *data, char **)
-{
-	struct bbdd_d_bfdd_ctx *ctx = data;
-	short events = POLLIN;
-	char *error;
-	int rc;
-
-	if (revents & POLLOUT)
-		bbdd_d_bfdd_write_event(ctx, pctx);
-	if (revents & POLLIN)
-		bbdd_d_bfdd_read_event(ctx, pctx);
-
-	if (bfddp_write_pending(*ctx->bctxp))
-		events |= POLLOUT;
-
-	rc = bbdd_poll_set_fd(pctx, ctx->fd, events,
-			      bbdd_d_bfdd_event, ctx, &error);
-	if (rc < 0)
-		bbdd_util_printerr(rc, &error, "Failed to reset BFD poll FD");
 	return 0;
 }
 
+static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, char **error,
+				   void *data)
+{
+	struct bbdd_d_bfdd_socket_ctx *sctx = data;
+	struct bbdd_bfdd **bfddp = sctx->bfddp;
+
+	// xxx monitor event, when we have a monitor bus
+	bbdd_util_printerr(-1, error, "BFD socket closed");
+
+	bbdd_bfdd_close(bfdd);
+	*bfddp = NULL;
+}
+
+static void bbdd_d_bfdd_sock_free_cb(void *data)
+{
+	struct bbdd_d_bfdd_sock_ctx *sctx = data;
+
+	free(sctx);
+}
+
 struct bbdd_d_bfdd_connect_ctx {
+	struct bbdd_bfdd **bfddp;
 	struct bbdd_sock peer;
 	struct json_object *id;
-	struct bbdd_d_bfdd_ctx *ctx;
 };
 
-static int bbdd_d_bfdd_unix_connected(struct bbdd_poll_ctx *pctx, short,
-				      void *data, char **)
+static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *bfdd, void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
-	struct bfddp_ctx **bctxp = cctx->ctx->bctxp;
-	char *error;
-	int fd;
-	int rv;
-
-	rv = bfddp_is_connected(*bctxp);
-	if (rv == 1)
-		/* bfddp_is_connected returns `1` if still not connected. Just
-		 * keep the same event handler and wait for more. */
-		return 0;
-
-	fd = bfddp_get_fd(*bctxp);
-	if (fd < 0) {
-		bbdd_util_fmterr(&error, "libbfd socket closed");
-		goto error;
-	}
-
-	rv = bbdd_poll_unset_fd(pctx, fd);
-	if (rv < 0) {
-		/* This shouldn't happen unless the FD is wrong, which it
-		 * shouldn't be. */
-		bbdd_util_fmterr(&error, "Error unsetting poll descriptor");
-		goto error;
-	}
-
-	if (rv == -1) {
-		bbdd_util_fmterr(&error, "Error connecting to the BFD DP socket");
-		goto error;
-	}
-
-	cctx->ctx->fd = fd;
-	rv = bbdd_poll_set_fd(pctx, fd, POLLOUT,
-			      bbdd_d_bfdd_event, cctx->ctx,
-			      &error);
-
-	if (rv < 0)
-		goto error;
 
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "bfdd: Connected.\n");
 	bbdd_d_respond_empty(&cctx->peer, cctx->id);
+}
 
-out:
+static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
+					void *data)
+{
+	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+	struct bbdd_bfdd **bfddp = cctx->bfddp;
+
+	fprintf(stderr, "Failed to connect to BFD: %s\n", *error);
+	bbdd_d_respond_interr(&cctx->peer, cctx->id, error);
+
+	bbdd_bfdd_close(bfdd);
+	*bfddp = NULL;
+}
+
+static void bbdd_d_bfdd_connect_free_cb(void *data)
+{
+	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+
 	json_object_put(cctx->id);
 	free(cctx);
-
-	/* Keep any errors that we encountered here to ourselves, the daemon
-	 * should stay up and running. */
-	return 0;
-
-error:
-	/* Respond to the waiting client that there was an error, and clean up
-	 * so that another attempt at connection can perhaps be made later. */
-	fprintf(stderr, "Failed to connect to BFD: %s\n", error);
-	bbdd_d_respond_interr(&cctx->peer, cctx->id, &error);
-	bbdd_d_bfddp_free(bctxp);
-	goto out;
 }
 
 static int bbdd_d_bfdd_connect_unix(struct bbdd_sock *peer,
 				    struct json_object *id,
 				    const char *path,
-				    struct bfddp_ctx **bctxp,
+				    struct bbdd_bfdd **bfddp,
 				    struct bbdd_poll_ctx *pctx,
 				    char **error)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx;
-	struct bbdd_d_bfdd_ctx *ctx;
-	struct bbdd_sockaddr sa;
+	struct bbdd_d_bfdd_socket_ctx *sctx;
+	struct bbdd_bfdd_cbs cbs;
 	int rc;
-	int fd;
 
-	if (*bctxp) {
+	if (*bfddp) {
 		bbdd_util_fmterr(error, "Already connected to a BFD daemon");
 		return -1;
-	}
-
-	rc = bbdd_sock_parse_addr_af(AF_UNIX, path, &sa, error);
-	if (rc < 0)
-		return rc;
-
-	*bctxp = bfddp_new(4096, 4096);
-	if (bctxp == NULL) {
-		bbdd_util_fmterr(error, "Failed to open libbfd context");
-		return -ENOMEM;
-	}
-
-	ctx = malloc(sizeof(*ctx));
-	if (ctx == NULL) {
-		bbdd_util_fmterr(error, "%m");
-		goto bfddp_free;
 	}
 
 	cctx = malloc(sizeof(*cctx));
 	if (cctx == NULL) {
 		bbdd_util_fmterr(error, "%m");
-		goto free_ctx;
+		return -ENOMEM;
 	}
-
-	rc = bfddp_connect(*bctxp, &sa.sa, sa.len);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to connect to bfd datapath socket");
-		goto free_cctx;
-	}
-
-	fd = bfddp_get_fd(*bctxp);
-	if (fd < 0) {
-		/* This shouldn't happen. */
-		bbdd_util_fmterr(error, "libbfd socket closed");
-		goto free_cctx;
-	}
-
-	*ctx = (struct bbdd_d_bfdd_ctx) {
-		.bctxp = bctxp,
-	};
 	*cctx = (struct bbdd_d_bfdd_connect_ctx) {
+		.bfddp = bfddp,
 		.peer = *peer,
 		.id = json_object_get(id),
-		.ctx = ctx,
 	};
-	rc = bbdd_poll_set_fd(pctx, fd, POLLOUT,
-			      bbdd_d_bfdd_unix_connected, cctx,
-			      error);
-	if (rc < 0)
-		goto free_cctx;
+
+	sctx = malloc(sizeof(*sctx));
+	if (sctx == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		rc = -ENOMEM;
+		goto cctx_free;
+	}
+	*sctx = (struct bbdd_d_bfdd_socket_ctx) {
+		.bfddp = bfddp,
+	};
+
+	cbs = (struct bbdd_bfdd_cbs) {
+		.conn_cb_data = cctx,
+		.connected_cb = bbdd_d_bfdd_connected_cb,
+		.connect_failed_cb = bbdd_d_bfdd_connect_fail_cb,
+		.connect_free_cb = bbdd_d_bfdd_connect_free_cb,
+
+		.sock_cb_data = sctx,
+		.sockerr_cb = bbdd_d_bfdd_sockerr_cb,
+		.message_cb = bbdd_d_bfdd_message_cb,
+		.sock_free_cb = bbdd_d_bfdd_sock_free_cb,
+	};
+
+	*bfddp = bbdd_bfdd_open(path, pctx, &cbs, error);
+	if (*bfddp == NULL) {
+		rc = -ENOMEM;
+		goto sctx_free;
+	}
 
 	return 0;
 
-free_cctx:
+sctx_free:
+	free(sctx);
+cctx_free:
 	free(cctx);
-free_ctx:
-	free(ctx);
-bfddp_free:
-	bbdd_d_bfddp_free(bctxp);
 	return rc;
 }
 
 static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id,
-				       struct bfddp_ctx **bctxp,
+				       struct bbdd_bfdd **bfddp,
 				       struct bbdd_poll_ctx *pctx)
 {
 	enum {
@@ -1870,7 +1753,7 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 	if (port != NULL)
 		return __bbdd_d_respond_invalid_params(peer, id, "`unix' address schema doesn't support ports");
 
-	rc = bbdd_d_bfdd_connect_unix(peer, id, addr, bctxp, pctx, &error);
+	rc = bbdd_d_bfdd_connect_unix(peer, id, addr, bfddp, pctx, &error);
 	if (rc < 0)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -1880,7 +1763,7 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 static void bbdd_d_handle_bfdd_disconnect(struct bbdd_sock *peer,
 					  struct json_object *params_obj,
 					  struct json_object *id,
-					  struct bfddp_ctx **bctxp)
+					  struct bbdd_bfdd **bfddp)
 {
 	char *error = NULL;
 	int rc;
@@ -1889,12 +1772,17 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_sock *peer,
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
-	if (*bctxp == NULL) {
+	if (*bfddp == NULL) {
 		bbdd_d_respond_empty(peer, id);
 		return;
 	}
 
-	fprintf(stderr, "bfdd-disconnect: not yet implemented\n");
+	bbdd_bfdd_close(*bfddp);
+	*bfddp = NULL;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Disconnected.\n");
+
 	bbdd_d_respond_empty(peer, id);
 }
 
@@ -1902,7 +1790,7 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
 				 struct bbdd_d_sport_alloc *spa,
-				 struct bfddp_ctx **bctxp,
+				 struct bbdd_bfdd **bfddp,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
@@ -1931,9 +1819,9 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 		bbdd_d_handle_session_stats(peer, params_obj, id,
 					    sdir, bpf);
 	else if (strcmp(method, "bfdd-connect") == 0)
-		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bctxp, pctx);
+		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bfddp, pctx);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
-		bbdd_d_handle_bfdd_disconnect(peer, params_obj, id, bctxp);
+		bbdd_d_handle_bfdd_disconnect(peer, params_obj, id, bfddp);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
@@ -1942,7 +1830,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 				struct bbdd_sess_dir *sdir,
 				struct bbdd_bpf *bpf,
 				struct bbdd_d_sport_alloc *spa,
-				struct bfddp_ctx **bctxp,
+				struct bbdd_bfdd **bfddp,
 				struct bbdd_sock *ctl)
 {
 	struct json_object *request_obj;
@@ -1974,7 +1862,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx,
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(pctx, sdir, bpf, spa, bctxp,
+	bbdd_d_handle_method(pctx, sdir, bpf, spa, bfddp,
 			     &peer, method, params, id);
 
 put_req_obj:
@@ -1984,7 +1872,7 @@ free_req:
 }
 
 struct bbdd_context {
-	struct bfddp_ctx *bctx;
+	struct bbdd_bfdd *bfdd;
 	struct bbdd_bpf *bpf;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
@@ -1997,7 +1885,7 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 	struct bbdd_context *bbdd = arg;
 
 	bbdd_d_ctl_activity(pctx, bbdd->sdir, bbdd->bpf, &bbdd->spa,
-			    &bbdd->bctx, &bbdd->ctl);
+			    &bbdd->bfdd, &bbdd->ctl);
 	return 0;
 }
 
@@ -2380,6 +2268,9 @@ static int bbdd_d_do_start(void)
 
 	err = bbdd_poll_loop(pctx, &error);
 	bbdd_util_printerr(err, &error, NULL);
+
+	if (bbdd.bfdd != NULL)
+		bbdd_bfdd_close(bbdd.bfdd);
 
 sig_fd_close:
 	close(sig_fd);

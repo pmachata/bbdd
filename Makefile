@@ -27,6 +27,7 @@ CFLAGS := -g $(WARN_CFLAGS)
 APPS := bbdd
 bbdd-OBJECTS :=					\
 	$(OUTPUT)/bbdd.o			\
+	$(OUTPUT)/bbdd-bfdd.o			\
 	$(OUTPUT)/bbdd-bpf.o			\
 	$(OUTPUT)/bbdd-c.o			\
 	$(OUTPUT)/bbdd-d.o			\
