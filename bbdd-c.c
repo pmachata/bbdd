@@ -1679,10 +1679,53 @@ out:
 	return rc;
 }
 
+static int bbdd_c_bfdd_disconnect(int argc, char **argv)
+{
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *result;
+	const int id = 1;
+	int err;
+
+	if (argc > 0) {
+		fprintf(stderr, "Usage: bbdd bfdd disconnect\n\n");
+		if (strcmp(*argv, "help") == 0)
+			return 0;
+		else
+			return -1;
+	}
+
+	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
+	if (request == NULL)
+		return -1;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL) {
+		err = -1;
+		goto put_request;
+	}
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_null,
+					    &result)) {
+		err = -1;
+		goto put_response;
+	}
+
+	bbdd_c_result_show_json(result);
+	err = 0;
+
+	json_object_put(result);
+put_request:
+	json_object_put(request);
+put_response:
+	json_object_put(response);
+	return err;
+}
+
 static void bbdd_c_bfdd_help(void)
 {
 	fprintf(stderr,
-		"Usage: bbdd bfdd { connect | help }\n"
+		"Usage: bbdd bfdd { connect | disconnect | help }\n"
 		"\n"
 	);
 }
@@ -1695,6 +1738,9 @@ int bbdd_c_bfdd(int argc, char **argv)
 	} else if (strcmp(*argv, "connect") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd_connect(argc, argv);
+	} else if (strcmp(*argv, "disconnect") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_bfdd_disconnect(argc, argv);
 	}
 
 	fprintf(stderr, "What is \"%s\"?\n", *argv);

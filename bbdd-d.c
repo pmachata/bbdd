@@ -1877,6 +1877,27 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 	/* Response for successful cases is handled asynchronously. */
 }
 
+static void bbdd_d_handle_bfdd_disconnect(struct bbdd_sock *peer,
+					  struct json_object *params_obj,
+					  struct json_object *id,
+					  struct bfddp_ctx **bctxp)
+{
+	char *error = NULL;
+	int rc;
+
+	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	if (*bctxp == NULL) {
+		bbdd_d_respond_empty(peer, id);
+		return;
+	}
+
+	fprintf(stderr, "bfdd-disconnect: not yet implemented\n");
+	bbdd_d_respond_empty(peer, id);
+}
+
 static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_bpf *bpf,
@@ -1911,6 +1932,8 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 					    sdir, bpf);
 	else if (strcmp(method, "bfdd-connect") == 0)
 		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bctxp, pctx);
+	else if (strcmp(method, "bfdd-disconnect") == 0)
+		bbdd_d_handle_bfdd_disconnect(peer, params_obj, id, bctxp);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
