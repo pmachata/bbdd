@@ -1760,6 +1760,36 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 	/* Response for successful cases is handled asynchronously. */
 }
 
+static void bbdd_d_handle_bfdd_connected(struct bbdd_sock *peer,
+					 struct json_object *params_obj,
+					 struct json_object *id,
+					 struct bbdd_bfdd **bfddp)
+{
+	struct json_object *obj;
+	bool connected;
+	char *error;
+	int rc;
+
+	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	connected = *bfddp != NULL && bbdd_bfdd_is_connected(*bfddp);
+
+	obj = bbdd_jrpc_new_object(id);
+	if (obj == NULL)
+		return bbdd_d_respond_memerr(peer, id);
+
+	if (json_object_object_add(obj, "result",
+				   json_object_new_boolean(connected)) != 0) {
+		json_object_put(obj);
+		return bbdd_d_respond_memerr(peer, id);
+	}
+
+	bbdd_jrpc_send(peer, obj);
+	json_object_put(obj);
+}
+
 static void bbdd_d_handle_bfdd_disconnect(struct bbdd_sock *peer,
 					  struct json_object *params_obj,
 					  struct json_object *id,
@@ -1820,6 +1850,8 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 					    sdir, bpf);
 	else if (strcmp(method, "bfdd-connect") == 0)
 		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bfddp, pctx);
+	else if (strcmp(method, "bfdd-connected") == 0)
+		bbdd_d_handle_bfdd_connected(peer, params_obj, id, bfddp);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
 		bbdd_d_handle_bfdd_disconnect(peer, params_obj, id, bfddp);
 	else

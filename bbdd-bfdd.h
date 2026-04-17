@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0 */
 #pragma once
 
+#include <stdbool.h>
+
 /* bfddp_packet.h */
 struct bfddp_message;
 
@@ -27,4 +29,5 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 struct bbdd_poll_ctx *pctx,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error);
+bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);

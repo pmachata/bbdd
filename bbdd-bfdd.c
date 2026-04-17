@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "bbdd.h"
@@ -225,6 +226,11 @@ free_bfdd:
 free_bfddp:
 	bfddp_free(bctx);
 	return NULL;
+}
+
+bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd)
+{
+	return bfddp_is_connected(bfdd->bctx) == 0;
 }
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
