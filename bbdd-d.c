@@ -1555,13 +1555,127 @@ static void bbdd_d_handle_session_show(struct bbdd_sock *peer,
 
 struct bbdd_d_bfdd_socket_ctx {
 	struct bbdd_bfdd **bfddp;
+	struct bbdd_sess_dir *sdir;
+	struct bbdd_bpf *bpf;
+	struct bbdd_d_sport_alloc *spa;
 };
+
+static int bbdd_d_bfddp_session_to_c(const struct bfddp_session *bsess,
+				     struct bbdd_c_session *csess,
+				     char **error)
+{
+	uint32_t flags = ntohl(bsess->flags);
+	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
+
+	memset(csess, 0, sizeof(*csess));
+
+#define SET_FLAG(name, FLAG) do {					\
+		csess->flags.name.seen = true;				\
+		csess->flags.name.value = !!(flags & (FLAG));		\
+	} while (0)
+	SET_FLAG(multihop, SESSION_MULTIHOP);
+	SET_FLAG(demand,   SESSION_DEMAND);
+	SET_FLAG(cbit,     SESSION_CBIT);
+	SET_FLAG(ipv6,     SESSION_IPV6);
+	SET_FLAG(passive,  SESSION_PASSIVE);
+	SET_FLAG(shutdown, SESSION_SHUTDOWN);
+#undef SET_FLAG
+
+	csess->src_af = af;
+	if (!inet_ntop(af, &bsess->src, csess->src, sizeof(csess->src))) {
+		bbdd_util_fmterr(error, "Failed to convert source address: %m");
+		return -1;
+	}
+
+	csess->dst_af = af;
+	if (!inet_ntop(af, &bsess->dst, csess->dst, sizeof(csess->dst))) {
+		bbdd_util_fmterr(error, "Failed to convert destination address: %m");
+		return -1;
+	}
+
+	csess->discr = ntohl(bsess->lid);
+	csess->discr_seen = (csess->discr != 0);
+
+	csess->min_tx_us = ntohl(bsess->min_tx);
+	csess->min_tx_us_seen = 1;
+
+	csess->min_rx_us = ntohl(bsess->min_rx);
+	csess->min_rx_us_seen = 1;
+
+	csess->hold_time = ntohl(bsess->hold_time);
+	csess->hold_time_seen = 1;
+
+	csess->ttl = bsess->ttl;
+	csess->ttl_seen = 1;
+
+	csess->detect_mult = bsess->detect_mult;
+	csess->detect_mult_seen = 1;
+
+	csess->ifindex = ntohl(bsess->ifindex);
+	csess->ifindex_seen = (csess->ifindex != 0);
+
+	if (bsess->ifname[0] != '\0') {
+		/* If an interface name is too long, it will be truncated, and
+		 * will subsequently fail validation. So we don't care, and this
+		 * contraption silences a GCC warning. */
+		(void) (snprintf(csess->ifname, sizeof(csess->ifname), "%s",
+				 bsess->ifname) != 0);
+		csess->ifname_seen = 1;
+	}
+
+	return 0;
+}
+
+static int bbdd_d_bfdd_handle_add_session(const struct bfddp_session *bsess,
+					  struct bbdd_sess_dir *sdir,
+					  struct bbdd_bpf *bpf,
+					  struct bbdd_d_sport_alloc *spa,
+					  char **error)
+{
+	struct bbdd_d_session *dsess;
+	struct bbdd_c_session csess;
+	uint32_t discr;
+	int rc;
+
+	rc = bbdd_d_bfddp_session_to_c(bsess, &csess, error);
+	if (rc != 0)
+		return rc;
+
+	/* We wouldn't mind getting a zero discr and allocating ourselves, but
+	 * it's not clear how it should work. We are getting a message that a
+	 * session is supposed to be added. The session already exists in bfdd,
+	 * and has a discriminator assigned. Even if it didn't, there's no
+	 * mechanism to report back to bfdd what value we assigned. So best to
+	 * just expect the value to be given. */
+	if (!csess.discr_seen) {
+		bbdd_util_fmterr(error, "DP_ADD_SESSION: missing local discriminator");
+		return -1;
+	}
+	discr = csess.discr;
+
+	if (csess.ifindex_seen || csess.ifname_seen) {
+		rc = bbdd_d_session_validate_interface(&csess, error);
+		if (rc != 0)
+			return rc;
+	}
+
+	dsess = bbdd_sess_dir_get_session(sdir, discr);
+	if (dsess == NULL)
+		return bbdd_d_session_add(&csess, sdir, bpf, spa, error);
+
+	/* Update existing session. */
+	rc = bbdd_d_session_apply_c(dsess, &csess, error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_bpf_session_update(bpf, dsess, error);
+}
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 				  struct bfddp_message *msg,
 				  void *data, char **error)
 {
-	//struct bbdd_d_bfdd_socket_ctx *sctx = data;
+	struct bbdd_d_bfdd_socket_ctx *sctx = data;
 	enum bfddp_message_type bmt;
 
 	bmt = ntohs(msg->header.type);
@@ -1575,8 +1689,9 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_ADD_SESSION:
-		fprintf(stderr, "add_session\n");
-		break;
+		return bbdd_d_bfdd_handle_add_session(&msg->data.session,
+						      sctx->sdir, sctx->bpf,
+						      sctx->spa, error);
 
 	case DP_DELETE_SESSION:
 		fprintf(stderr, "delete_session\n");
@@ -1614,7 +1729,7 @@ static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, char **error,
 
 static void bbdd_d_bfdd_sock_free_cb(void *data)
 {
-	struct bbdd_d_bfdd_sock_ctx *sctx = data;
+	struct bbdd_d_bfdd_socket_ctx *sctx = data;
 
 	free(sctx);
 }
@@ -1660,6 +1775,9 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_sock *peer,
 				    const char *path,
 				    struct bbdd_bfdd **bfddp,
 				    struct bbdd_poll_ctx *pctx,
+				    struct bbdd_sess_dir *sdir,
+				    struct bbdd_bpf *bpf,
+				    struct bbdd_d_sport_alloc *spa,
 				    char **error)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx;
@@ -1691,6 +1809,9 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_sock *peer,
 	}
 	*sctx = (struct bbdd_d_bfdd_socket_ctx) {
 		.bfddp = bfddp,
+		.sdir = sdir,
+		.bpf = bpf,
+		.spa = spa,
 	};
 
 	cbs = (struct bbdd_bfdd_cbs) {
@@ -1724,7 +1845,10 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id,
 				       struct bbdd_bfdd **bfddp,
-				       struct bbdd_poll_ctx *pctx)
+				       struct bbdd_poll_ctx *pctx,
+				       struct bbdd_sess_dir *sdir,
+				       struct bbdd_bpf *bpf,
+				       struct bbdd_d_sport_alloc *spa)
 {
 	enum {
 		pol_proto,
@@ -1767,7 +1891,8 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_sock *peer,
 	if (port != NULL)
 		return __bbdd_d_respond_invalid_params(peer, id, "`unix' address schema doesn't support ports");
 
-	rc = bbdd_d_bfdd_connect_unix(peer, id, addr, bfddp, pctx, &error);
+	rc = bbdd_d_bfdd_connect_unix(peer, id, addr, bfddp, pctx,
+				      sdir, bpf, spa, &error);
 	if (rc < 0)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -1863,7 +1988,8 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 		bbdd_d_handle_session_stats(peer, params_obj, id,
 					    sdir, bpf);
 	else if (strcmp(method, "bfdd-connect") == 0)
-		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bfddp, pctx);
+		bbdd_d_handle_bfdd_connect(peer, params_obj, id, bfddp, pctx,
+					   sdir, bpf, spa);
 	else if (strcmp(method, "bfdd-connected") == 0)
 		bbdd_d_handle_bfdd_connected(peer, params_obj, id, bfddp);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
