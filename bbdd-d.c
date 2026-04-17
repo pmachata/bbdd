@@ -2035,8 +2035,8 @@ static int bbdd_d_do_start(void)
 	if (err != 0)
 		goto bpf_destroy;
 
-	err = bbdd_poll_push_fd(pctx, bbdd.ctl.fd, POLLIN,
-				bbdd_d_ctl_recv, &bbdd, &error);
+	err = bbdd_poll_set_fd(pctx, bbdd.ctl.fd, POLLIN,
+			       bbdd_d_ctl_recv, &bbdd, &error);
 	if (err != 0) {
 		bbdd_util_printerr(err, &error, "Failed to register socket for events");
 		goto sock_close_d;
@@ -2053,8 +2053,8 @@ static int bbdd_d_do_start(void)
 		goto sock_close_d;
 	}
 
-	err = bbdd_poll_push_fd(pctx, sig_fd, POLLIN,
-				bbdd_d_sig_cb, &sig_fd, &error);
+	err = bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
+			       bbdd_d_sig_cb, &sig_fd, &error);
 	if (err != 0) {
 		bbdd_util_printerr(err, &error, "Failed to register signal fd");
 		goto sig_fd_close;

@@ -8,10 +8,13 @@ struct bbdd_poll_ctx;
 struct bbdd_poll_ctx *bbdd_poll_init(void);
 void bbdd_poll_fini(struct bbdd_poll_ctx *ctx);
 
-int bbdd_poll_push_fd(struct bbdd_poll_ctx *ctx,
-		      int fd, short events,
-		      int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
-		      void *data, char **error);
+int bbdd_poll_set_fd(struct bbdd_poll_ctx *ctx,
+		     int fd, short events,
+		     int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
+		     void *data, char **error);
+
+int bbdd_poll_unset_fd(struct bbdd_poll_ctx *ctx, int fd);
+
 void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx);
 
 int bbdd_poll_loop(struct bbdd_poll_ctx *ctx, char **error);
