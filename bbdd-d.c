@@ -1355,27 +1355,24 @@ free_discrs:
 	free(discrs);
 }
 
-static int bbdd_d_handle_session_del_one(struct bbdd_sess_dir *sdir,
-					 struct bbdd_bpf *bpf,
-					 struct bbdd_d_sport_alloc *spa,
-					 uint32_t discr,
+static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 					 char **error)
 {
 	struct bbdd_d_session *dsess;
 	uint16_t sport;
 
-	dsess = bbdd_sess_dir_get_session(sdir, discr);
+	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
 		bbdd_util_fmterr(error, "Failed to look up session %u", discr);
 		return -1;
 	}
 
-	bbdd_bpf_session_del(bpf, dsess);
+	bbdd_bpf_session_del(d->bpf, dsess);
 
 	sport = dsess->src.sin46.port;
-	bbdd_d_sport_put(spa, sport);
+	bbdd_d_sport_put(&d->spa, sport);
 
-	bbdd_sess_dir_del_session(sdir, dsess);
+	bbdd_sess_dir_del_session(d->sdir, dsess);
 
 	return 0;
 }
@@ -1548,8 +1545,7 @@ static void bbdd_d_handle_session_del(struct bbdd_d *d,
 	for (size_t i = 0; i < ndiscrs; i++) {
 		char *error;
 
-		rc = bbdd_d_handle_session_del_one(d->sdir, d->bpf, &d->spa,
-						   discrs[i], &error);
+		rc = bbdd_d_handle_session_del_one(d, discrs[i], &error);
 		if (rc < 0) {
 			if (error != NULL) {
 				free(last_error);
