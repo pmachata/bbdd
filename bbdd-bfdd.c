@@ -245,3 +245,75 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 		bfdd->cbs.sock_free_cb(bfdd->cbs.sock_cb_data);
 	free(bfdd);
 }
+
+int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
+			   struct bbdd_c_session *csess,
+			   char **error)
+{
+	uint32_t flags = ntohl(fsess->flags);
+	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
+	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
+	unsigned char zeroes[16] = {};
+
+	memset(csess, 0, sizeof(*csess));
+
+#define SET_FLAG(name, FLAG) do {					\
+		csess->flags.name.seen = true;				\
+		csess->flags.name.value = !!(flags & (FLAG));		\
+	} while (0)
+	SET_FLAG(multihop, SESSION_MULTIHOP);
+	SET_FLAG(demand,   SESSION_DEMAND);
+	SET_FLAG(cbit,     SESSION_CBIT);
+	SET_FLAG(ipv6,     SESSION_IPV6);
+	SET_FLAG(passive,  SESSION_PASSIVE);
+	SET_FLAG(shutdown, SESSION_SHUTDOWN);
+#undef SET_FLAG
+
+	/* Source address is not mandatory. */
+	if (memcmp(&fsess->src, zeroes, addr_sz) != 0) {
+		csess->src_af = af;
+		if (!inet_ntop(af, &fsess->src, csess->src,
+			       sizeof(csess->src))) {
+			bbdd_util_fmterr(error, "Failed to convert source address: %m");
+			return -1;
+		}
+	}
+
+	csess->dst_af = af;
+	if (!inet_ntop(af, &fsess->dst, csess->dst, sizeof(csess->dst))) {
+		bbdd_util_fmterr(error, "Failed to convert destination address: %m");
+		return -1;
+	}
+
+	csess->discr = ntohl(fsess->lid);
+	csess->discr_seen = (csess->discr != 0);
+
+	csess->min_tx_us = ntohl(fsess->min_tx);
+	csess->min_tx_us_seen = 1;
+
+	csess->min_rx_us = ntohl(fsess->min_rx);
+	csess->min_rx_us_seen = 1;
+
+	csess->hold_time = ntohl(fsess->hold_time);
+	csess->hold_time_seen = 1;
+
+	csess->ttl = fsess->ttl;
+	csess->ttl_seen = 1;
+
+	csess->detect_mult = fsess->detect_mult;
+	csess->detect_mult_seen = 1;
+
+	csess->ifindex = ntohl(fsess->ifindex);
+	csess->ifindex_seen = (csess->ifindex != 0);
+
+	if (fsess->ifname[0] != '\0') {
+		/* If an interface name is too long, it will be truncated, and
+		 * will subsequently fail validation. So we don't care, and this
+		 * contraption silences a GCC warning. */
+		(void) (snprintf(csess->ifname, sizeof(csess->ifname), "%s",
+				 fsess->ifname) != 0);
+		csess->ifname_seen = 1;
+	}
+
+	return 0;
+}

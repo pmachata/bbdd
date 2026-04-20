@@ -1593,80 +1593,8 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	return bbdd_d_handle_session_show_do(peer, id, d->sdir, discrs, ndiscrs);
 }
 
-static int bbdd_d_bfddp_session_to_c(const struct bfddp_session *bsess,
-				     struct bbdd_c_session *csess,
-				     char **error)
-{
-	uint32_t flags = ntohl(bsess->flags);
-	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
-	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
-	unsigned char zeroes[16] = {};
-
-	memset(csess, 0, sizeof(*csess));
-
-#define SET_FLAG(name, FLAG) do {					\
-		csess->flags.name.seen = true;				\
-		csess->flags.name.value = !!(flags & (FLAG));		\
-	} while (0)
-	SET_FLAG(multihop, SESSION_MULTIHOP);
-	SET_FLAG(demand,   SESSION_DEMAND);
-	SET_FLAG(cbit,     SESSION_CBIT);
-	SET_FLAG(ipv6,     SESSION_IPV6);
-	SET_FLAG(passive,  SESSION_PASSIVE);
-	SET_FLAG(shutdown, SESSION_SHUTDOWN);
-#undef SET_FLAG
-
-	/* Source address is not mandatory. */
-	if (memcmp(&bsess->src, zeroes, addr_sz) != 0) {
-		csess->src_af = af;
-		if (!inet_ntop(af, &bsess->src, csess->src,
-			       sizeof(csess->src))) {
-			bbdd_util_fmterr(error, "Failed to convert source address: %m");
-			return -1;
-		}
-	}
-
-	csess->dst_af = af;
-	if (!inet_ntop(af, &bsess->dst, csess->dst, sizeof(csess->dst))) {
-		bbdd_util_fmterr(error, "Failed to convert destination address: %m");
-		return -1;
-	}
-
-	csess->discr = ntohl(bsess->lid);
-	csess->discr_seen = (csess->discr != 0);
-
-	csess->min_tx_us = ntohl(bsess->min_tx);
-	csess->min_tx_us_seen = 1;
-
-	csess->min_rx_us = ntohl(bsess->min_rx);
-	csess->min_rx_us_seen = 1;
-
-	csess->hold_time = ntohl(bsess->hold_time);
-	csess->hold_time_seen = 1;
-
-	csess->ttl = bsess->ttl;
-	csess->ttl_seen = 1;
-
-	csess->detect_mult = bsess->detect_mult;
-	csess->detect_mult_seen = 1;
-
-	csess->ifindex = ntohl(bsess->ifindex);
-	csess->ifindex_seen = (csess->ifindex != 0);
-
-	if (bsess->ifname[0] != '\0') {
-		/* If an interface name is too long, it will be truncated, and
-		 * will subsequently fail validation. So we don't care, and this
-		 * contraption silences a GCC warning. */
-		(void) (snprintf(csess->ifname, sizeof(csess->ifname), "%s",
-				 bsess->ifname) != 0);
-		csess->ifname_seen = 1;
-	}
-
-	return 0;
-}
-
 static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
-					  const struct bfddp_session *bsess,
+					  const struct bfddp_session *fsess,
 					  char **error)
 {
 	struct bbdd_d_session *dsess;
@@ -1674,7 +1602,7 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	uint32_t discr;
 	int rc;
 
-	rc = bbdd_d_bfddp_session_to_c(bsess, &csess, error);
+	rc = bbdd_bfdd_session_to_c(fsess, &csess, error);
 	if (rc != 0)
 		goto interr;
 

@@ -3,14 +3,17 @@
 
 #include <stdbool.h>
 
-/* bfddp_packet.h */
-struct bfddp_message;
+/* bfddp.h */
+struct bbdd_c_session;
 
 /* bbdd-poll.c */
 struct bbdd_poll_ctx;
 
 /* bbdd-bfdd.c */
 struct bbdd_bfdd;
+
+/* bfddp_packet.h */
+struct bfddp_session;
 
 struct bbdd_bfdd_cbs {
 	void *conn_cb_data;
@@ -31,3 +34,7 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 char **error);
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
+
+int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
+			   struct bbdd_c_session *csess,
+			   char **error);
