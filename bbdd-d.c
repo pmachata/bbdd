@@ -1589,16 +1589,16 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	return bbdd_d_handle_session_show_do(peer, id, d->sdir, discrs, ndiscrs);
 }
 
-static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
-					  const struct bfddp_session *fsess,
-					  char **error)
+static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
+					   const struct bfddp_session *fsess)
 {
 	struct bbdd_d_session *dsess;
 	struct bbdd_c_session csess;
 	uint32_t discr;
+	char *error;
 	int rc;
 
-	rc = bbdd_bfdd_session_to_c(fsess, &csess, error);
+	rc = bbdd_bfdd_session_to_c(fsess, &csess, &error);
 	if (rc != 0)
 		goto interr;
 
@@ -1609,13 +1609,13 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	 * mechanism to report back to bfdd what value we assigned. So best to
 	 * just expect the value to be given. */
 	if (!csess.discr_seen) {
-		bbdd_util_fmterr(error, "DP_ADD_SESSION: missing local discriminator");
+		bbdd_util_fmterr(&error, "missing local discriminator");
 		goto malformed;
 	}
 	discr = csess.discr;
 
 	if (csess.ifindex_seen || csess.ifname_seen) {
-		rc = bbdd_d_session_validate_interface(&csess, error);
+		rc = bbdd_d_session_validate_interface(&csess, &error);
 		if (rc != 0)
 			goto malformed;
 	}
@@ -1623,29 +1623,35 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
 		rc = bbdd_d_session_add(&csess, d->sdir, d->bpf, &d->spa,
-					error);
+					&error);
 		if (rc != 0)
-			goto interr;
-		return 0;
+			goto no_session;
+		return;
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, &csess, error);
+	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
 	if (rc != 0)
 		goto interr;
 
-	rc = bbdd_bpf_session_update(d->bpf, dsess, error);
+	rc = bbdd_bpf_session_update(d->bpf, dsess, &error);
 	if (rc != 0)
 		goto interr;
 
-	return 0;
+	return;
 
 malformed:
 	++d->diag_stats.dp_malformed_message;
-	return -1;
+	goto message;
 interr:
 	++d->diag_stats.dp_internal_error;
-	return -1;
+	goto message;
+no_session:
+	++d->diag_stats.dp_session_not_found;
+	goto message;
+
+message:
+	bbdd_util_verberr(&error, "bfdd: DP_ADD_SESSION");
 }
 
 static void
@@ -1711,7 +1717,7 @@ reply:
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 				  struct bfddp_message *msg,
-				  void *data, char **error)
+				  void *data, char **)
 {
 	struct bbdd_d *d = data;
 	enum bfddp_message_type bmt;
@@ -1731,8 +1737,8 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_ADD_SESSION:
-		return bbdd_d_bfdd_handle_add_session(d, &msg->data.session,
-						      error);
+		bbdd_d_bfdd_handle_add_session(d, &msg->data.session);
+		return 0;
 
 	case DP_DELETE_SESSION:
 		bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);
