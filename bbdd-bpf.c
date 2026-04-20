@@ -25,6 +25,7 @@
 #include <uthash.h>
 
 #include "bbdd.h"
+#include "bbdd-jrpc.h"
 #include "bbdd-nl.h"
 #include "bbdd-prog.h"
 #include "bbdd-util.h"
@@ -1204,7 +1205,7 @@ static int bbdd_bpf_add_stat(struct json_object *obj,
 			     char **error)
 {
 	int rc;
-	rc = json_object_object_add(obj, name, json_object_new_uint64(value));
+	rc = bbdd_jrpc_append_uint64(obj, name, value);
 	if (rc)
 		bbdd_bpf_stat_fmterr(error);
 	return rc;

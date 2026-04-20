@@ -84,6 +84,7 @@ struct bbdd_d {
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_sock ctl;
+	struct bbdd_d_global_diag_stats diag_stats;
 };
 
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
@@ -212,6 +213,40 @@ static void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
 	bbdd_d_respond_empty(peer, id);
 }
 
+static void bbdd_d_stat_fmterr(char **error)
+{
+	bbdd_util_fmterr(error, "Failed to format stats to JSON: %m");
+}
+
+static int bbdd_d_add_stat(struct json_object *obj,
+			   const char *name, uint64_t value,
+			   char **error)
+{
+	int rc;
+	rc = bbdd_jrpc_append_uint64(obj, name, value);
+	if (rc)
+		bbdd_d_stat_fmterr(error);
+	return rc;
+}
+
+static int bbdd_d_global_diag_stats_json(struct bbdd_d *d,
+					 struct json_object *obj,
+					 char **error)
+{
+	struct bbdd_d_global_diag_stats *stats = &d->diag_stats;
+
+#define FIELD(NAME) {							\
+		uint64_t value = stats->NAME;				\
+		if (bbdd_d_add_stat(obj, #NAME, value, error))		\
+			return -1;					\
+	}
+
+	BBDD_D_GLOBAL_DIAG_STATS(FIELD)
+#undef FIELD
+
+	return 0;
+}
+
 static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 					   struct bbdd_sock *peer,
 					   struct json_object *params_obj,
@@ -229,6 +264,10 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	result = bbdd_bpf_global_diag_stats_json(d->bpf, &error);
 	if (!result)
 		return bbdd_d_respond_interr(peer, id, &error);
+
+	rc = bbdd_d_global_diag_stats_json(d, result, &error);
+	if (rc != 0)
+		goto put_result;
 
 	obj = bbdd_jrpc_new_object(id);
 	if (!obj)

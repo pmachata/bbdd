@@ -103,6 +103,15 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 
 /* bbdd-d.c */
 
+#define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
+	/**/
+
+#define STAT_FIELD(NAME) __u64 NAME;
+struct bbdd_d_global_diag_stats {
+	BBDD_D_GLOBAL_DIAG_STATS(STAT_FIELD)
+};
+#undef STAT_FIELD
+
 #define BBDD_D_SESSION_EXPAND_FIELD(NAME, name, ...) bool name;
 
 struct bbdd_d_session_flags {
