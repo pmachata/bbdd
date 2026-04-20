@@ -1230,7 +1230,7 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 			goto err;					\
 	}
 
-	BBDD_GLOBAL_DIAG_STATS(FIELD)
+	BBDD_PROG_GLOBAL_DIAG_STATS(FIELD)
 #undef FIELD
 
 	return obj;
@@ -1279,7 +1279,7 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 			goto err;					\
 	}
 
-	BBDD_SESSION_DIAG_STATS(FIELD)
+	BBDD_PROG_SESSION_DIAG_STATS(FIELD)
 #undef FIELD
 
 	return obj;
@@ -1327,7 +1327,7 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 			goto err;					\
 	}
 
-	BBDD_SESSION_STATS(FIELD)
+	BBDD_PROG_SESSION_STATS(FIELD)
 #undef FIELD
 
 	return obj;

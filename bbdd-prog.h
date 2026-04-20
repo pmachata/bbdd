@@ -3,7 +3,7 @@
 
 #include "bbdd-prog-pkt.h"
 
-#define BBDD_GLOBAL_DIAG_STATS(FIELD)		\
+#define BBDD_PROG_GLOBAL_DIAG_STATS(FIELD)	\
 	FIELD(tx_no_session)			\
 	FIELD(tx_not_bfd)			\
 	FIELD(rx_not_bfd)			\
@@ -15,7 +15,7 @@
 	FIELD(ring_buffer_error)		\
 	/**/
 
-#define BBDD_SESSION_DIAG_STATS(FIELD)		\
+#define BBDD_PROG_SESSION_DIAG_STATS(FIELD)	\
 	FIELD(tx_dst_blackholed)		\
 	FIELD(tx_dst_unreachable)		\
 	FIELD(tx_dst_prohibited)		\
@@ -42,7 +42,7 @@
 	FIELD(rx_timeout)			\
 	/**/
 
-#define BBDD_SESSION_STATS(FIELD)		\
+#define BBDD_PROG_SESSION_STATS(FIELD)		\
 	FIELD(rx_bytes)				\
 	FIELD(rx_packets)		        \
 	FIELD(tx_bytes)			        \
@@ -51,7 +51,7 @@
 
 #define STAT_FIELD(NAME) __u64 NAME;
 struct bbdd_prog_global_diag_stats {
-	BBDD_GLOBAL_DIAG_STATS(STAT_FIELD)
+	BBDD_PROG_GLOBAL_DIAG_STATS(STAT_FIELD)
 };
 
 struct bbdd_prog_session_config {
@@ -74,11 +74,11 @@ enum {
 };
 
 struct bbdd_prog_session_data_stats {
-	BBDD_SESSION_STATS(STAT_FIELD)
+	BBDD_PROG_SESSION_STATS(STAT_FIELD)
 };
 
 struct bbdd_prog_session_data_diag_stats {
-	BBDD_SESSION_DIAG_STATS(STAT_FIELD)
+	BBDD_PROG_SESSION_DIAG_STATS(STAT_FIELD)
 };
 
 struct bbdd_prog_session_data {
