@@ -1659,10 +1659,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 	rc = bbdd_d_handle_session_del_one(d, discr, &error);
 	if (rc != 0) {
 		++d->diag_stats.dp_session_not_found;
-		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(&error, "bfdd: DP_DELETE_SESSION");
-		else
-			free(error);
+		bbdd_util_verberr(&error, "bfdd: DP_DELETE_SESSION");
 	}
 }
 
@@ -1699,10 +1696,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	rc = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, &error);
 	if (rc != 0) {
 		++d->diag_stats.dp_internal_error;
-		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
-		else
-			free(error);
+		bbdd_util_verberr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
 		goto reply;
 	}
 
@@ -1711,10 +1705,7 @@ reply:
 				      &error);
 	if (rc != 0) {
 		++d->diag_stats.dp_bfdd_buffer_full;
-		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
-		else
-			free(error);
+		bbdd_util_verberr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
 	}
 }
 

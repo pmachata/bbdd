@@ -1,7 +1,10 @@
 #include "bbdd-util.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "bbdd.h"
 
 int bbdd_util_vfmterr(char **strp, const char *fmt, va_list ap)
 {
@@ -48,19 +51,38 @@ int bbdd_util_wraperr(char **strp, const char *fmt, ...)
 	return rc;
 }
 
-__attribute__((format(printf, 2, 3)))
-void bbdd_util_printerr(char **error, const char *fmt, ...)
+static void bbdd_util_vprinterr(char **error, const char *fmt, va_list ap)
 {
-	va_list ap;
-
-	if (fmt) {
-		va_start(ap, fmt);
+	if (fmt)
 		vfprintf(stderr, fmt, ap);
-		va_end(ap);
-	}
 
 	if (*error) {
 		fprintf(stderr, ": %s\n", *error);
 		free(*error);
 	}
+}
+
+__attribute__((format(printf, 2, 3)))
+void bbdd_util_verberr(char **error, const char *fmt, ...)
+{
+	va_list ap;
+
+	if (bbdd_env.verbosity <= 0) {
+		free(*error);
+		return;
+	}
+
+	va_start(ap, fmt);
+	bbdd_util_vprinterr(error, fmt, ap);
+	va_end(ap);
+}
+
+__attribute__((format(printf, 2, 3)))
+void bbdd_util_printerr(char **error, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	bbdd_util_vprinterr(error, fmt, ap);
+	va_end(ap);
 }

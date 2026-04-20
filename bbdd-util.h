@@ -22,3 +22,8 @@ int bbdd_util_wraperr(char **strp, const char *fmt, ...);
  * and freed. A nop when rc == 0. */
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_printerr(char **error, const char *fmt, ...);
+
+/* Like bbdd_util_printerr, but only prints when verbosity > 0; always frees
+ * *error. */
+__attribute__((format(printf, 2, 3)))
+void bbdd_util_verberr(char **error, const char *fmt, ...);
