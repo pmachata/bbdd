@@ -1665,10 +1665,8 @@ static int bbdd_d_bfddp_session_to_c(const struct bfddp_session *bsess,
 	return 0;
 }
 
-static int bbdd_d_bfdd_handle_add_session(const struct bfddp_session *bsess,
-					  struct bbdd_sess_dir *sdir,
-					  struct bbdd_bpf *bpf,
-					  struct bbdd_d_sport_alloc *spa,
+static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
+					  const struct bfddp_session *bsess,
 					  char **error)
 {
 	struct bbdd_d_session *dsess;
@@ -1678,7 +1676,7 @@ static int bbdd_d_bfdd_handle_add_session(const struct bfddp_session *bsess,
 
 	rc = bbdd_d_bfddp_session_to_c(bsess, &csess, error);
 	if (rc != 0)
-		return rc;
+		goto interr;
 
 	/* We wouldn't mind getting a zero discr and allocating ourselves, but
 	 * it's not clear how it should work. We are getting a message that a
@@ -1688,26 +1686,42 @@ static int bbdd_d_bfdd_handle_add_session(const struct bfddp_session *bsess,
 	 * just expect the value to be given. */
 	if (!csess.discr_seen) {
 		bbdd_util_fmterr(error, "DP_ADD_SESSION: missing local discriminator");
-		return -1;
+		goto malformed;
 	}
 	discr = csess.discr;
 
 	if (csess.ifindex_seen || csess.ifname_seen) {
 		rc = bbdd_d_session_validate_interface(&csess, error);
 		if (rc != 0)
-			return rc;
+			goto malformed;
 	}
 
-	dsess = bbdd_sess_dir_get_session(sdir, discr);
-	if (dsess == NULL)
-		return bbdd_d_session_add(&csess, sdir, bpf, spa, error);
+	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
+	if (dsess == NULL) {
+		rc = bbdd_d_session_add(&csess, d->sdir, d->bpf, &d->spa,
+					error);
+		if (rc != 0)
+			goto interr;
+		return 0;
+	}
 
 	/* Update existing session. */
 	rc = bbdd_d_session_apply_c(dsess, &csess, error);
 	if (rc != 0)
-		return rc;
+		goto interr;
 
-	return bbdd_bpf_session_update(bpf, dsess, error);
+	rc = bbdd_bpf_session_update(d->bpf, dsess, error);
+	if (rc != 0)
+		goto interr;
+
+	return 0;
+
+malformed:
+	++d->diag_stats.dp_malformed_message;
+	return -1;
+interr:
+	++d->diag_stats.dp_internal_error;
+	return -1;
 }
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
@@ -1732,9 +1746,8 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_ADD_SESSION:
-		return bbdd_d_bfdd_handle_add_session(&msg->data.session,
-						      d->sdir, d->bpf,
-						      &d->spa, error);
+		return bbdd_d_bfdd_handle_add_session(d, &msg->data.session,
+						      error);
 
 	case DP_DELETE_SESSION:
 		fprintf(stderr, "delete_session\n");
@@ -1746,11 +1759,16 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 
 	case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
 	case BFD_STATE_CHANGE:
-		fprintf(stderr, "Received wrong state-change mesage\n");
+		++d->diag_stats.dp_invalid_message;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr, "bfdd: Invalid message type %d\n", bmt);
 		break;
 
 	default:
-		fprintf(stderr, "Unhandled message type %d\n", bmt);
+		++d->diag_stats.dp_unknown_message;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr, "bfdd: Unhandled message type %d\n",
+				bmt);
 		break;
 	}
 

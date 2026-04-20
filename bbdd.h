@@ -104,6 +104,10 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 /* bbdd-d.c */
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
+	FIELD(dp_unknown_message)		\
+	FIELD(dp_invalid_message)		\
+	FIELD(dp_malformed_message)		\
+	FIELD(dp_internal_error)		\
 	/**/
 
 #define STAT_FIELD(NAME) __u64 NAME;

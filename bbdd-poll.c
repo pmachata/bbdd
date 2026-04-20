@@ -134,6 +134,9 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 {
 	int err = 0;
 
+	if (bbdd_env.verbosity > 0)
+		fprintf(stdout, "Ready.\n");
+
 	while (!pctx->should_quit) {
 		int nfds;
 
