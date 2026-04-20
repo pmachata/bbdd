@@ -1649,6 +1649,24 @@ interr:
 }
 
 static void
+bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
+				  const struct bfddp_session *bsess)
+{
+	uint32_t discr = ntohl(bsess->lid);
+	char *error;
+	int rc;
+
+	rc = bbdd_d_handle_session_del_one(d, discr, &error);
+	if (rc != 0) {
+		++d->diag_stats.dp_session_not_found;
+		if (bbdd_env.verbosity > 0)
+			bbdd_util_printerr(rc, &error, "bfdd: DP_DELETE_SESSION");
+		else
+			free(error);
+	}
+}
+
+static void
 bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 				    const struct bfddp_message *msg)
 {
@@ -1726,8 +1744,8 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 						      error);
 
 	case DP_DELETE_SESSION:
-		fprintf(stderr, "delete_session\n");
-		break;
+		bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);
+		return 0;
 
 	case DP_REQUEST_SESSION_COUNTERS:
 		bbdd_d_bfdd_handle_session_counters(d, msg);
