@@ -116,7 +116,7 @@ static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 	rc = bbdd_poll_set_fd(pctx, bfdd->fd, events,
 			      bbdd_bfdd_event, bfdd, &error);
 	if (rc < 0) {
-		bbdd_util_printerr(rc, &error, "Failed to reset BFD poll FD");
+		bbdd_util_printerr(&error, "Failed to reset BFD poll FD");
 		goto error;
 	}
 

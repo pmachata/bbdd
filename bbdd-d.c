@@ -1660,7 +1660,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 	if (rc != 0) {
 		++d->diag_stats.dp_session_not_found;
 		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(rc, &error, "bfdd: DP_DELETE_SESSION");
+			bbdd_util_printerr(&error, "bfdd: DP_DELETE_SESSION");
 		else
 			free(error);
 	}
@@ -1700,7 +1700,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	if (rc != 0) {
 		++d->diag_stats.dp_internal_error;
 		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(rc, &error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+			bbdd_util_printerr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
 		else
 			free(error);
 		goto reply;
@@ -1712,7 +1712,7 @@ reply:
 	if (rc != 0) {
 		++d->diag_stats.dp_bfdd_buffer_full;
 		if (bbdd_env.verbosity > 0)
-			bbdd_util_printerr(rc, &error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+			bbdd_util_printerr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
 		else
 			free(error);
 	}
@@ -2394,7 +2394,7 @@ static int bbdd_d_do_start(void)
 				     &veth_tx_ifindex,
 				     &error);
 	if (err) {
-		bbdd_util_printerr(err, &error,  "Failed to prepare veth pair");
+		bbdd_util_printerr(&error,  "Failed to prepare veth pair");
 		goto sess_dir_destroy;
 	}
 
@@ -2409,7 +2409,7 @@ static int bbdd_d_do_start(void)
 
 	d.bpf = bbdd_bpf_create(pctx, nl, &bpf_conf, d.sdir, &error);
 	if (d.bpf == NULL) {
-		bbdd_util_printerr(err, &error,  "Failed to initialize BPF");
+		bbdd_util_printerr(&error,  "Failed to initialize BPF");
 		goto fini_veth;
 	}
 
@@ -2420,7 +2420,7 @@ static int bbdd_d_do_start(void)
 	err = bbdd_poll_set_fd(pctx, d.ctl.fd, POLLIN,
 			       bbdd_d_ctl_recv, &d, &error);
 	if (err != 0) {
-		bbdd_util_printerr(err, &error, "Failed to register socket for events");
+		bbdd_util_printerr(&error, "Failed to register socket for events");
 		goto sock_close_d;
 	}
 
@@ -2438,12 +2438,13 @@ static int bbdd_d_do_start(void)
 	err = bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
 			       bbdd_d_sig_cb, &sig_fd, &error);
 	if (err != 0) {
-		bbdd_util_printerr(err, &error, "Failed to register signal fd");
+		bbdd_util_printerr(&error, "Failed to register signal fd");
 		goto sig_fd_close;
 	}
 
 	err = bbdd_poll_loop(pctx, &error);
-	bbdd_util_printerr(err, &error, NULL);
+	if (err != 0)
+		bbdd_util_printerr(&error, NULL);
 
 	if (d.bfdd != NULL)
 		bbdd_bfdd_close(d.bfdd);

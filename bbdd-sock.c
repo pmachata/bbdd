@@ -408,7 +408,8 @@ static int bbdd_ctl_sockaddr(const char *sockdir,
 	int rc;
 
 	rc = bbdd_sock_parse_addr_unix(sockdir, "bbdd.ctl", ctl_bsa, &error);
-	bbdd_util_printerr(rc, &error, "CTL");
+	if (rc != 0)
+		bbdd_util_printerr(&error, "CTL");
 	return rc;
 }
 
@@ -424,7 +425,8 @@ static int bbdd_cli_sockaddr(const char *sockdir,
 		return rc;
 
 	rc = bbdd_sock_parse_addr_unix(sockdir, sockname, cli_bsa, &error);
-	bbdd_util_printerr(rc, &error, "CLI");
+	if (rc != 0)
+		bbdd_util_printerr(&error, "CLI");
 	free(sockname);
 	return rc;
 }

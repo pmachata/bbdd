@@ -705,7 +705,7 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 
 	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
 	if (err != 0)
-		bbdd_util_printerr(err, &error, "discr_resolve: session %u: Failed to update session",
+		bbdd_util_printerr(&error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
 }
 
@@ -835,7 +835,7 @@ poll_respond:
 						  BBDD_BFD_PKT_BIT_FINAL,
 						  &error);
 		if (err != 0)
-			bbdd_util_printerr(err, &error, "Failed to respond to a poll packet");
+			bbdd_util_printerr(&error, "Failed to respond to a poll packet");
 	}
 }
 
@@ -880,7 +880,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 				      elem->skb_len, elem->ttl);
 
 error:
-	bbdd_util_printerr(err, &error, "`your_discr' of 0");
+	bbdd_util_printerr(&error, "`your_discr' of 0");
 }
 
 static void

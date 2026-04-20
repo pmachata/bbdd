@@ -48,13 +48,10 @@ int bbdd_util_wraperr(char **strp, const char *fmt, ...)
 	return rc;
 }
 
-__attribute__((format(printf, 3, 4)))
-void bbdd_util_printerr(int rc, char **error, const char *fmt, ...)
+__attribute__((format(printf, 2, 3)))
+void bbdd_util_printerr(char **error, const char *fmt, ...)
 {
 	va_list ap;
-
-	if (!rc)
-		return;
 
 	if (fmt) {
 		va_start(ap, fmt);

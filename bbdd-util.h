@@ -20,5 +20,5 @@ int bbdd_util_wraperr(char **strp, const char *fmt, ...);
 
 /* If rc != 0, *error shall be a valid error string, which is printed out
  * and freed. A nop when rc == 0. */
-__attribute__((format(printf, 3, 4)))
-void bbdd_util_printerr(int rc, char **error, const char *fmt, ...);
+__attribute__((format(printf, 2, 3)))
+void bbdd_util_printerr(char **error, const char *fmt, ...);

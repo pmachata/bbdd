@@ -1110,7 +1110,8 @@ static int bbdd_c_parse_u8(const char *str, void *ret, const char *what)
 	int rc;
 
 	rc = bbdd_sock_parse_u8(str, u8_ret, what, &error);
-	bbdd_util_printerr(rc, &error, NULL);
+	if (rc != 0)
+		bbdd_util_printerr(&error, NULL);
 	return rc;
 }
 
@@ -1121,7 +1122,8 @@ static int bbdd_c_parse_u32(const char *str, void *ret, const char *what)
 	int rc;
 
 	rc = bbdd_sock_parse_u32(str, u32_ret, what, &error);
-	bbdd_util_printerr(rc, &error, NULL);
+	if (rc != 0)
+		bbdd_util_printerr(&error, NULL);
 	return rc;
 }
 
@@ -1668,7 +1670,7 @@ static int bbdd_c_bfdd_connect(int argc, char **argv)
 	copy = strdup(arg);
 	rc = bbdd_sock_split_addr_proto(copy, &proto, &addr, &port, &error);
 	if (rc < 0) {
-		bbdd_util_printerr(rc, &error, "bfdd connect");
+		bbdd_util_printerr(&error, "bfdd connect");
 		goto out;
 	}
 
