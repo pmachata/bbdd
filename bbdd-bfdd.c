@@ -122,10 +122,12 @@ static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 	return 0;
 
 error:
-	/* The callback could call bbdd_bfdd_close(). But doesn't have to, so
-	 * unset the poll FD now. */
+	/* The sockerr callback below could call bbdd_bfdd_close(). But doesn't
+	 * have to, so unset the poll FD now. */
 	bbdd_bfdd_poll_unset(bfdd);
-	bfdd->cbs.sockerr_cb(bfdd, &error, bfdd->cbs.sock_cb_data);
+
+	bfdd->cbs.sockerr_cb(bfdd, error, bfdd->cbs.sock_cb_data);
+	free(error);
 
 	return 0;
 }

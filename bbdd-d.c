@@ -1678,6 +1678,10 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 	struct bbdd_d *d = data;
 	enum bfddp_message_type bmt;
 
+	/* This is called from bbdd-bfdd for individual error messages. When we
+	 * return error, the sockerr callback is called and causes the socket to
+	 * close, but does not shut the daemon down. */
+
 	bmt = ntohs(msg->header.type);
 	switch (bmt) {
 	case ECHO_REQUEST:
@@ -1714,13 +1718,14 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 	return 0;
 }
 
-static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, char **error,
+static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
 				   void *data)
 {
 	struct bbdd_d *d = data;
 
 	// xxx monitor event, when we have a monitor bus
-	bbdd_util_printerr(-1, error, "BFD socket closed");
+	fprintf(stderr, "BFD socket closed%c%s\n",
+		error ? ':' : '.', error ?: "");
 
 	assert(d->bfdd == bfdd);
 	bbdd_bfdd_close(d->bfdd);

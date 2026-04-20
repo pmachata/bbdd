@@ -19,7 +19,7 @@ struct bbdd_bfdd_cbs {
 	void (*connect_free_cb)(void *);
 
 	void *sock_cb_data;
-	void (*sockerr_cb)(struct bbdd_bfdd *, char **, void *);
+	void (*sockerr_cb)(struct bbdd_bfdd *, const char *, void *);
 	int (*message_cb)(struct bbdd_bfdd *, struct bfddp_message *,
 			  void *, char **);
 	void (*sock_free_cb)(void *);
