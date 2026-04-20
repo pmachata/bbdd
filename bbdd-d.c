@@ -36,6 +36,56 @@
 #include "bbdd-util.h"
 #include "bfddp_packet.h"
 
+enum {
+	bbdd_d_bits_per_long = 8 * sizeof(long),
+
+	bbdd_d_sport_lo = 49152,
+	bbdd_d_sport_hi = 65535,
+	bbdd_d_sport_cap = bbdd_d_sport_hi - bbdd_d_sport_lo + 1,
+	bbdd_d_sport_nwords = bbdd_d_sport_cap / bbdd_d_bits_per_long,
+};
+
+struct bbdd_d_sport_alloc {
+	/* Has 1-bits where ports are taken, 0-bits where they are free. */
+	long occ[bbdd_d_sport_nwords];
+};
+
+static int bbdd_d_sport_get(struct bbdd_d_sport_alloc *alloc, uint16_t *port)
+{
+	for (int i = 0; i < bbdd_d_sport_nwords; i++) {
+		int f = ffsl(~alloc->occ[i]);
+		if (f) {
+			f--;
+			alloc->occ[i] |= 1L << f;
+			*port = (uint16_t)(bbdd_d_sport_lo +
+					   i * bbdd_d_bits_per_long + f);
+			return 0;
+		}
+	}
+	errno = -ENOBUFS;
+	return -1;
+}
+
+static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
+{
+	uint16_t d;
+	int i, f;
+
+	assert(port >= bbdd_d_sport_lo);
+	d = port - bbdd_d_sport_lo;
+	i = d / bbdd_d_bits_per_long;
+	f = d % bbdd_d_bits_per_long;
+	alloc->occ[i] &= ~(1L << f);
+}
+
+struct bbdd_context {
+	struct bbdd_bfdd *bfdd;
+	struct bbdd_bpf *bpf;
+	struct bbdd_sess_dir *sdir;
+	struct bbdd_d_sport_alloc spa;
+	struct bbdd_sock ctl;
+};
+
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
 	if (obj != NULL) {
@@ -1060,48 +1110,6 @@ oom:
 	return -1;
 }
 
-enum {
-	bbdd_d_bits_per_long = 8 * sizeof(long),
-
-	bbdd_d_sport_lo = 49152,
-	bbdd_d_sport_hi = 65535,
-	bbdd_d_sport_cap = bbdd_d_sport_hi - bbdd_d_sport_lo + 1,
-	bbdd_d_sport_nwords = bbdd_d_sport_cap / bbdd_d_bits_per_long,
-};
-
-struct bbdd_d_sport_alloc {
-	/* Has ones where ports are taken. */
-	long occ[bbdd_d_sport_nwords];
-};
-
-static int bbdd_d_sport_get(struct bbdd_d_sport_alloc *alloc, uint16_t *port)
-{
-	for (int i = 0; i < bbdd_d_sport_nwords; i++) {
-		int f = ffsl(~alloc->occ[i]);
-		if (f) {
-			f--;
-			alloc->occ[i] |= 1L << f;
-			*port = (uint16_t)(bbdd_d_sport_lo +
-					   i * bbdd_d_bits_per_long + f);
-			return 0;
-		}
-	}
-	errno = -ENOBUFS;
-	return -1;
-}
-
-static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
-{
-	uint16_t d;
-	int i, f;
-
-	assert(port >= bbdd_d_sport_lo);
-	d = port - bbdd_d_sport_lo;
-	i = d / bbdd_d_bits_per_long;
-	f = d % bbdd_d_bits_per_long;
-	alloc->occ[i] &= ~(1L << f);
-}
-
 static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 			      struct bbdd_sess_dir *sdir,
 			      struct bbdd_bpf *bpf,
@@ -2048,14 +2056,6 @@ put_req_obj:
 free_req:
 	free(request);
 }
-
-struct bbdd_context {
-	struct bbdd_bfdd *bfdd;
-	struct bbdd_bpf *bpf;
-	struct bbdd_sess_dir *sdir;
-	struct bbdd_d_sport_alloc spa;
-	struct bbdd_sock ctl;
-};
 
 static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 			   char **)
