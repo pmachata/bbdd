@@ -108,7 +108,8 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 	FIELD(dp_invalid_message)		\
 	FIELD(dp_malformed_message)		\
 	FIELD(dp_internal_error)		\
-	FIELD(dp_counters_req_no_session)	\
+	FIELD(dp_session_not_found)		\
+	FIELD(dp_bfdd_buffer_full)		\
 	/**/
 
 #define STAT_FIELD(NAME) __u64 NAME;

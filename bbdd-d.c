@@ -1648,14 +1648,14 @@ interr:
 	return -1;
 }
 
-static int
+static void
 bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
-				    const struct bfddp_message *msg,
-				    char **error)
+				    const struct bfddp_message *msg)
 {
 	uint32_t discr = ntohl(msg->data.counters_req.lid);
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_d_session *dsess;
+	char *error;
 	int rc;
 
 	/* We don't necessarily want to detach from the socket on errors in
@@ -1670,19 +1670,34 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		++d->diag_stats.dp_counters_req_no_session;
+		++d->diag_stats.dp_session_not_found;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr,
+				"bfdd: DP_REQUEST_SESSION_COUNTERS: no session for discr %u\n",
+				discr);
 		goto reply;
 	}
 
-	rc = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, NULL);
+	rc = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, &error);
 	if (rc != 0) {
 		++d->diag_stats.dp_internal_error;
+		if (bbdd_env.verbosity > 0)
+			bbdd_util_printerr(rc, &error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+		else
+			free(error);
 		goto reply;
 	}
 
 reply:
-	return bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
-					error);
+	rc = bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
+				      &error);
+	if (rc != 0) {
+		++d->diag_stats.dp_bfdd_buffer_full;
+		if (bbdd_env.verbosity > 0)
+			bbdd_util_printerr(rc, &error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+		else
+			free(error);
+	}
 }
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
@@ -1715,7 +1730,8 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_REQUEST_SESSION_COUNTERS:
-		return bbdd_d_bfdd_handle_session_counters(d, msg, error);
+		bbdd_d_bfdd_handle_session_counters(d, msg);
+		return 0;
 
 	case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
 	case BFD_STATE_CHANGE:
