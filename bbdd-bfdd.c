@@ -237,7 +237,9 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 {
 	bbdd_bfdd_poll_unset(bfdd);
 	bfddp_free(bfdd->bctx);
-	bfdd->cbs.connect_free_cb(bfdd->cbs.conn_cb_data);
-	bfdd->cbs.sock_free_cb(bfdd->cbs.sock_cb_data);
+	if (bfdd->cbs.connect_free_cb != NULL)
+		bfdd->cbs.connect_free_cb(bfdd->cbs.conn_cb_data);
+	if (bfdd->cbs.sock_free_cb != NULL)
+		bfdd->cbs.sock_free_cb(bfdd->cbs.sock_cb_data);
 	free(bfdd);
 }
