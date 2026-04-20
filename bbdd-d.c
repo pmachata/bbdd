@@ -1566,6 +1566,8 @@ static int bbdd_d_bfddp_session_to_c(const struct bfddp_session *bsess,
 {
 	uint32_t flags = ntohl(bsess->flags);
 	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
+	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
+	unsigned char zeroes[16] = {};
 
 	memset(csess, 0, sizeof(*csess));
 
@@ -1581,10 +1583,14 @@ static int bbdd_d_bfddp_session_to_c(const struct bfddp_session *bsess,
 	SET_FLAG(shutdown, SESSION_SHUTDOWN);
 #undef SET_FLAG
 
-	csess->src_af = af;
-	if (!inet_ntop(af, &bsess->src, csess->src, sizeof(csess->src))) {
-		bbdd_util_fmterr(error, "Failed to convert source address: %m");
-		return -1;
+	/* Source address is not mandatory. */
+	if (memcmp(&bsess->src, zeroes, addr_sz) != 0) {
+		csess->src_af = af;
+		if (!inet_ntop(af, &bsess->src, csess->src,
+			       sizeof(csess->src))) {
+			bbdd_util_fmterr(error, "Failed to convert source address: %m");
+			return -1;
+		}
 	}
 
 	csess->dst_af = af;
