@@ -8,6 +8,7 @@
 
 #include "bbdd.h"
 #include "bbdd-poll.h"
+#include "bbdd-prog-stat.h"
 #include "bbdd-util.h"
 #include "bfddp.h"
 
@@ -233,6 +234,47 @@ free_bfddp:
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd)
 {
 	return bfddp_is_connected(bfdd->bctx) == 0;
+}
+
+void bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
+			     const struct bfddp_message *msg)
+{
+	bfddp_write_enqueue(bfdd->bctx, msg);
+}
+
+int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
+			     uint16_t msg_id, uint32_t discr,
+			     const struct bbdd_prog_session_data_stats *stats,
+			     char **error)
+{
+	struct bfddp_message msg;
+	size_t written;
+
+	msg = (struct bfddp_message) {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(BFD_SESSION_COUNTERS),
+		.header.id = msg_id,
+		.header.length = htons(sizeof(msg.header) +
+				       sizeof(msg.data.session_counters)),
+
+		.data.session_counters = {
+			.lid = htonl(discr),
+			.control_input_bytes = htobe64(stats->rx_bytes),
+			.control_input_packets = htobe64(stats->rx_packets),
+			.control_output_bytes = htobe64(stats->tx_bytes),
+			.control_output_packets = htobe64(stats->tx_packets),
+			/* echo counters are zero */
+		},
+	};
+
+	/* returns 0 on full buffer or the number of bytes buffered. */
+	written = bfddp_write_enqueue(bfdd->bctx, &msg);
+	if (written == 0) {
+		bbdd_util_fmterr(error, "bfdd: Buffer full");
+		return -1;
+	}
+
+	return 0;
 }
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)

@@ -13,6 +13,10 @@
 
 struct bbdd_bpf_global_config;
 
+/* bbdd-prog-stat.h */
+
+struct bbdd_prog_session_data_stats;
+
 /* bbdd-bpf.c */
 
 struct bbdd_bpf;
@@ -35,6 +39,10 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 						uint32_t discr,
 						char **error);
+
+int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
+				struct bbdd_prog_session_data_stats *out,
+				char **error);
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 			 const struct bbdd_d_session *dsess,

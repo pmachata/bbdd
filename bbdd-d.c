@@ -1652,6 +1652,43 @@ interr:
 	return -1;
 }
 
+static int
+bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
+				    const struct bfddp_message *msg,
+				    char **error)
+{
+	uint32_t discr = ntohl(msg->data.counters_req.lid);
+	struct bbdd_prog_session_data_stats stats;
+	struct bbdd_d_session *dsess;
+	int rc;
+
+	/* We don't necessarily want to detach from the socket on errors in
+	 * these queries. Instead, form o nonsense response, but do respond, so
+	 * that the sender doesn't stay hanging. */
+	stats = (struct bbdd_prog_session_data_stats) {
+		.rx_bytes = UINT64_MAX / 2,
+		.rx_packets = UINT64_MAX / 2,
+		.tx_bytes = UINT64_MAX / 2,
+		.tx_packets = UINT64_MAX / 2,
+	};
+
+	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
+	if (dsess == NULL) {
+		++d->diag_stats.dp_counters_req_no_session;
+		goto reply;
+	}
+
+	rc = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, NULL);
+	if (rc != 0) {
+		++d->diag_stats.dp_internal_error;
+		goto reply;
+	}
+
+reply:
+	return bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
+					error);
+}
+
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 				  struct bfddp_message *msg,
 				  void *data, char **error)
@@ -1682,8 +1719,7 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_REQUEST_SESSION_COUNTERS:
-		fprintf(stderr, "request_session_counters\n");
-		break;
+		return bbdd_d_bfdd_handle_session_counters(d, msg, error);
 
 	case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
 	case BFD_STATE_CHANGE:

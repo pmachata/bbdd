@@ -2,9 +2,13 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* bfddp.h */
 struct bbdd_c_session;
+
+/* bbdd-prog-stat.h */
+struct bbdd_prog_session_data_stats;
 
 /* bbdd-poll.c */
 struct bbdd_poll_ctx;
@@ -13,6 +17,7 @@ struct bbdd_poll_ctx;
 struct bbdd_bfdd;
 
 /* bfddp_packet.h */
+struct bfddp_message;
 struct bfddp_session;
 
 struct bbdd_bfdd_cbs {
@@ -33,6 +38,10 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error);
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
+int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
+			     uint16_t msg_id, uint32_t discr,
+			     const struct bbdd_prog_session_data_stats *stats,
+			     char **error);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
 int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,

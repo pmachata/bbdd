@@ -1344,6 +1344,33 @@ err:
 	return NULL;
 }
 
+int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
+				struct bbdd_prog_session_data_stats *out,
+				char **error)
+{
+	struct bbdd_prog_session_data data;
+	struct bbdd_bpf_session *bsess;
+	int err;
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
+		return -1;
+	}
+
+	err = bbdd_bpf_sess_data_lookup(bpf, discr, &data, error);
+	if (err)
+		return -1;
+
+#define FIELD(NAME)						\
+		out->NAME = data.stats.NAME + bsess->stats.NAME;
+	BBDD_PROG_SESSION_STATS(FIELD)
+#undef FIELD
+
+	return 0;
+}
+
 static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
 				    uint32_t veth_tx_ifindex, char **error)
 {
