@@ -1241,6 +1241,24 @@ err:
 	return NULL;
 }
 
+static int bbdd_bpf_sess_data_lookup(struct bbdd_bpf *bpf,
+				     uint32_t discr,
+				     struct bbdd_prog_session_data *data,
+				     char **error)
+{
+	int err;
+
+	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
+				   &discr, sizeof(discr),
+				   data, sizeof(*data), 0);
+	if (err != 0)
+		bbdd_util_fmterr(error,
+				 "Failed to look up BPF session data for discr %u: %s",
+				 discr, strerror(-err));
+
+	return err;
+}
+
 struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 						     uint32_t discr,
 						     char **error)
@@ -1257,15 +1275,9 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &discr, sizeof(discr),
-				   &data, sizeof(data), 0);
-	if (err) {
-		bbdd_util_fmterr(error,
-				 "Failed to look up BPF session data for discr %u: %s",
-				 discr, strerror(-err));
+	err = bbdd_bpf_sess_data_lookup(bpf, discr, &data, error);
+	if (err)
 		return NULL;
-	}
 
 	obj = json_object_new_object();
 	if (!obj) {
@@ -1306,15 +1318,9 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
-	err = bpf_map__lookup_elem(bpf->skel->maps.bbdd_prog_session_data_hash,
-				   &discr, sizeof(discr),
-				   &data, sizeof(data), 0);
-	if (err) {
-		bbdd_util_fmterr(error,
-				 "Failed to look up BPF session data for discr %u: %s",
-				 discr, strerror(-err));
+	err = bbdd_bpf_sess_data_lookup(bpf, discr, &data, error);
+	if (err)
 		return NULL;
-	}
 
 	obj = json_object_new_object();
 	if (!obj) {
