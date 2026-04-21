@@ -707,10 +707,10 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 {
 	struct json_object *obj;
 	bool printed = false;
-	char *error;
+	char *error = NULL;
 	int err;
 
-	obj = bbdd_d_session_json(dsess);
+	obj = bbdd_d_session_json(bpf, dsess, &error);
 	if (obj != NULL) {
 		const char *str;
 
@@ -719,17 +719,19 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 			fprintf(stderr, "state change %s\n", str);
 			printed = true;
 		}
-
-		json_object_put(obj);
 	}
 
+	json_object_put(obj);
+
 	if (!printed)
-		fprintf(stderr, "state change, but formatting error\n");
+		bbdd_util_printerr(&error, "state change: Formatting error");
+	else
+		assert(error == NULL);
 
 	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, false,
 					&error);
 	if (err != 0)
-		bbdd_util_printerr(&error, "discr_resolve: session %u: Failed to update session",
+		bbdd_util_printerr(&error, "session %u state change: Failed to update session",
 				   dsess->local.discr);
 }
 
@@ -1380,6 +1382,24 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 err:
 	json_object_put(obj);
 	return NULL;
+}
+
+int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
+				struct json_object *state_obj, char **error)
+{
+	struct bbdd_bpf_session *bsess;
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL)
+		return 0;
+
+	if (json_object_object_add(state_obj, "poll_pending",
+				   json_object_new_boolean(bsess->poll_pending)) != 0) {
+		bbdd_util_fmterr(error, "%m");
+		return -1;
+	}
+
+	return 0;
 }
 
 int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,

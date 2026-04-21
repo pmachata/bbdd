@@ -824,7 +824,9 @@ put_entry_obj:
 	return NULL;
 }
 
-struct json_object *bbdd_d_session_json(struct bbdd_d_session *dsess)
+struct json_object *bbdd_d_session_json(struct bbdd_bpf *bpf,
+					struct bbdd_d_session *dsess,
+					char **error)
 {
 	struct json_object *entry_obj;
 	struct json_object *sess_obj;
@@ -841,6 +843,11 @@ struct json_object *bbdd_d_session_json(struct bbdd_d_session *dsess)
 	state_obj = bbdd_d_jrpc_session_state_obj(dsess);
 	if (state_obj == NULL)
 		goto put_entry_obj;
+
+	rc = bbdd_bpf_session_state_json(bpf, dsess->local.discr, state_obj,
+					 error);
+	if (rc != 0)
+		goto put_state_obj;
 
 	sess_obj = bbdd_c_jrpc_session_obj(&sess);
 	if (sess_obj == NULL)
@@ -870,6 +877,7 @@ put_entry_obj:
 static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
+					  struct bbdd_bpf *bpf,
 					  uint32_t *discrs,
 					  size_t ndiscrs)
 {
@@ -877,6 +885,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	struct json_object *result_obj;
 	struct json_object *array;
 	struct json_object *entry_obj;
+	char *error = NULL;
 	int rc;
 	bool dumped;
 
@@ -925,7 +934,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 		dumped = true;
 
-		entry_obj = bbdd_d_session_json(dsess);
+		entry_obj = bbdd_d_session_json(bpf, dsess, &error);
 		if (entry_obj == NULL)
 			goto put_array;
 
@@ -960,7 +969,10 @@ put_result_obj:
 	json_object_put(result_obj);
 put_obj:
 	json_object_put(obj);
-	bbdd_d_respond_memerr(peer, id);
+	if (error != NULL)
+		bbdd_d_respond_interr(peer, id, &error);
+	else
+		bbdd_d_respond_memerr(peer, id);
 }
 
 static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
@@ -1586,7 +1598,8 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	if (rc < 0)
 		return;
 
-	return bbdd_d_handle_session_show_do(peer, id, d->sdir, discrs, ndiscrs);
+	return bbdd_d_handle_session_show_do(peer, id, d->sdir, d->bpf,
+					     discrs, ndiscrs);
 }
 
 static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,

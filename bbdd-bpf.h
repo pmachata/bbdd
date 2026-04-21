@@ -40,6 +40,9 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 						uint32_t discr,
 						char **error);
 
+int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
+				struct json_object *state_obj, char **error);
+
 int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
 				struct bbdd_prog_session_data_stats *out,
 				char **error);

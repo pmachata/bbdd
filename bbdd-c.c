@@ -21,6 +21,10 @@
 struct bbdd_c_session_state {
 	struct bbdd_d_session_state_end local;
 	struct bbdd_d_session_data remote;
+
+	/* Optional fields added by bbdd-bpf. */
+	bool poll_pending_seen;
+	bool poll_pending;
 };
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
@@ -522,12 +526,16 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	enum {
 		pol_local,
 		pol_remote,
+		pol_poll_pending,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		[pol_local] = { .key = "local", .type = json_type_object,
 				.required = true},
 		[pol_remote] = { .key = "remote", .type = json_type_object,
 				 .required = true},
+		[pol_poll_pending] = { .key = "poll_pending",
+				       .type = json_type_boolean,
+				       .required = false},
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
@@ -547,6 +555,12 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 						      &state->remote, error);
 	if (rc != 0)
 		return rc;
+
+	if (seen[pol_poll_pending]) {
+		state->poll_pending_seen = true;
+		state->poll_pending =
+			json_object_get_boolean(values[pol_poll_pending]);
+	}
 
 	return 0;
 }
@@ -775,6 +789,10 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	bbdd_c_session_show_state_end(&state->local);
 	printf("remote ");
 	bbdd_c_session_show_data(&state->remote);
+
+	if (state->poll_pending_seen && state->poll_pending)
+		printf("poll-pending ");
+
 	printf("\n");
 }
 
