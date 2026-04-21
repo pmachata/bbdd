@@ -317,7 +317,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					struct bbdd_bpf_session *bsess,
 					uint32_t ifindex,
 					uint32_t tbid,
-					uint32_t flags,
+					uint32_t fib_flags,
 					uint32_t min_interval_us,
 					uint32_t max_interval_us,
 					uint32_t detect_time_us,
@@ -337,7 +337,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 			.tbid = tbid,
 			.mark = bsess->gen_id,
 		},
-		.bpf_fib_lookup_flags = flags,
+		.bpf_fib_lookup_flags = fib_flags,
 		.min_interval_us = min_interval_us,
 		.max_interval_us = max_interval_us,
 		.detect_time_us = detect_time_us,
@@ -390,7 +390,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				     struct bbdd_bpf_session *bsess,
 				     uint32_t ifindex,
 				     uint32_t tbid,
-				     uint32_t flags,
+				     uint32_t fib_flags,
 				     uint32_t min_interval_us,
 				     uint32_t max_interval_us,
 				     uint32_t detect_time_us,
@@ -401,7 +401,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 	int err;
 
 	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, ifindex,
-					   tbid, flags, min_interval_us,
+					   tbid, fib_flags, min_interval_us,
 					   max_interval_us, detect_time_us,
 					   error);
 	if (err)
@@ -469,7 +469,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t detect_time_us;
 	uint32_t interval_us;
 	uint32_t tbid = 0;    // xxx VRF support
-	uint32_t flags = BPF_FIB_LOOKUP_SRC;
+	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
 	bool downish;
 	int rc;
@@ -525,23 +525,26 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return rc;
 
 	if (tbid != 0)
-		flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
+		fib_flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
 
 	if (dsess->ifindex != 0) {
 		fwd_ifindex = dsess->ifindex;
-		flags |= BPF_FIB_LOOKUP_OUTPUT;
+		fib_flags |= BPF_FIB_LOOKUP_OUTPUT;
 	} else {
 		fwd_ifindex = bpf->conf.veth_tx_ifindex;
 	}
 
 	if (add)
 		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
-					       tbid, flags, min_interval_us,
-					       max_interval_us, detect_time_us,
+					       tbid, fib_flags,
+					       min_interval_us,
+					       max_interval_us,
+					       detect_time_us,
 					       error);
 	else
 		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
-						  tbid, flags, min_interval_us,
+						  tbid, fib_flags,
+						  min_interval_us,
 						  max_interval_us,
 						  detect_time_us,
 						  error);
