@@ -69,6 +69,10 @@ struct bbdd_bpf_session {
 	uint32_t gen_id;
 	int sock_fd;
 
+	uint32_t last_detect_time_us; /* Mirror of previously configured struct
+				       * bbdd_prog_session_config.detect_time_us. */
+	bool poll_pending;
+
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
 
@@ -256,7 +260,7 @@ static int
 bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 		      const struct bbdd_bfd_pkt *packet,
 		      struct bbdd_d_session_data *data,
-		      bool *poll)
+		      bool *poll, bool *final)
 {
 	uint8_t bits = bbdd_bpf_pkt_bits(packet);
 	uint32_t remote_discr = ntohl(packet->my_disc);
@@ -308,6 +312,7 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 	data->state.diag = bbdd_bfd_pkt_diag(packet);
 
 	*poll = bits & BBDD_BFD_PKT_BIT_POLL;
+	*final = bits & BBDD_BFD_PKT_BIT_FINAL;
 
 	return 0;
 }
@@ -462,7 +467,7 @@ enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
-				     bool add, char **error)
+				     bool add, bool set_poll, char **error)
 {
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
@@ -471,6 +476,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t tbid = 0;    // xxx VRF support
 	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
+	uint8_t bfd_flags;
 	bool downish;
 	int rc;
 
@@ -507,6 +513,19 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		detect_time_us = UINT32_MAX;
 	else
 		detect_time_us *= dsess->remote.detect_mult;
+
+	/* In theory, we could get several reconfiguration requests before we
+	 * get the final packet. So we set bsess->poll_pending and refer to
+	 * that. The flag is cleared as final packet arrives. Unfortunately
+	 * there's no way to differentiate which version the remote end is
+	 * final'ing, but oh well. */
+	if (set_poll) {
+		bsess->poll_pending = true;
+		bsess->last_detect_time_us = detect_time_us;
+	} else if (bsess->poll_pending) {
+		detect_time_us = bsess->last_detect_time_us;
+		assert(detect_time_us != 0);
+	}
 
 	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9.
 	 * For downish sessions, just take the slow rate verbatim. */
@@ -551,9 +570,10 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
+	bfd_flags = bsess->poll_pending ? BBDD_BFD_PKT_BIT_POLL : 0;
 	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-					 bpf->conf.veth_tx_ifindex, 0,
-					 error);
+					 bpf->conf.veth_tx_ifindex,
+					 bfd_flags, error);
 	if (rc != 0)
 		goto del_session;
 
@@ -706,7 +726,8 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 	if (!printed)
 		fprintf(stderr, "state change, but formatting error\n");
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, false,
+					&error);
 	if (err != 0)
 		bbdd_util_printerr(&error, "discr_resolve: session %u: Failed to update session",
 				   dsess->local.discr);
@@ -725,6 +746,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	struct bbdd_d_session *dsess;
 	char *error;
 	bool poll;
+	bool final;
 	int err;
 
 	/* Errors here are problematic, but not worth killing the daemon
@@ -768,7 +790,8 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	old_local = dsess->local;
 	old_remote = dsess->remote;
 
-	err = bbdd_bpf_parse_packet(bsess, packet, &dsess->remote, &poll);
+	err = bbdd_bpf_parse_packet(bsess, packet, &dsess->remote,
+				    &poll, &final);
 	if (err)
 		return;
 
@@ -839,6 +862,18 @@ poll_respond:
 						  &error);
 		if (err != 0)
 			bbdd_util_printerr(&error, "Failed to respond to a poll packet");
+	}
+
+	if (final && bsess->poll_pending) {
+		bsess->poll_pending = false;
+		bsess->last_detect_time_us = 0;
+
+		err = __bbdd_bpf_session_update(bpf, dsess, bsess,
+						false, false, &error);
+		if (err != 0)
+			bbdd_util_printerr(&error,
+					   "session %u: Failed to apply timers after poll-final",
+					   dsess->local.discr);
 	}
 }
 
@@ -1448,7 +1483,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		.sock_fd = sock_fd,
 	};
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, false, error);
 	if (err != 0)
 		goto close_sock;
 
@@ -1476,7 +1511,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, error);
+	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, true, error);
 }
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
