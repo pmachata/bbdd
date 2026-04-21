@@ -15,6 +15,14 @@
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
+/* For carrying state information decoded from RPC. Most local session-specific
+ * information is carried in bbdd_c_session. This contains the state & diag bits
+ * for local session, and known remote session configuration. */
+struct bbdd_c_session_state {
+	struct bbdd_d_session_state_end local;
+	struct bbdd_d_session_data remote;
+};
+
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
 static bool bbdd_c_validate_id(struct json_object *id_obj, int expect_id)

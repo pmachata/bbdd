@@ -144,14 +144,6 @@ struct bbdd_d_session_data {
 	struct bbdd_d_session_state_end state;
 };
 
-/* For carrying state information decoded from RPC. Most local session-specific
- * information is carried in bbdd_c_session. This contains the state & diag bits
- * for local session, and known remote session configuration. */
-struct bbdd_c_session_state {
-	struct bbdd_d_session_state_end local;
-	struct bbdd_d_session_data remote;
-};
-
 struct bbdd_d_session {
 	/* Local session configuration. */
 	struct bbdd_d_session_flags flags;
