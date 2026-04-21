@@ -1728,12 +1728,11 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 
 	bmt = ntohs(msg->header.type);
 	switch (bmt) {
+	/* We don't generate ECHO_REQUEST's, therefore we don't expect to see
+	 * ECHO_REPLY's. And frr doesn't generate ECHO_REQUEST's either. So
+	 * ignore both. In theory we could use it for liveness probe though. */
 	case ECHO_REQUEST:
-		fprintf(stderr, "echo_request\n");
-		break;
-
 	case ECHO_REPLY:
-		fprintf(stderr, "echo_reply\n");
 		break;
 
 	case DP_ADD_SESSION:
@@ -1748,7 +1747,7 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		bbdd_d_bfdd_handle_session_counters(d, msg);
 		return 0;
 
-	case BFD_SESSION_COUNTERS: /* FALLTHROUGH. */
+	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
 		++d->diag_stats.dp_invalid_message;
 		if (bbdd_env.verbosity > 0)
