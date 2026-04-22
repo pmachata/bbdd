@@ -39,6 +39,18 @@ struct bbdd_prog_session_data {
 	X(AF_INET6, BFD_MULTI_HOP_PORT,  ipv6_mhop)	\
 	/**/
 
+#define BBDD_PROG_SOCK_IX(AF, PORT, NAME) BBDD_PROG_RECV_SOCK_ ## NAME ## _IX,
+enum {
+	BBDD_PROG_RECV_SOCKETS(BBDD_PROG_SOCK_IX)
+};
+#undef BBDD_PROG_SOCK_IX
+
+#define BBDD_PROG_SOCK_P1(...) +1
+enum {
+	bbdd_prog_sock_recv_nsocks = BBDD_PROG_RECV_SOCKETS(BBDD_PROG_SOCK_P1),
+};
+#undef BBDD_PROG_SOCK_P1
+
 struct bbdd_bpf_global_config {
 	__u32 veth_rx_ifindex;
 	__u32 veth_tx_ifindex;

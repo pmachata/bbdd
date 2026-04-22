@@ -14,6 +14,7 @@
 
 #include <arpa/inet.h>
 #include <bpf/libbpf.h>
+#include <fcntl.h>
 #include <json-c/json_object.h>
 #include <linux/if_ether.h>
 #include <netinet/ip.h>
@@ -70,6 +71,7 @@ struct bbdd_bpf {
 	struct bbdd_bpf_rb_context *rb_ctx;
 
 	struct bbdd_bpf_sockets sockets;
+	struct bpf_link *sk_lookup_link;
 
 	struct bbdd_prog_global_diag_stats diag_stats;
 };
@@ -1248,6 +1250,94 @@ static void bbdd_bpf_sockets_detach(struct bbdd_bpf *bpf)
 #undef DETACH
 }
 
+static int bbdd_bpf_sockmap_init(struct bbdd_bpf *bpf, char **error)
+{
+	int err;
+
+#define UPDATE(AF, PORT, NAME) {					\
+		uint32_t fd = bpf->sockets.NAME ## _sk.fd;		\
+		uint32_t ix = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;	\
+		err = bpf_map__update_elem(bpf->skel->maps.bbdd_bpf_sock_map, \
+					   &ix, sizeof(ix),		\
+					   &fd, sizeof(fd),		\
+					   BPF_ANY);			\
+		if (err != 0)						\
+			goto err;					\
+	}
+
+	BBDD_PROG_RECV_SOCKETS(UPDATE)
+	return 0;
+
+err:
+	bbdd_util_fmterr(error, "Failed to insert socket into sockmap: %s",
+			 strerror(-err));
+	return err;
+
+#undef UPDATE
+}
+
+static void bbdd_bpf_sockmap_fini(struct bbdd_bpf *bpf)
+{
+	int err = 0;
+
+#define DELETE(AF, PORT, NAME) {					\
+		uint32_t ix = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;	\
+		err = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_sock_map, \
+					   &ix, sizeof(ix), 0) || err;	\
+	}
+
+	BBDD_PROG_RECV_SOCKETS(DELETE);
+	if (err != 0)
+		fprintf(stderr, "Failed to remove sockets from sockmap: %s",
+			strerror(-err));
+#undef DELETE
+}
+
+static int bbdd_bpf_sk_lookup_attach(struct bbdd_bpf *bpf, char **error)
+{
+	int netns_fd;
+	int err;
+
+	err = bbdd_bpf_sockmap_init(bpf, error);
+	if (err != 0)
+		return err;
+
+	netns_fd = open("/proc/self/ns/net", O_RDONLY | O_CLOEXEC);
+	if (netns_fd < 0) {
+		bbdd_util_fmterr(error, "open(/proc/self/ns/net): %m");
+		err = netns_fd;
+		goto sockmap_fini;
+	}
+
+	bpf->sk_lookup_link = bpf_program__attach_netns(
+			bpf->skel->progs.bbdd_sk_lookup, netns_fd);
+	if (!bpf->sk_lookup_link) {
+		bbdd_util_fmterr(error, "Failed to attach socket lookup program: %m");
+		err = -1;
+		goto close_netns_fd;
+	}
+
+	/* Close this always, we only need it to identify what to attach to. */
+	close(netns_fd);
+	return 0;
+
+close_netns_fd:
+	close(netns_fd);
+sockmap_fini:
+	bbdd_bpf_sockmap_fini(bpf);
+	return err;
+}
+
+static void bbdd_bpf_sk_lookup_detach(struct bbdd_bpf *bpf)
+{
+	int err;
+
+	err = bpf_link__destroy(bpf->sk_lookup_link);
+	if (err != 0)
+		fprintf(stderr, "Failed to detach socket lookup program: %s\n",
+			strerror(-err));
+}
+
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
@@ -1303,8 +1393,14 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 	if (err != 0)
 		goto sockets_close;
 
+	err = bbdd_bpf_sk_lookup_attach(bpf, error);
+	if (err != 0)
+		goto sockets_detach;
+
 	return bpf;
 
+sockets_detach:
+	bbdd_bpf_sockets_detach(bpf);
 sockets_close:
 	bbdd_bpf_sockets_close(&bpf->sockets);
 detach_tx:
@@ -1322,6 +1418,7 @@ free_bpf:
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
+	bbdd_bpf_sk_lookup_detach(bpf);
 	bbdd_bpf_sockets_detach(bpf);
 	bbdd_bpf_sockets_close(&bpf->sockets);
 	bbdd_bpf_detach(bpf->tx);

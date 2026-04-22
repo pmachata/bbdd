@@ -11,6 +11,8 @@
 	FIELD(rx_your_discr_0)			\
 	FIELD(rx_no_unique_session)		\
 	FIELD(ring_buffer_error)		\
+	FIELD(sk_lookup_no_socket)		\
+	FIELD(sk_lookup_assign_error)		\
 	/**/
 
 #define BBDD_PROG_SESSION_DIAG_STATS(FIELD)	\

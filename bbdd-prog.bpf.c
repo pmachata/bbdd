@@ -8,6 +8,9 @@
 #define ETH_P_IPV6	0x86DD          /* IPv6 over bluebook */
 #define ETH_ALEN	6
 
+#define AF_INET		2	/* Internet IP Protocol 	*/
+#define AF_INET6	10	/* IP version 6			*/
+
 #define TC_ACT_OK		0
 #define TC_ACT_SHOT		2
 #define TC_ACT_REDIRECT		7
@@ -40,6 +43,13 @@ struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 256 * 1024);
 } bbdd_bpf_rb SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_SOCKMAP);
+	__uint(max_entries, bbdd_prog_sock_recv_nsocks);
+	__type(key, __u32);
+	__type(value, __u32);
+} bbdd_bpf_sock_map SEC(".maps");
 
 #define BUMP(COUNTER) __sync_fetch_and_add(&COUNTER, 1)
 
@@ -653,6 +663,43 @@ int bbdd_recv(struct __sk_buff *skb)
 	}
 
 	return TC_ACT_SHOT;
+}
+
+SEC("sk_lookup")
+int bbdd_sk_lookup(struct bpf_sk_lookup *ctx)
+{
+	struct bpf_sock *sk;
+	__u32 idx;
+	int rc;
+
+	if (ctx->protocol != IPPROTO_UDP)
+		return SK_PASS;
+
+#define MATCH(AF, PORT, NAME)					\
+	if (ctx->family == (AF) && ctx->local_port == (PORT))	\
+		idx = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;
+
+	BBDD_PROG_RECV_SOCKETS(MATCH)
+	else
+		return SK_PASS;
+
+#undef MATCH
+
+	sk = bpf_map_lookup_elem(&bbdd_bpf_sock_map, &idx);
+	if (!sk) {
+		BUMP(bbdd_prog_global_diag_stats.sk_lookup_no_socket);
+		return SK_PASS;
+	}
+
+	rc = bpf_sk_assign(ctx, sk, 0);
+	if (rc != 0) {
+		BUMP(bbdd_prog_global_diag_stats.sk_lookup_assign_error);
+		bpf_sk_release(sk);
+		return SK_DROP;
+	}
+
+	bpf_sk_release(sk);
+	return SK_PASS;
 }
 
 char _license[] SEC("license") = "GPL";
