@@ -527,7 +527,7 @@ static bool bbdd_recv_parse_ipv6(struct __sk_buff *skb,
 }
 
 static struct bbdd_bfd_pkt *
-bbdd_get_bfd_recv(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
+bbdd_recv_get_bfd(struct __sk_buff *skb, u8 *bfd_buf, size_t bfd_buf_size,
 		  struct bbdd_bfd_rx_pkt_digest *digest)
 {
 	u8 udph_buf[sizeof(struct udphdr)] = {};
@@ -574,7 +574,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	u32 discr;
 	int ret;
 
-	bfd = bbdd_get_bfd_recv(skb, bfd_buf, sizeof bfd_buf, &digest);
+	bfd = bbdd_recv_get_bfd(skb, bfd_buf, sizeof bfd_buf, &digest);
 	if (bfd == NULL) {
 		BUMP(bbdd_prog_global_diag_stats.rx_not_bfd);
 		return TC_ACT_OK;
