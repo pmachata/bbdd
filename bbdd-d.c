@@ -2315,29 +2315,6 @@ fini_veth:
 	return err;
 }
 
-static int
-bbdd_d_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
-		     char **error)
-{
-	struct bbdd_sockaddr addr = {};
-
-	addr.sa.sa_family = af;
-	switch (af) {
-	case AF_INET:
-		addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
-		addr.sin.sin_port = htons(port);
-		addr.len = sizeof(addr.sin);
-		break;
-	case AF_INET6:
-		addr.sin6.sin6_addr = in6addr_any;
-		addr.sin6.sin6_port = htons(port);
-		addr.len = sizeof(addr.sin6);
-		break;
-	}
-
-	return bbdd_sock_open_udp(addr, sock, error);
-}
-
 static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, short, void *data,
 			 char **)
 {
@@ -2366,10 +2343,6 @@ static int bbdd_d_do_start(void)
 	struct bbdd_d d = {};
 	struct bbdd_nl *nl;
 	struct bbdd_poll_ctx *pctx;
-	struct bbdd_sock ipv4_shop_sk;
-	struct bbdd_sock ipv6_shop_sk;
-	struct bbdd_sock ipv4_mhop_sk;
-	struct bbdd_sock ipv6_mhop_sk;
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
@@ -2393,30 +2366,10 @@ static int bbdd_d_do_start(void)
 	if (pctx == NULL)
 		goto nl_destroy;
 
-	err = bbdd_d_sock_open_udp(&ipv4_shop_sk, AF_INET,
-				   BFD_SINGLE_HOP_PORT, &error);
-	if (err != 0)
-		goto poll_fini;
-
-	err = bbdd_d_sock_open_udp(&ipv6_shop_sk, AF_INET6,
-				   BFD_SINGLE_HOP_PORT, &error);
-	if (err != 0)
-		goto ipv4_shop_close;
-
-	err = bbdd_d_sock_open_udp(&ipv4_mhop_sk, AF_INET,
-				   BFD_MULTI_HOP_PORT, &error);
-	if (err != 0)
-		goto ipv6_shop_close;
-
-	err = bbdd_d_sock_open_udp(&ipv6_mhop_sk, AF_INET6,
-				   BFD_MULTI_HOP_PORT, &error);
-	if (err != 0)
-		goto ipv4_mhop_close;
-
 	d.sdir = bbdd_sess_dir_create();
 	if (d.sdir == NULL) {
 		fprintf(stderr, "Failed to create session directory: %m\n");
-		goto ipv6_mhop_close;
+		goto poll_fini;
 	}
 
 	err = bbdd_d_start_init_veth(nl,
@@ -2429,10 +2382,6 @@ static int bbdd_d_do_start(void)
 	}
 
 	bpf_conf = (struct bbdd_bpf_global_config) {
-		.ipv4_shop_fd = ipv4_shop_sk.fd,
-		.ipv6_shop_fd = ipv6_shop_sk.fd,
-		.ipv4_mhop_fd = ipv4_mhop_sk.fd,
-		.ipv6_mhop_fd = ipv6_mhop_sk.fd,
 		.veth_rx_ifindex = veth_rx_ifindex,
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
@@ -2489,14 +2438,6 @@ fini_veth:
 	bbdd_d_start_fini_veth(nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(d.sdir);
-ipv6_mhop_close:
-	bbdd_sock_close_udp(&ipv6_mhop_sk);
-ipv4_mhop_close:
-	bbdd_sock_close_udp(&ipv4_mhop_sk);
-ipv6_shop_close:
-	bbdd_sock_close_udp(&ipv6_shop_sk);
-ipv4_shop_close:
-	bbdd_sock_close_udp(&ipv4_shop_sk);
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:

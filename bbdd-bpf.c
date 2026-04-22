@@ -49,16 +49,27 @@ struct bbdd_bpf_rb_context {
 	char **error;
 };
 
+#define SOCK(AF, PORT, NAME) \
+		struct bbdd_sock NAME##_sk;
+
+struct bbdd_bpf_sockets {
+	BBDD_PROG_RECV_SOCKETS(SOCK)
+};
+
+#undef SOCK
+
 struct bbdd_bpf {
 	/* Some of the conf information is not strictly necessary to keep around
 	 * or duplicated in the attachments, but it's easier to keep it all. */
 	struct bbdd_bpf_global_config conf;
+	struct bbdd_bpf_session *sdir;
 
 	struct bbdd_prog *skel;
 	struct bbdd_bpf_attachment *rx;
 	struct bbdd_bpf_attachment *tx;
 	struct bbdd_bpf_rb_context *rb_ctx;
-	struct bbdd_bpf_session *sdir;
+
+	struct bbdd_bpf_sockets sockets;
 
 	struct bbdd_prog_global_diag_stats diag_stats;
 };
@@ -1056,24 +1067,6 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 	free(rb_ctx);
 }
 
-static int bbdd_bpf_attach_sock(struct bpf_program *prog, int sock_fd,
-				char **error)
-{
-	int prog_fd = bpf_program__fd(prog);
-
-	if (setsockopt(sock_fd, SOL_SOCKET, SO_ATTACH_BPF,
-		       &prog_fd, sizeof(prog_fd)) < 0) {
-		bbdd_util_fmterr(error, "SO_ATTACH_BPF: %m");
-		return -1;
-	}
-	return 0;
-}
-
-static void bbdd_bpf_detach_sock(int sock_fd)
-{
-	setsockopt(sock_fd, SOL_SOCKET, SO_DETACH_BPF, NULL, 0);
-}
-
 static struct bbdd_bpf_attachment *
 bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 		enum bpf_tc_attach_point attach_point,
@@ -1134,6 +1127,127 @@ static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
 	free(attachment);
 }
 
+static int
+bbdd_bpf_sock_open_udp(struct bbdd_sock *sock, uint16_t af, uint16_t port,
+		       char **error)
+{
+	struct bbdd_sockaddr addr = {};
+
+	addr.sa.sa_family = af;
+	switch (af) {
+	case AF_INET:
+		addr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
+		addr.sin.sin_port = htons(port);
+		addr.len = sizeof(addr.sin);
+		break;
+	case AF_INET6:
+		addr.sin6.sin6_addr = in6addr_any;
+		addr.sin6.sin6_port = htons(port);
+		addr.len = sizeof(addr.sin6);
+		break;
+	}
+
+	return bbdd_sock_open_udp(addr, sock, error);
+}
+
+static int bbdd_bpf_sockets_open(struct bbdd_bpf_sockets *sockets, char **error)
+{
+	ssize_t ndone = 0;
+	int err;
+
+#define OPEN(AF, PORT, NAME) {						\
+		err = bbdd_bpf_sock_open_udp(&sockets->NAME ## _sk,	\
+					     (AF), (PORT), error);	\
+		if (err != 0)						\
+			goto cleanup;					\
+		++ndone;						\
+	}
+#define CLOSE(AF, PORT, NAME) {						\
+		if (ndone-- > 0)					\
+			bbdd_sock_close_udp(&sockets->NAME ## _sk);	\
+	}
+
+	BBDD_PROG_RECV_SOCKETS(OPEN);
+	return 0;
+
+cleanup:
+	BBDD_PROG_RECV_SOCKETS(CLOSE);
+	return err;
+
+#undef CLOSE
+#undef OPEN
+}
+
+static void bbdd_bpf_sockets_close(struct bbdd_bpf_sockets *sockets)
+{
+#define CLOSE(AF, PORT, NAME) bbdd_sock_close_udp(&sockets->NAME ## _sk);
+
+	BBDD_PROG_RECV_SOCKETS(CLOSE);
+
+#undef CLOSE
+}
+
+static int bbdd_bpf_sockets_attach_one(int sock_fd, int prog_fd)
+{
+	return setsockopt(sock_fd, SOL_SOCKET, SO_ATTACH_BPF,
+			  &prog_fd, sizeof(prog_fd));
+}
+
+static int bbdd_bpf_sockets_detach_one(int sock_fd)
+{
+	return setsockopt(sock_fd, SOL_SOCKET, SO_DETACH_BPF, NULL, 0);
+}
+
+static int bbdd_bpf_sockets_attach(struct bbdd_bpf *bpf, char **error)
+{
+	int prog_fd = bpf_program__fd(bpf->skel->progs.bbdd_recv);
+	ssize_t ndone = 0;
+	int err;
+
+#define ATTACH(AF, PORT, NAME) {					\
+		int sock_fd = bpf->sockets.NAME ## _sk.fd;		\
+		err = bbdd_bpf_sockets_attach_one(sock_fd, prog_fd);	\
+		if (err != 0)						\
+			goto cleanup;					\
+		++ndone;						\
+	}
+#define DETACH(AF, PORT, NAME) {					\
+		if (ndone-- > 0) {					\
+			int sock_fd = bpf->sockets.NAME ## _sk.fd;	\
+			bbdd_bpf_sockets_detach_one(sock_fd);		\
+		}							\
+	}
+
+	BBDD_PROG_RECV_SOCKETS(ATTACH);
+	return 0;
+
+cleanup:
+	bbdd_util_fmterr(error, "Failed to attach socket program: %s",
+			 strerror(-err));
+	BBDD_PROG_RECV_SOCKETS(DETACH);
+	return err;
+
+#undef DETACH
+#undef ATTACH
+}
+
+static void bbdd_bpf_sockets_detach(struct bbdd_bpf *bpf)
+{
+	int err = 0;
+
+#define DETACH(AF, PORT, NAME) {					\
+		int sock_fd = bpf->sockets.NAME ## _sk.fd;		\
+		err = bbdd_bpf_sockets_detach_one(sock_fd) || err;	\
+	}
+
+	BBDD_PROG_RECV_SOCKETS(DETACH);
+	if (err != 0)
+		fprintf(stderr, "Failed to detach socket program: %s\n",
+			strerror(-err));
+
+#undef DETACH
+}
+
 struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
@@ -1181,34 +1295,18 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 	if (bpf->tx == NULL)
 		goto detach_rx;
 
-	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv4_shop_fd, error);
+	err = bbdd_bpf_sockets_open(&bpf->sockets, error);
 	if (err != 0)
 		goto detach_tx;
 
-	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv6_shop_fd, error);
+	err = bbdd_bpf_sockets_attach(bpf, error);
 	if (err != 0)
-		goto detach_ipv4_shop;
-
-	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv4_mhop_fd, error);
-	if (err != 0)
-		goto detach_ipv6_shop;
-
-	err = bbdd_bpf_attach_sock(bpf->skel->progs.bbdd_recv,
-				   conf->ipv6_mhop_fd, error);
-	if (err != 0)
-		goto detach_ipv4_mhop;
+		goto sockets_close;
 
 	return bpf;
 
-detach_ipv4_mhop:
-	bbdd_bpf_detach_sock(conf->ipv4_mhop_fd);
-detach_ipv6_shop:
-	bbdd_bpf_detach_sock(conf->ipv6_shop_fd);
-detach_ipv4_shop:
-	bbdd_bpf_detach_sock(conf->ipv4_shop_fd);
+sockets_close:
+	bbdd_bpf_sockets_close(&bpf->sockets);
 detach_tx:
 	bbdd_bpf_detach(bpf->tx);
 detach_rx:
@@ -1224,10 +1322,8 @@ free_bpf:
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
-	bbdd_bpf_detach_sock(bpf->conf.ipv6_mhop_fd);
-	bbdd_bpf_detach_sock(bpf->conf.ipv4_mhop_fd);
-	bbdd_bpf_detach_sock(bpf->conf.ipv6_shop_fd);
-	bbdd_bpf_detach_sock(bpf->conf.ipv4_shop_fd);
+	bbdd_bpf_sockets_detach(bpf);
+	bbdd_bpf_sockets_close(&bpf->sockets);
 	bbdd_bpf_detach(bpf->tx);
 	bbdd_bpf_detach(bpf->rx);
 	bbdd_bpf_rb_fini(bpf->rb_ctx);

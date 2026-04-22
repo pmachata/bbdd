@@ -32,13 +32,16 @@ struct bbdd_prog_session_data {
 #define BFD_SINGLE_HOP_PORT	3784
 #define BFD_MULTI_HOP_PORT	4784
 
+#define BBDD_PROG_RECV_SOCKETS(X)			\
+	X(AF_INET,  BFD_SINGLE_HOP_PORT, ipv4_shop)	\
+	X(AF_INET6, BFD_SINGLE_HOP_PORT, ipv6_shop)	\
+	X(AF_INET,  BFD_MULTI_HOP_PORT,  ipv4_mhop)	\
+	X(AF_INET6, BFD_MULTI_HOP_PORT,  ipv6_mhop)	\
+	/**/
+
 struct bbdd_bpf_global_config {
 	__u32 veth_rx_ifindex;
 	__u32 veth_tx_ifindex;
-	int ipv4_shop_fd;
-	int ipv6_shop_fd;
-	int ipv4_mhop_fd;
-	int ipv6_mhop_fd;
 };
 
 enum bbdd_bpf_rb_elem_type {
