@@ -469,6 +469,32 @@ fail:
 	return -1;
 }
 
+static int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
+						struct bbdd_c_session *sess,
+						const char *what,
+						char **error)
+{
+	int rc;
+
+	if (obj == NULL) {
+		bbdd_util_fmterr(error, "RPC method doesn't allow session %s",
+				 what);
+		return -1;
+	}
+
+	rc = bbdd_d_jrpc_dissect_session_one(obj, sess, error);
+	if (rc != 0)
+		return rc;
+
+	if (sess->ifindex_seen || sess->ifname_seen) {
+		rc = bbdd_d_session_validate_interface(sess, error);
+		if (rc != 0)
+			return rc;
+	}
+
+	return 0;
+}
+
 static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      struct bbdd_c_session *select,
 					      struct bbdd_c_session *change,
@@ -494,37 +520,32 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	if (seen[pol_select] && select == NULL) {
-		bbdd_util_fmterr(error, "RPC method doesn't allow session select");
-		return -1;
-	}
-	if (seen[pol_change] && change == NULL) {
-		bbdd_util_fmterr(error, "RPC method doesn't allow session change");
-		return -1;
-	}
-	if (seen[pol_bulk] && bulk == NULL) {
-		bbdd_util_fmterr(error, "RPC method doesn't allow bulk operations");
-		return -1;
+	if (seen[pol_select]) {
+		rc = bbdd_d_jrpc_dissect_validate_session(values[pol_select],
+							  select, "select",
+							  error);
+		if (rc != 0)
+			return rc;
 	}
 
-	if (seen[pol_select] &&
-	    (bbdd_d_jrpc_dissect_session_one(values[pol_select], select,
-					     error) != 0 ||
-	     ((select->ifindex_seen || select->ifname_seen) &&
-	      bbdd_d_session_validate_interface(select, error) < 0)))
-		return -1;
+	if (seen[pol_change]) {
+		rc = bbdd_d_jrpc_dissect_validate_session(values[pol_change],
+							  change, "change",
+							  error);
+		if (rc != 0)
+			return rc;
+	}
 
-	if (seen[pol_change] &&
-	    (bbdd_d_jrpc_dissect_session_one(values[pol_change], change,
-					     error) != 0 ||
-	     ((change->ifindex_seen || change->ifname_seen) &&
-	      bbdd_d_session_validate_interface(change, error) < 0)))
-		return -1;
+	if (seen[pol_bulk]) {
+		if (bulk == NULL) {
+			bbdd_util_fmterr(error, "RPC method doesn't allow bulk operations");
+			return -1;
+		}
 
-	if (seen[pol_bulk])
 		*bulk = json_object_get_boolean(values[pol_bulk]);
-	else if (bulk != NULL)
+	} else if (bulk != NULL) {
 		*bulk = false;
+	}
 
 	return 0;
 }
