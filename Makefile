@@ -50,6 +50,9 @@ EXTRA_CLEAN :=					\
 	$(OUTPUT)/bbdd-prog.bpf.o		\
 	$(OUTPUT)/bbdd-prog.skel.h		\
 	#
+EXTRA_DEPS :=					\
+	$(OUTPUT)/bbdd-prog.bpf.o		\
+	#
 
 # Files that need to be in place before dependencies can be parsed.
 DEP_DEPS :=					\
@@ -59,7 +62,7 @@ DEP_DEPS :=					\
 	#
 
 # N.B. sort also makes the list unique.
-ALL_OBJECTS := $(sort $(foreach app,$(APPS),$($(app)-OBJECTS)))
+ALL_OBJECTS := $(sort $(foreach app,$(APPS),$($(app)-OBJECTS)) $(EXTRA_DEPS))
 ALL_DEPS := $(ALL_OBJECTS:%.o=%.dep)
 OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS)))
 
