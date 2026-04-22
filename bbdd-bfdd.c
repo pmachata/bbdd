@@ -297,6 +297,11 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
 	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
 	unsigned char zeroes[16] = {};
 
+	if (flags & SESSION_ECHO) {
+		bbdd_util_fmterr(error, "Echo not supported");
+		return -1;
+	}
+
 	if (flags & SESSION_DEMAND) {
 		bbdd_util_fmterr(error, "Demand mode not supported");
 		return -1;
