@@ -1529,8 +1529,6 @@ int bbdd_c_session(int argc, char **argv)
 
 		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
 					       &sess->flags.multihop)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "demand",
-					       &sess->flags.demand)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
 					       &sess->flags.cbit)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",

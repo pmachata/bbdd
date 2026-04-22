@@ -297,6 +297,11 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
 	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
 	unsigned char zeroes[16] = {};
 
+	if (flags & SESSION_DEMAND) {
+		bbdd_util_fmterr(error, "Demand mode not supported");
+		return -1;
+	}
+
 	memset(csess, 0, sizeof(*csess));
 
 #define SET_FLAG(name, FLAG) do {					\
@@ -304,7 +309,6 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
 		csess->flags.name.value = !!(flags & (FLAG));		\
 	} while (0)
 	SET_FLAG(multihop, SESSION_MULTIHOP);
-	SET_FLAG(demand,   SESSION_DEMAND);
 	SET_FLAG(cbit,     SESSION_CBIT);
 	SET_FLAG(ipv6,     SESSION_IPV6);
 	SET_FLAG(passive,  SESSION_PASSIVE);
