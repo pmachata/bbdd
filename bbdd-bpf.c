@@ -1229,8 +1229,7 @@ static int bbdd_bpf_sockets_attach(struct bbdd_bpf *bpf, char **error)
 	return 0;
 
 cleanup:
-	bbdd_util_fmterr(error, "Failed to attach socket program: %s",
-			 strerror(-err));
+	bbdd_util_fmterr(error, "Failed to attach socket program: %m");
 	BBDD_PROG_RECV_SOCKETS(DETACH);
 	return err;
 
@@ -1249,8 +1248,7 @@ static void bbdd_bpf_sockets_detach(struct bbdd_bpf *bpf)
 
 	BBDD_PROG_RECV_SOCKETS(DETACH);
 	if (err != 0)
-		fprintf(stderr, "Failed to detach socket program: %s\n",
-			strerror(-err));
+		fprintf(stderr, "Failed to detach socket program: %m\n");
 
 #undef DETACH
 }
