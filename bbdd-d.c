@@ -289,54 +289,91 @@ put_result:
 	bbdd_d_respond_memerr(peer, id);
 }
 
-static int bbdd_d_session_validate_interface(struct bbdd_c_session *sess,
-					     char **error)
+static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
+					 char **error)
 {
 	char ifname[IFNAMSIZ] = {};
 	unsigned int ifindex = 0;
 
-	if (!sess->ifindex_seen && !sess->ifname_seen)
+	if (!netif->ifindex_seen && !netif->name_seen)
 		return 0;
 
-	if (sess->ifindex_seen) {
-		if (!if_indextoname(sess->ifindex, ifname)) {
+	if (netif->ifindex_seen) {
+		if (!if_indextoname(netif->ifindex, ifname)) {
 			bbdd_util_fmterr(error,
 					 "No interface with ifindex %u found",
-					 sess->ifindex);
+					 netif->ifindex);
 			return -1;
 		}
 	}
 
-	if (sess->ifname_seen) {
-		ifindex = if_nametoindex(sess->ifname);
+	if (netif->name_seen) {
+		ifindex = if_nametoindex(netif->name);
 		if (ifindex == 0) {
 			bbdd_util_fmterr(error,
 					 "No interface named `%s' found",
-					 sess->ifname);
+					 netif->name);
 			return -1;
 		}
 	}
 
-	if (sess->ifindex_seen && sess->ifname_seen) {
-		if (sess->ifindex != ifindex ||
-		    strcmp(ifname, sess->ifname) != 0) {
+	if (netif->ifindex_seen && netif->name_seen) {
+		if (netif->ifindex != ifindex ||
+		    strcmp(ifname, netif->name) != 0) {
 			bbdd_util_fmterr(error,
 					 "No interface with ifindex `%u' and name `%s' found",
-					 sess->ifindex, sess->ifname);
+					 netif->ifindex, netif->name);
 			return -1;
 		}
 	}
 
-	if (!sess->ifname_seen) {
+	if (!netif->name_seen) {
 		assert(ifname[0] != 0);
-		sess->ifname_seen = 1;
-		strcpy(sess->ifname, ifname);
+		netif->name_seen = 1;
+		strcpy(netif->name, ifname);
 	}
 
-	if (!sess->ifindex_seen) {
+	if (!netif->ifindex_seen) {
 		assert(ifindex != 0);
-		sess->ifindex_seen = 1;
-		sess->ifindex = ifindex;
+		netif->ifindex_seen = 1;
+		netif->ifindex = ifindex;
+	}
+
+	return 0;
+}
+
+static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
+				       struct bbdd_nl *nl,
+				       char **error)
+{
+	uint32_t table;
+	int err;
+
+	/* Validate and backfill VRF ifindex / ifname as necessary, even if as
+	 * of this writing user has no way of setting ifindex directly. */
+	err = bbdd_d_session_validate_netif(&sess_vrf->netif, error);
+	if (err != 0)
+		return err;
+
+	/* We can't backfill VRF name / ifindex given routing table. */
+	if (!sess_vrf->netif.ifindex_seen)
+		return 0;
+
+	/* But we can a) backfill table from VRF, and b) when both are given,
+	 * cross-validate. */
+
+	err = bbdd_nl_get_vrf_table(nl, sess_vrf->netif.ifindex, &table, error);
+	if (err != 0)
+		return err;
+
+	if (!sess_vrf->table_seen) {
+		sess_vrf->table = table;
+		sess_vrf->table_seen = 1;
+	} else if (sess_vrf->table != table) {
+		bbdd_util_fmterr(error, "VRF x table mismatch: VRF `%s' has table %d, but %d given",
+				 sess_vrf->netif.name, table,
+				 sess_vrf->table);
+		return -1;
 	}
 
 	return 0;
@@ -436,41 +473,41 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 	if (seen[pol_ifname]) {
 		if (bbdd_jrpc_strcpy(values[pol_ifname],
-				     sess->ifname, sizeof(sess->ifname), error) < 0)
+				     sess->netif.name, sizeof(sess->netif.name),
+				     error) < 0)
 		    goto fail;
-		sess->ifname_seen = 1;
+		sess->netif.name_seen = 1;
 	}
 
 	if (seen[pol_vrf]) {
-		if (bbdd_jrpc_strcpy(values[pol_vrf],
-				     sess->vrf, sizeof(sess->vrf), error) < 0)
+		if (bbdd_jrpc_strcpy(values[pol_vrf], sess->vrf.netif.name,
+				     sizeof(sess->vrf.netif.name), error) < 0)
 			goto fail;
-		sess->vrf_seen = 1;
+		sess->vrf.netif.name_seen = 1;
 	}
 
-#define __DISSECT(NAME, CB) do {					\
-		if (seen[pol_ ## NAME]) {				\
-			if (CB(values[pol_ ## NAME], &sess->NAME, error) < 0) \
+#define __DISSECT(POLNAME, NAME, CB) do {				\
+		if (seen[pol_ ## POLNAME]) {				\
+			if (CB(values[pol_ ## POLNAME], &sess->NAME,	\
+			       error) < 0)				\
 				goto fail;				\
 			sess->NAME ## _seen = 1;			\
 		}							\
 	} while (0)
 
-#define DISSECT_U32_NON0(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32_non0)
-#define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
-#define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
+#define DISSECT_U32(NAME) __DISSECT(NAME, NAME, bbdd_jrpc_get_uint32)
+#define DISSECT_U8(NAME) __DISSECT(NAME, NAME, bbdd_jrpc_get_uint8)
 
-	DISSECT_U32_NON0(discr);
+	__DISSECT(discr, discr, bbdd_jrpc_get_uint32_non0);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
 	DISSECT_U32(hold_time);
 	DISSECT_U8(ttl);
 	DISSECT_U8(detect_mult);
-	DISSECT_U32_NON0(ifindex);
+	__DISSECT(ifindex, netif.ifindex, bbdd_jrpc_get_uint32_non0);
 
 #undef DISSECT_U8
 #undef DISSECT_U32
-#undef DISSECT_U32_NON0
 #undef __DISSECT
 
 	return 0;
@@ -497,31 +534,16 @@ static int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	if (sess->ifindex_seen || sess->ifname_seen) {
-		rc = bbdd_d_session_validate_interface(sess, error);
+	if (sess->netif.ifindex_seen || sess->netif.name_seen) {
+		rc = bbdd_d_session_validate_netif(&sess->netif, error);
 		if (rc != 0)
 			return rc;
 	}
 
-	/* There should be no UI for these fields. */
-	assert(!sess->vrf_table_seen);
-	assert(!sess->vrf_ifindex_seen);
-
-	if (sess->vrf_seen) {
-		sess->vrf_ifindex = if_nametoindex(sess->vrf);
-		if (sess->vrf_ifindex == 0) {
-			bbdd_util_fmterr(error,
-					 "No VRF interface named `%s' found",
-					 sess->vrf);
-			return -1;
-		}
-		sess->vrf_ifindex_seen = 1;
-
-		int err = bbdd_nl_get_vrf_table(nl, sess->vrf_ifindex,
-						&sess->vrf_table, error);
-		if (err)
-			return err;
-		sess->vrf_table_seen = 1;
+	if (sess->vrf.netif.name_seen) {
+		rc = bbdd_d_session_validate_vrf(&sess->vrf, nl, error);
+		if (rc != 0)
+			return rc;
 	}
 
 	return 0;
@@ -613,6 +635,22 @@ static void bbdd_d_sockaddr_ntop(socklen_t size;
 	snprintf(dst, size, "[af %d?]", sa->sa_family);
 }
 
+static void bbdd_d_session_to_c_vrf(struct bbdd_d_session *dsess,
+				    struct bbdd_c_session_vrf *sess_vrf)
+{
+	if (dsess->vrf_ifindex != 0) {
+		if_indextoname(dsess->vrf_ifindex, sess_vrf->netif.name);
+		sess_vrf->netif.name_seen = 1;
+		sess_vrf->netif.ifindex = dsess->vrf_ifindex;
+		sess_vrf->netif.ifindex_seen = 1;
+	}
+
+	if (dsess->vrf_table != 0) {
+		sess_vrf->table = dsess->vrf_table;
+		sess_vrf->table_seen = 1;
+	}
+}
+
 static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 				struct bbdd_c_session *csess)
 {
@@ -631,18 +669,11 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 				     csess->dst, sizeof(csess->dst));
 
 	if (dsess->ifindex != 0) {
-		if_indextoname(dsess->ifindex, csess->ifname);
-		csess->ifname_seen = 1;
+		if_indextoname(dsess->ifindex, csess->netif.name);
+		csess->netif.name_seen = 1;
 	}
 
-	if (dsess->vrf_ifindex != 0) {
-		if_indextoname(dsess->vrf_ifindex, csess->vrf);
-		csess->vrf_seen = 1;
-		csess->vrf_ifindex = dsess->vrf_ifindex;
-		csess->vrf_ifindex_seen = 1;
-		csess->vrf_table = dsess->vrf_table;
-		csess->vrf_table_seen = 1;
-	}
+	bbdd_d_session_to_c_vrf(dsess, &csess->vrf);
 
 #define ASSIGN(CFIELD, DFIELD) do {		\
 		csess->CFIELD = dsess->DFIELD;	\
@@ -657,7 +688,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	ASSIGN(discr, local.discr);
 	ASSIGN_NON0(hold_time, hold_time);
 	ASSIGN_NON0(ttl, ttl);
-	ASSIGN_NON0(ifindex, ifindex);
+	ASSIGN_NON0(netif.ifindex, ifindex);
 
 	ASSIGN_NON0(min_tx_us, local.min_tx_us);
 	ASSIGN_NON0(min_rx_us, local.min_rx_us);
@@ -1040,10 +1071,41 @@ put_obj:
 
 static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				  const struct bbdd_c_session *csess,
+				  struct bbdd_nl *nl,
 				  char **error)
 {
 	uint16_t sport;
 	int err;
+
+	/* The change request could only include VRF table, and we have no way
+	 * of uniquely determining which VRF was meant by that. Only here at the
+	 * application time do we see both the configured VRF name and the table
+	 * ID. So construct a VRF configuration view from the current dsess,
+	 * with the csess changes applied on top, and check that _that_ is
+	 * consistent. */
+	{
+		struct bbdd_c_session_vrf sess_vrf = {};
+
+		bbdd_d_session_to_c_vrf(dsess, &sess_vrf);
+		if (csess->vrf.netif.name_seen) {
+			memcpy(sess_vrf.netif.name, csess->vrf.netif.name,
+			       sizeof(sess_vrf.netif.name));
+			sess_vrf.netif.name_seen = 1;
+		}
+		if (csess->vrf.netif.ifindex_seen) {
+			sess_vrf.netif.ifindex = csess->vrf.netif.ifindex;
+			sess_vrf.netif.ifindex_seen = 1;
+		}
+		if (csess->vrf.table_seen) {
+			sess_vrf.table = csess->vrf.table;
+			sess_vrf.table_seen = 1;
+		}
+
+		err = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
+		if (err != 0)
+			return err;
+
+	}
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++) {
 		struct bbdd_c_session_flag cflag = csess->flags.flags[i];
@@ -1090,12 +1152,10 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	 * point, both have been validated to match each other, and ifindex has
 	 * been backfilled from ifname if not given. So we only need to care
 	 * about ifindex. */
-	ASSIGN(ifindex, ifindex);
+	ASSIGN(ifindex, netif.ifindex);
 
-	/* If VRF was given, both vrf_ifindex and vrf_table should have been
-	 * backfilled and marked as seen by now. */
-	ASSIGN(vrf_ifindex, vrf_ifindex);
-	ASSIGN(vrf_table, vrf_table);
+	ASSIGN(vrf_ifindex, vrf.netif.ifindex);
+	ASSIGN(vrf_table, vrf.table);
 
 #undef ASSIGN
 
@@ -1182,8 +1242,9 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	FIELD(hold_time, hold_time);
 	FIELD(ttl, ttl);
 	FIELD(local.detect_mult, detect_mult);
-	FIELD(ifindex, ifindex);
-	FIELD(vrf_ifindex, vrf_ifindex);
+	FIELD(ifindex, netif.ifindex);
+	FIELD(vrf_ifindex, vrf.netif.ifindex);
+	FIELD(vrf_table, vrf.table);
 #undef FIELD
 
 	return 1;
@@ -1231,6 +1292,7 @@ oom:
 }
 
 static int bbdd_d_session_add(const struct bbdd_c_session *csess,
+			      struct bbdd_nl *nl,
 			      struct bbdd_sess_dir *sdir,
 			      struct bbdd_bpf *bpf,
 			      struct bbdd_d_sport_alloc *spa,
@@ -1264,7 +1326,7 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
 
-	rc = bbdd_d_session_apply_c(dsess, csess, error);
+	rc = bbdd_d_session_apply_c(dsess, csess, nl, error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
@@ -1303,7 +1365,8 @@ static void bbdd_d_handle_session_add(struct bbdd_d *d,
 		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
 	}
 
-	rc = bbdd_d_session_add(&csess, d->sdir, d->bpf, &d->spa, &error);
+	rc = bbdd_d_session_add(&csess, d->nl, d->sdir, d->bpf, &d->spa,
+				&error);
 	if (rc < 0)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -1409,7 +1472,7 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 			goto free_discrs;
 		}
 
-		rc = bbdd_d_session_apply_c(dsess, &change, &error);
+		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &error);
 		if (rc != 0) {
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_discrs;
@@ -1697,15 +1760,15 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	}
 	discr = csess.discr;
 
-	if (csess.ifindex_seen || csess.ifname_seen) {
-		rc = bbdd_d_session_validate_interface(&csess, &error);
+	if (csess.netif.ifindex_seen || csess.netif.name_seen) {
+		rc = bbdd_d_session_validate_netif(&csess.netif, &error);
 		if (rc != 0)
 			goto invalid;
 	}
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		rc = bbdd_d_session_add(&csess, d->sdir, d->bpf, &d->spa,
+		rc = bbdd_d_session_add(&csess, d->nl, d->sdir, d->bpf, &d->spa,
 					&error);
 		if (rc != 0)
 			goto no_session;
@@ -1713,7 +1776,7 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, &csess, &error);
+	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &error);
 	if (rc != 0)
 		goto interr;
 

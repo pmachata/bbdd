@@ -773,12 +773,26 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		printf("detect-mult %u ", sess->detect_mult);
 		seen = true;
 	}
-	if (sess->ifindex_seen) {
-		printf("ifindex %u ", sess->ifindex);
+
+	/* Prefer ifname to ifindex, but show both in verbose mode. */
+	if (sess->netif.name_seen) {
+		printf("ifname %s ", sess->netif.name);
 		seen = true;
 	}
-	if (sess->ifname_seen) {
-		printf("ifname %s ", sess->ifname);
+	if ((!sess->netif.name_seen || bbdd_env.verbosity > 0) &&
+	    sess->netif.ifindex_seen) {
+		printf("ifindex %u ", sess->netif.ifindex);
+		seen = true;
+	}
+
+	/* Prefer VRF name to table ID, but show both in verbose mode. */
+	if (sess->vrf.netif.name_seen) {
+		printf("vrf %s ", sess->vrf.netif.name);
+		seen = true;
+	}
+	if ((!sess->vrf.netif.name_seen || bbdd_env.verbosity > 0) &&
+	    sess->vrf.table_seen) {
+		printf("table %d ", sess->vrf.table);
 		seen = true;
 	}
 
@@ -1335,12 +1349,12 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	    (sess->detect_mult_seen &&
 	     bbdd_jrpc_append_int(params_obj, "detect_mult",
 				  sess->detect_mult)) ||
-	    (sess->ifindex_seen &&
-	     bbdd_jrpc_append_int(params_obj, "ifindex", sess->ifindex)) ||
-	    (sess->ifname_seen &&
-	     bbdd_jrpc_append_str(params_obj, "ifname", sess->ifname)) ||
-	    (sess->vrf_seen &&
-	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf)))
+	    (sess->netif.ifindex_seen &&
+	     bbdd_jrpc_append_int(params_obj, "ifindex", sess->netif.ifindex)) ||
+	    (sess->netif.name_seen &&
+	     bbdd_jrpc_append_str(params_obj, "ifname", sess->netif.name)) ||
+	    (sess->vrf.netif.name_seen &&
+	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf.netif.name)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -1567,14 +1581,14 @@ int bbdd_c_session(int argc, char **argv)
 					     &sess->detect_mult,
 					     &sess->detect_mult_seen)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "ifindex",
-					      &sess->ifindex,
-					      &sess->ifindex_seen)) ||
+					      &sess->netif.ifindex,
+					      &sess->netif.ifindex_seen)) ||
 		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
-						 sess->ifname,
-						 &sess->ifname_seen)) ||
+						 sess->netif.name,
+						 &sess->netif.name_seen)) ||
 		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "vrf",
-						 sess->vrf,
-						 &sess->vrf_seen)) ||
+						 sess->vrf.netif.name,
+						 &sess->vrf.netif.name_seen)) ||
 
 		    (command == NULL &&
 		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk))) ||

@@ -88,6 +88,16 @@ static inline bool bbdd_c_session_flag_isset(struct bbdd_c_session_flag flag)
 
 const char *bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag);
 
+struct bbdd_c_session_netif {
+	char name[IFNAMSIZ];		int name_seen;
+	uint32_t ifindex;		int ifindex_seen;
+};
+
+struct bbdd_c_session_vrf {
+	struct bbdd_c_session_netif netif;
+	uint32_t table;			int table_seen;
+};
+
 struct bbdd_c_session {
 	struct bbdd_c_session_flags flags;
 	char src[INET6_ADDRSTRLEN];	int src_af;
@@ -98,11 +108,8 @@ struct bbdd_c_session {
 	uint32_t hold_time;		int hold_time_seen;
 	uint8_t ttl;			int ttl_seen;
 	uint8_t detect_mult;		int detect_mult_seen;
-	uint32_t ifindex;		int ifindex_seen;
-	char ifname[IFNAMSIZ];		int ifname_seen;
-	char vrf[IFNAMSIZ];		int vrf_seen;
-	uint32_t vrf_ifindex;		int vrf_ifindex_seen;
-	uint32_t vrf_table;		int vrf_table_seen;
+	struct bbdd_c_session_netif netif;
+	struct bbdd_c_session_vrf vrf;
 };
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
@@ -160,6 +167,8 @@ struct bbdd_d_session {
 	uint8_t ttl;
 	uint32_t ifindex;
 	uint32_t vrf_ifindex;
+
+	/* Non-0; table 0 is invalid, so use it to mean `not configured'. */
 	uint32_t vrf_table;
 
 	struct bbdd_d_session_data local;

@@ -354,16 +354,17 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
 	csess->detect_mult = fsess->detect_mult;
 	csess->detect_mult_seen = 1;
 
-	csess->ifindex = ntohl(fsess->ifindex);
-	csess->ifindex_seen = (csess->ifindex != 0);
+	csess->netif.ifindex = ntohl(fsess->ifindex);
+	csess->netif.ifindex_seen = (csess->netif.ifindex != 0);
 
 	if (fsess->ifname[0] != '\0') {
 		/* If an interface name is too long, it will be truncated, and
 		 * will subsequently fail validation. So we don't care, and this
 		 * contraption silences a GCC warning. */
-		(void) (snprintf(csess->ifname, sizeof(csess->ifname), "%s",
-				 fsess->ifname) != 0);
-		csess->ifname_seen = 1;
+		(void) (snprintf(csess->netif.name,
+				 sizeof(csess->netif.name),
+				 "%s", fsess->ifname) != 0);
+		csess->netif.name_seen = 1;
 	}
 
 	return 0;
