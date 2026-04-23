@@ -1644,14 +1644,14 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	 * just expect the value to be given. */
 	if (!csess.discr_seen) {
 		bbdd_util_fmterr(&error, "missing local discriminator");
-		goto malformed;
+		goto invalid;
 	}
 	discr = csess.discr;
 
 	if (csess.ifindex_seen || csess.ifname_seen) {
 		rc = bbdd_d_session_validate_interface(&csess, &error);
 		if (rc != 0)
-			goto malformed;
+			goto invalid;
 	}
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
@@ -1674,14 +1674,14 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 
 	return;
 
-malformed:
-	++d->diag_stats.dp_malformed_message;
+invalid:
+	++d->diag_stats.dp_invalid_message;
 	goto message;
 interr:
 	++d->diag_stats.dp_internal_error;
 	goto message;
 no_session:
-	++d->diag_stats.dp_session_not_found;
+	++d->diag_stats.dp_no_session;
 	goto message;
 
 message:
@@ -1698,7 +1698,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 
 	rc = bbdd_d_handle_session_del_one(d, discr, &error);
 	if (rc != 0) {
-		++d->diag_stats.dp_session_not_found;
+		++d->diag_stats.dp_no_session;
 		bbdd_util_verberr(&error, "bfdd: DP_DELETE_SESSION");
 	}
 }
@@ -1725,7 +1725,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		++d->diag_stats.dp_session_not_found;
+		++d->diag_stats.dp_no_session;
 		if (bbdd_env.verbosity > 0)
 			fprintf(stderr,
 				"bfdd: DP_REQUEST_SESSION_COUNTERS: no session for discr %u\n",
@@ -1744,7 +1744,7 @@ reply:
 	rc = bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
 				      &error);
 	if (rc != 0) {
-		++d->diag_stats.dp_bfdd_buffer_full;
+		++d->diag_stats.dp_buffer_error;
 		bbdd_util_verberr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
 	}
 }
@@ -1761,13 +1761,6 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 
 	bmt = ntohs(msg->header.type);
 	switch (bmt) {
-	/* We don't generate ECHO_REQUEST's, therefore we don't expect to see
-	 * ECHO_REPLY's. And frr doesn't generate ECHO_REQUEST's either. So
-	 * ignore both. In theory we could use it for liveness probe though. */
-	case ECHO_REQUEST:
-	case ECHO_REPLY:
-		break;
-
 	case DP_ADD_SESSION:
 		return bbdd_d_bfdd_handle_add_session(d, &msg->data.session);
 
@@ -1777,21 +1770,22 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	case DP_REQUEST_SESSION_COUNTERS:
 		return bbdd_d_bfdd_handle_session_counters(d, msg);
 
+	/* We don't generate ECHO_REQUEST's, therefore we don't expect to see
+	 * ECHO_REPLY's. And frr doesn't generate ECHO_REQUEST's either. So
+	 * ignore both. In theory we could use it for liveness probe though. */
+	case ECHO_REQUEST:
+	case ECHO_REPLY:
+	/* These are outgoing messages that BFDD shouldn't be sending to us. */
 	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
-		++d->diag_stats.dp_invalid_message;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: Invalid message type %d\n", bmt);
-		break;
-
+	/* Whatever this is. */
 	default:
-		++d->diag_stats.dp_unknown_message;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: Unhandled message type %d\n",
-				bmt);
 		break;
 	}
 
+	++d->diag_stats.dp_invalid_message_type;
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Invalid message type %d\n", bmt);
 }
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
