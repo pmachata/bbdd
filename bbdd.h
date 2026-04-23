@@ -118,6 +118,7 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(dp_wrong_version_number)		\
+	FIELD(dp_invalid_message_length)	\
 	FIELD(dp_invalid_message_type)		\
 	FIELD(dp_invalid_message)		\
 	FIELD(dp_internal_error)		\

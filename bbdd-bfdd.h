@@ -18,7 +18,7 @@ struct bbdd_bfdd;
 
 /* bfddp_packet.h */
 struct bfddp_message;
-struct bfddp_session;
+struct bfddp_session_cumulus;
 
 struct bbdd_bfdd_cbs {
 	void *conn_cb_data;
@@ -44,6 +44,6 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 			     char **error);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
-int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
+int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *fsess,
 			   struct bbdd_c_session *csess,
 			   char **error);

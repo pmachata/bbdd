@@ -209,6 +209,18 @@ struct bfddp_session {
 	/* TODO: missing authentication. */
 };
 
+/* Cumulus carries a private patch where VRF information is passed in extra
+ * fields. We can use the length field to disambiguate between the two
+ * versions. */
+struct bfddp_session_cumulus {
+	struct bfddp_session session;
+
+	/** VRF table ID **/
+	uint32_t vrf_id;
+	/** VRF NAME **/
+	char vrfname[36];
+};
+
 /** BFD packet state values as defined in RFC 5880, Section 4.1. */
 enum bfd_state_value {
 	/** Session is administratively down. */
@@ -415,6 +427,7 @@ struct bfddp_message {
 	union {
 		struct bfddp_echo echo;
 		struct bfddp_session session;
+		struct bfddp_session_cumulus session_cumulus;
 		struct bfddp_state_change state;
 		struct bfddp_control_packet control;
 		struct bfddp_request_counters counters_req;

@@ -1744,8 +1744,9 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 					     discrs, ndiscrs);
 }
 
-static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
-					   const struct bfddp_session *fsess)
+static void
+bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
+				   const struct bfddp_session_cumulus *fsess)
 {
 	struct bbdd_d_session *dsess;
 	struct bbdd_c_session csess;
@@ -1809,6 +1810,38 @@ message:
 	bbdd_util_verberr(&error, "bfdd: DP_ADD_SESSION");
 }
 
+static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
+					   const struct bfddp_message *msg)
+{
+	uint16_t length = ntohs(msg->header.length);
+	enum {
+		std_len = (sizeof(msg->header) +
+			   sizeof(msg->data.session)),
+		cml_len = (sizeof(msg->header) +
+			   sizeof(msg->data.session_cumulus)),
+	};
+
+	switch (length) {
+		struct bfddp_session_cumulus session_cumulus;
+		const struct bfddp_session_cumulus *ptr;
+
+	case std_len:
+		session_cumulus = (struct bfddp_session_cumulus) {
+			.session = msg->data.session,
+		};
+		return bbdd_d_bfdd_handle_add_session_vrf(d, &session_cumulus);
+
+	case cml_len:
+		ptr = &msg->data.session_cumulus;
+		return bbdd_d_bfdd_handle_add_session_vrf(d, ptr);
+	}
+
+	++d->diag_stats.dp_invalid_message_length;
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: DP_ADD_SESSION: Invalid length: got %u, expected %u or %u\n",
+			length, std_len, cml_len);
+}
+
 static void
 bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 				  const struct bfddp_session *bsess)
@@ -1848,8 +1881,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	if (dsess == NULL) {
 		++d->diag_stats.dp_no_session;
 		if (bbdd_env.verbosity > 0)
-			fprintf(stderr,
-				"bfdd: DP_REQUEST_SESSION_COUNTERS: no session for discr %u\n",
+			fprintf(stderr, "bfdd: DP_REQUEST_SESSION_COUNTERS: no session for discr %u\n",
 				discr);
 		goto reply;
 	}
@@ -1891,7 +1923,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	bmt = ntohs(msg->header.type);
 	switch (bmt) {
 	case DP_ADD_SESSION:
-		return bbdd_d_bfdd_handle_add_session(d, &msg->data.session);
+		return bbdd_d_bfdd_handle_add_session(d, msg);
 
 	case DP_DELETE_SESSION:
 		return bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);

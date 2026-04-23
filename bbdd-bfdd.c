@@ -288,10 +288,11 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 	free(bfdd);
 }
 
-int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
+int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 			   struct bbdd_c_session *csess,
 			   char **error)
 {
+	const struct bfddp_session *fsess = &cmsess->session;
 	uint32_t flags = ntohl(fsess->flags);
 	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
 	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
@@ -365,6 +366,18 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session *fsess,
 				 sizeof(csess->netif.name),
 				 "%s", fsess->ifname) != 0);
 		csess->netif.name_seen = 1;
+	}
+
+	if (cmsess->vrf_id != 0) {
+		csess->vrf.table = ntohl(cmsess->vrf_id);
+		csess->vrf.table_seen = 1;
+	}
+
+	if (cmsess->vrfname[0] != '\0') {
+		(void) (snprintf(csess->vrf.netif.name,
+				 sizeof(csess->vrf.netif.name),
+				 "%s", cmsess->vrfname) != 0);
+		csess->vrf.netif.name_seen = 1;
 	}
 
 	return 0;
