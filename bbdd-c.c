@@ -992,7 +992,7 @@ static void bbdd_c_session_help(void)
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
 		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl |"
-		"	          detect-mult | ifname | ifindex | vrf }\n"
+		"	          detect-mult | ifname | ifindex | vrf | table }\n"
 		"	FLAG ::= { multihop | demand | cbit | ipv6 | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value"
 		"\n"
@@ -1008,6 +1008,7 @@ static void bbdd_c_session_help(void)
 		"	ifname STR	-- interface name\n"
 		"	ifindex U32	-- interface index\n"
 		"	vrf STR		-- VRF interface name\n"
+		"	table U32	-- routing table ID\n"
 		"\n"
 		"where	U8 := 8-bit numerical value (0..255)\n"
 		"	U32 := 32-bit numerical value (0..4Gi)\n"
@@ -1354,7 +1355,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	    (sess->netif.name_seen &&
 	     bbdd_jrpc_append_str(params_obj, "ifname", sess->netif.name)) ||
 	    (sess->vrf.netif.name_seen &&
-	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf.netif.name)))
+	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf.netif.name)) ||
+	    (sess->vrf.table_seen &&
+	     bbdd_jrpc_append_int(params_obj, "vrf_table", sess->vrf.table)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -1589,6 +1592,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "vrf",
 						 sess->vrf.netif.name,
 						 &sess->vrf.netif.name_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "table",
+					      &sess->vrf.table,
+					      &sess->vrf.table_seen)) ||
 
 		    (command == NULL &&
 		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk))) ||

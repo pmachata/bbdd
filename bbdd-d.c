@@ -405,6 +405,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		pol_ifindex,
 		pol_ifname,
 		pol_vrf,
+		pol_vrf_table,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
@@ -422,9 +423,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_detect_mult] = { .key = "detect_mult",
 				      .type = json_type_int },
 
-		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
-		[pol_ifname]  = { .key = "ifname",  .type = json_type_string },
-		[pol_vrf]     = { .key = "vrf",     .type = json_type_string },
+		[pol_ifindex]   = { .key = "ifindex",   .type = json_type_int },
+		[pol_ifname]    = { .key = "ifname",    .type = json_type_string },
+		[pol_vrf]       = { .key = "vrf",       .type = json_type_string },
+		[pol_vrf_table] = { .key = "vrf_table", .type = json_type_int },
 	};
 
 #undef BBDD_D_SESSION_EXPAND_POLICY
@@ -484,6 +486,13 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				     sizeof(sess->vrf.netif.name), error) < 0)
 			goto fail;
 		sess->vrf.netif.name_seen = 1;
+	}
+
+	if (seen[pol_vrf_table]) {
+		if (bbdd_jrpc_get_uint32_non0(values[pol_vrf_table],
+					      &sess->vrf.table, error) < 0)
+			goto fail;
+		sess->vrf.table_seen = 1;
 	}
 
 #define __DISSECT(POLNAME, NAME, CB) do {				\
