@@ -977,7 +977,8 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
-		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl | detect-mult | ifname | ifindex }\n"
+		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl |"
+		"	          detect-mult | ifname | ifindex | vrf }\n"
 		"	FLAG ::= { multihop | demand | cbit | ipv6 | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value"
 		"\n"
@@ -992,6 +993,7 @@ static void bbdd_c_session_help(void)
 		"	detect-mult U8	-- detection multiplier\n"
 		"	ifname STR	-- interface name\n"
 		"	ifindex U32	-- interface index\n"
+		"	vrf STR		-- VRF interface name\n"
 		"\n"
 		"where	U8 := 8-bit numerical value (0..255)\n"
 		"	U32 := 32-bit numerical value (0..4Gi)\n"
@@ -1336,7 +1338,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	    (sess->ifindex_seen &&
 	     bbdd_jrpc_append_int(params_obj, "ifindex", sess->ifindex)) ||
 	    (sess->ifname_seen &&
-	     bbdd_jrpc_append_str(params_obj, "ifname", sess->ifname)))
+	     bbdd_jrpc_append_str(params_obj, "ifname", sess->ifname)) ||
+	    (sess->vrf_seen &&
+	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -1568,6 +1572,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
 						 sess->ifname,
 						 &sess->ifname_seen)) ||
+		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "vrf",
+						 sess->vrf,
+						 &sess->vrf_seen)) ||
 
 		    (command == NULL &&
 		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk))) ||
