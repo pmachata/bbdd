@@ -1755,6 +1755,14 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 {
 	enum bfddp_message_type bmt;
 
+	if (msg->header.version != 1) {
+		++d->diag_stats.dp_wrong_version_number;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr, "bfdd: Wrong message version number %d\n",
+				msg->header.version);
+		return;
+	}
+
 	/* This is called from bbdd-bfdd for individual error messages. When we
 	 * return error, the sockerr callback is called and causes the socket to
 	 * close, but does not shut the daemon down. */
