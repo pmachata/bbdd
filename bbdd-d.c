@@ -81,6 +81,7 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 struct bbdd_d {
 	struct bbdd_bfdd *bfdd;
 	struct bbdd_bpf *bpf;
+	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
 	struct bbdd_sock ctl;
@@ -2348,7 +2349,6 @@ static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, short, void *data,
 static int bbdd_d_do_start(void)
 {
 	struct bbdd_d d = {};
-	struct bbdd_nl *nl;
 	struct bbdd_poll_ctx *pctx;
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
@@ -2363,8 +2363,8 @@ static int bbdd_d_do_start(void)
 	if (bbdd_d_raise_nofile() < 0)
 		goto closelog;
 
-	nl = bbdd_nl_create();
-	if (nl == NULL) {
+	d.nl = bbdd_nl_create();
+	if (d.nl == NULL) {
 		fprintf(stderr, "Failed to open netlink socket: %m\n");
 		goto closelog;
 	}
@@ -2379,7 +2379,7 @@ static int bbdd_d_do_start(void)
 		goto poll_fini;
 	}
 
-	err = bbdd_d_start_init_veth(nl,
+	err = bbdd_d_start_init_veth(d.nl,
 				     &veth_rx_ifindex,
 				     &veth_tx_ifindex,
 				     &error);
@@ -2393,7 +2393,7 @@ static int bbdd_d_do_start(void)
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
 
-	d.bpf = bbdd_bpf_create(pctx, nl, &bpf_conf, d.sdir, &error);
+	d.bpf = bbdd_bpf_create(pctx, d.nl, &bpf_conf, d.sdir, &error);
 	if (d.bpf == NULL) {
 		bbdd_util_printerr(&error,  "Failed to initialize BPF");
 		goto fini_veth;
@@ -2442,13 +2442,13 @@ sock_close_d:
 bpf_destroy:
 	bbdd_bpf_destroy(d.bpf);
 fini_veth:
-	bbdd_d_start_fini_veth(nl);
+	bbdd_d_start_fini_veth(d.nl);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(d.sdir);
 poll_fini:
 	bbdd_poll_fini(pctx);
 nl_destroy:
-	bbdd_nl_destroy(nl);
+	bbdd_nl_destroy(d.nl);
 closelog:
 	closelog();
 	return err;
