@@ -1749,11 +1749,10 @@ reply:
 	}
 }
 
-static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
-				  struct bfddp_message *msg,
-				  void *data, char **)
+static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
+				     struct bbdd_bfdd *bfdd,
+				     struct bfddp_message *msg)
 {
-	struct bbdd_d *d = data;
 	enum bfddp_message_type bmt;
 
 	/* This is called from bbdd-bfdd for individual error messages. When we
@@ -1770,16 +1769,13 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 
 	case DP_ADD_SESSION:
-		bbdd_d_bfdd_handle_add_session(d, &msg->data.session);
-		return 0;
+		return bbdd_d_bfdd_handle_add_session(d, &msg->data.session);
 
 	case DP_DELETE_SESSION:
-		bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);
-		return 0;
+		return bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);
 
 	case DP_REQUEST_SESSION_COUNTERS:
-		bbdd_d_bfdd_handle_session_counters(d, msg);
-		return 0;
+		return bbdd_d_bfdd_handle_session_counters(d, msg);
 
 	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
@@ -1796,6 +1792,15 @@ static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 		break;
 	}
 
+}
+
+static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
+				  struct bfddp_message *msg,
+				  void *data, char **)
+{
+	struct bbdd_d *d = data;
+
+	__bbdd_d_bfdd_message_cb(d, bfdd, msg);
 	return 0;
 }
 
