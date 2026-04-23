@@ -372,6 +372,112 @@ uint32_t bbdd_nl_tc_h_root(void)
 	return TC_H_ROOT;
 }
 
+struct bbdd_nl_vrf_table_cb {
+	struct bbdd_nl_cb base;
+	uint32_t *table;
+	bool found;
+};
+
+static int bbdd_nl_vrf_infodata_attr(const struct nlattr *attr, void *data)
+{
+	struct bbdd_nl_vrf_table_cb *cb = data;
+
+	if (mnl_attr_get_type(attr) == IFLA_VRF_TABLE &&
+	    mnl_attr_validate(attr, MNL_TYPE_U32) >= 0) {
+		*cb->table = mnl_attr_get_u32(attr);
+		cb->found = true;
+	}
+	return MNL_CB_OK;
+}
+
+struct bbdd_nl_vrf_linkinfo_ctx {
+	const char *kind;
+	const struct nlattr *infodata;
+};
+
+static int bbdd_nl_vrf_linkinfo_attr(const struct nlattr *attr, void *data)
+{
+	struct bbdd_nl_vrf_linkinfo_ctx *ctx = data;
+
+	switch (mnl_attr_get_type(attr)) {
+	case IFLA_INFO_KIND:
+		ctx->kind = mnl_attr_get_str(attr);
+		break;
+	case IFLA_INFO_DATA:
+		ctx->infodata = attr;
+		break;
+	}
+	return MNL_CB_OK;
+}
+
+static int bbdd_nl_vrf_link_attr(const struct nlattr *attr, void *data)
+{
+	struct bbdd_nl_vrf_table_cb *cb = data;
+
+	if (mnl_attr_get_type(attr) == IFLA_LINKINFO) {
+		struct bbdd_nl_vrf_linkinfo_ctx ctx = {};
+
+		mnl_attr_parse_nested(attr, bbdd_nl_vrf_linkinfo_attr, &ctx);
+		if (ctx.kind && strcmp(ctx.kind, "vrf") == 0 && ctx.infodata)
+			mnl_attr_parse_nested(ctx.infodata,
+					      bbdd_nl_vrf_infodata_attr, cb);
+	}
+	return MNL_CB_OK;
+}
+
+static int bbdd_nl_vrf_table_cb_fn(const struct nlmsghdr *nlh, void *data)
+{
+	const struct ifinfomsg *ifi = mnl_nlmsg_get_payload(nlh);
+
+	mnl_attr_parse(nlh, sizeof(*ifi), bbdd_nl_vrf_link_attr, data);
+	return MNL_CB_OK;
+}
+
+int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
+			  uint32_t *table, char **error)
+{
+	struct bbdd_nl_vrf_table_cb cb = {
+		.base = { .error = error },
+		.table = table,
+	};
+	struct nlmsghdr *nlh;
+	struct ifinfomsg *ifi;
+	ssize_t rc;
+
+	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
+	nlh->nlmsg_type = RTM_GETLINK;
+	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nlh->nlmsg_seq = (uint32_t) time(NULL);
+
+	ifi = mnl_nlmsg_put_extra_header(nlh, sizeof(*ifi));
+	ifi->ifi_family = AF_UNSPEC;
+	ifi->ifi_index = (int)ifindex;
+
+	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "Failed to send RTM_GETLINK: %m");
+		return -1;
+	}
+
+	*error = NULL;
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq,
+				  bbdd_nl_vrf_table_cb_fn, &cb);
+	if (rc < 0) {
+		bbdd_util_wraperr(error,
+				  "Failed to get link info for ifindex %u: %m, `%s'",
+				  ifindex, *error ?: "");
+		return -1;
+	}
+
+	if (!cb.found) {
+		bbdd_util_fmterr(error,
+				 "Interface %u is not a VRF device", ifindex);
+		return -1;
+	}
+
+	return 0;
+}
+
 int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			  const struct bbdd_sockaddr *addr, char **error)
 {

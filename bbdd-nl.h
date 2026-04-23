@@ -25,5 +25,8 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 
 uint32_t bbdd_nl_tc_h_root(void);
 
+int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
+			  uint32_t *table, char **error);
+
 int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			  const struct bbdd_sockaddr *addr, char **error);
