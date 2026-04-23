@@ -367,6 +367,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		pol_ifindex,
 		pol_ifname,
+		pol_vrf,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
@@ -385,7 +386,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				      .type = json_type_int },
 
 		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
-		[pol_ifname] = { .key = "ifname", .type = json_type_string },
+		[pol_ifname]  = { .key = "ifname",  .type = json_type_string },
+		[pol_vrf]     = { .key = "vrf",     .type = json_type_string },
 	};
 
 #undef BBDD_D_SESSION_EXPAND_POLICY
@@ -439,6 +441,13 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		sess->ifname_seen = 1;
 	}
 
+	if (seen[pol_vrf]) {
+		if (bbdd_jrpc_strcpy(values[pol_vrf],
+				     sess->vrf, sizeof(sess->vrf), error) < 0)
+			goto fail;
+		sess->vrf_seen = 1;
+	}
+
 #define __DISSECT(NAME, CB) do {					\
 		if (seen[pol_ ## NAME]) {				\
 			if (CB(values[pol_ ## NAME], &sess->NAME, error) < 0) \
@@ -473,6 +482,7 @@ fail:
 static int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 						struct bbdd_c_session *sess,
 						const char *what,
+						struct bbdd_nl *nl,
 						char **error)
 {
 	int rc;
@@ -493,6 +503,27 @@ static int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 			return rc;
 	}
 
+	/* There should be no UI for these fields. */
+	assert(!sess->vrf_table_seen);
+	assert(!sess->vrf_ifindex_seen);
+
+	if (sess->vrf_seen) {
+		sess->vrf_ifindex = if_nametoindex(sess->vrf);
+		if (sess->vrf_ifindex == 0) {
+			bbdd_util_fmterr(error,
+					 "No VRF interface named `%s' found",
+					 sess->vrf);
+			return -1;
+		}
+		sess->vrf_ifindex_seen = 1;
+
+		int err = bbdd_nl_get_vrf_table(nl, sess->vrf_ifindex,
+						&sess->vrf_table, error);
+		if (err)
+			return err;
+		sess->vrf_table_seen = 1;
+	}
+
 	return 0;
 }
 
@@ -500,6 +531,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 					      struct bbdd_c_session *select,
 					      struct bbdd_c_session *change,
 					      bool *bulk,
+					      struct bbdd_nl *nl,
 					      char **error)
 {
 	enum {
@@ -524,7 +556,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	if (seen[pol_select]) {
 		rc = bbdd_d_jrpc_dissect_validate_session(values[pol_select],
 							  select, "select",
-							  error);
+							  nl, error);
 		if (rc != 0)
 			return rc;
 	}
@@ -532,7 +564,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 	if (seen[pol_change]) {
 		rc = bbdd_d_jrpc_dissect_validate_session(values[pol_change],
 							  change, "change",
-							  error);
+							  nl, error);
 		if (rc != 0)
 			return rc;
 	}
@@ -601,6 +633,15 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	if (dsess->ifindex != 0) {
 		if_indextoname(dsess->ifindex, csess->ifname);
 		csess->ifname_seen = 1;
+	}
+
+	if (dsess->vrf_ifindex != 0) {
+		if_indextoname(dsess->vrf_ifindex, csess->vrf);
+		csess->vrf_seen = 1;
+		csess->vrf_ifindex = dsess->vrf_ifindex;
+		csess->vrf_ifindex_seen = 1;
+		csess->vrf_table = dsess->vrf_table;
+		csess->vrf_table_seen = 1;
 	}
 
 #define ASSIGN(CFIELD, DFIELD) do {		\
@@ -1051,6 +1092,11 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	 * about ifindex. */
 	ASSIGN(ifindex, ifindex);
 
+	/* If VRF was given, both vrf_ifindex and vrf_table should have been
+	 * backfilled and marked as seen by now. */
+	ASSIGN(vrf_ifindex, vrf_ifindex);
+	ASSIGN(vrf_table, vrf_table);
+
 #undef ASSIGN
 
 	/* A session marked as `shutdown' needs to be made admin down. On
@@ -1137,6 +1183,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	FIELD(ttl, ttl);
 	FIELD(local.detect_mult, detect_mult);
 	FIELD(ifindex, ifindex);
+	FIELD(vrf_ifindex, vrf_ifindex);
 #undef FIELD
 
 	return 1;
@@ -1244,7 +1291,7 @@ static void bbdd_d_handle_session_add(struct bbdd_d *d,
 	int rc;
 
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &csess, NULL,
-						&error);
+						d->nl, &error);
 	if (rc != 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 
@@ -1269,6 +1316,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 					struct bbdd_c_session *select,
 					struct bbdd_c_session *change,
 					bool *bulk,
+					struct bbdd_nl *nl,
 					struct bbdd_sess_dir *sdir,
 					uint32_t **discrs,
 					size_t *ndiscrs)
@@ -1276,8 +1324,8 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	char *error;
 	int rc;
 
-	rc = bbdd_d_jrpc_dissect_params_session(params_obj,
-						select, change, bulk, &error);
+	rc = bbdd_d_jrpc_dissect_params_session(params_obj, select,
+						change, bulk, nl, &error);
 	if (rc != 0) {
 		bbdd_d_respond_invalid_params(peer, id, &error);
 		return -1;
@@ -1327,7 +1375,7 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
 					  &select, &change, &bulk,
-					  d->sdir, &discrs, &ndiscrs);
+					  d->nl, d->sdir, &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
@@ -1522,7 +1570,7 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, d->sdir,
+					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1543,7 +1591,7 @@ static void bbdd_d_handle_session_stats(struct bbdd_d *d,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, d->sdir,
+					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1567,7 +1615,7 @@ static void bbdd_d_handle_session_del(struct bbdd_d *d,
 	size_t num_errors = 0;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, &bulk, d->sdir,
+					  &sess, NULL, &bulk, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
@@ -1615,7 +1663,7 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
-					  &sess, NULL, NULL, d->sdir,
+					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;

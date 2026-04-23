@@ -100,6 +100,9 @@ struct bbdd_c_session {
 	uint8_t detect_mult;		int detect_mult_seen;
 	uint32_t ifindex;		int ifindex_seen;
 	char ifname[IFNAMSIZ];		int ifname_seen;
+	char vrf[IFNAMSIZ];		int vrf_seen;
+	uint32_t vrf_ifindex;		int vrf_ifindex_seen;
+	uint32_t vrf_table;		int vrf_table_seen;
 };
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
@@ -156,6 +159,8 @@ struct bbdd_d_session {
 	uint32_t hold_time;
 	uint8_t ttl;
 	uint32_t ifindex;
+	uint32_t vrf_ifindex;
+	uint32_t vrf_table;
 
 	struct bbdd_d_session_data local;
 

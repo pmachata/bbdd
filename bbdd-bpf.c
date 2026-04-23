@@ -486,7 +486,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t max_interval_us;
 	uint32_t detect_time_us;
 	uint32_t interval_us;
-	uint32_t tbid = 0;    // xxx VRF support
+	uint32_t tbid = dsess->vrf_table;
 	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
 	uint8_t bfd_flags;
