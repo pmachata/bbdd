@@ -1243,7 +1243,7 @@ static void bbdd_bpf_sockets_detach(struct bbdd_bpf *bpf)
 
 #define DETACH(AF, PORT, NAME) {					\
 		int sock_fd = bpf->sockets.NAME ## _sk.fd;		\
-		err = bbdd_bpf_sockets_detach_one(sock_fd) || err;	\
+		err = bbdd_bpf_sockets_detach_one(sock_fd) ?: err;	\
 	}
 
 	BBDD_PROG_RECV_SOCKETS(DETACH);
@@ -1286,7 +1286,7 @@ static void bbdd_bpf_sockmap_fini(struct bbdd_bpf *bpf)
 #define DELETE(AF, PORT, NAME) {					\
 		uint32_t ix = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;	\
 		err = bpf_map__delete_elem(bpf->skel->maps.bbdd_bpf_sock_map, \
-					   &ix, sizeof(ix), 0) || err;	\
+					   &ix, sizeof(ix), 0) ?: err;	\
 	}
 
 	BBDD_PROG_RECV_SOCKETS(DELETE);
