@@ -669,22 +669,26 @@ SEC("sk_lookup")
 int bbdd_sk_lookup(struct bpf_sk_lookup *ctx)
 {
 	struct bpf_sock *sk;
+	int ret = SK_DROP;
 	__u32 idx;
 	int rc;
 
 	if (ctx->protocol != IPPROTO_UDP)
 		return SK_PASS;
 
-#define MATCH(AF, PORT, NAME)					\
-	if (ctx->family == (AF) && ctx->local_port == (PORT))	\
-		idx = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;
+#define MATCH(AF, PORT, NAME)						\
+		if (ctx->family == (AF) && ctx->local_port == (PORT)) {	\
+			idx = BBDD_PROG_RECV_SOCK_ ## NAME ## _IX;	\
+			goto matched;					\
+		}
 
-	BBDD_PROG_RECV_SOCKETS(MATCH)
-	else
-		return SK_PASS;
+	BBDD_PROG_RECV_SOCKETS(MATCH);
 
+	/* No match. */
+	return SK_PASS;
 #undef MATCH
 
+matched:
 	sk = bpf_map_lookup_elem(&bbdd_bpf_sock_map, &idx);
 	if (!sk) {
 		BUMP(bbdd_prog_global_diag_stats.sk_lookup_no_socket);
@@ -694,12 +698,11 @@ int bbdd_sk_lookup(struct bpf_sk_lookup *ctx)
 	rc = bpf_sk_assign(ctx, sk, 0);
 	if (rc != 0) {
 		BUMP(bbdd_prog_global_diag_stats.sk_lookup_assign_error);
-		bpf_sk_release(sk);
-		return SK_DROP;
-	}
+	} else
+		ret = SK_PASS;
 
 	bpf_sk_release(sk);
-	return SK_PASS;
+	return ret;
 }
 
 char _license[] SEC("license") = "GPL";
