@@ -1197,7 +1197,12 @@ static int bbdd_bpf_sockets_attach_one(int sock_fd, int prog_fd)
 
 static int bbdd_bpf_sockets_detach_one(int sock_fd)
 {
-	return setsockopt(sock_fd, SOL_SOCKET, SO_DETACH_BPF, NULL, 0);
+	/* SO_DETACH_BPF ignores the optval, but sk_setsockopt() bounces us if
+	 * it is < sizeof(int). So pass a dummy. */
+	int dummy = 0;
+
+	return setsockopt(sock_fd, SOL_SOCKET, SO_DETACH_BPF,
+			  &dummy, sizeof(dummy));
 }
 
 static int bbdd_bpf_sockets_attach(struct bbdd_bpf *bpf, char **error)
