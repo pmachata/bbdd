@@ -1947,11 +1947,23 @@ static void
 bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 				    const struct bfddp_message *msg)
 {
-	uint32_t discr = ntohl(msg->data.counters_req.lid);
+	uint16_t length = ntohs(msg->header.length);
+	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.counters_req);
+	uint32_t discr;
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_d_session *dsess;
 	char *error;
 	int rc;
+
+	if (length != exp_len) {
+		++d->diag_stats.dp_invalid_message_length;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr, "bfdd: DP_REQUEST_SESSION_COUNTERS: Invalid length: got %u, expected %u\n",
+				length, exp_len);
+		return;
+	}
+
+	discr = ntohl(msg->data.counters_req.lid);
 
 	/* We don't necessarily want to detach from the socket on errors in
 	 * these queries. Instead, form o nonsense response, but do respond, so
