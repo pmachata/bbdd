@@ -339,7 +339,9 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 #undef SET_FLAG
 
 	/* Source address is not mandatory. */
-	if (memcmp(&fsess->src, zeroes, addr_sz) != 0) {
+	if (memcmp(&fsess->src, zeroes, addr_sz) == 0) {
+		csess->src.unset = true;
+	} else {
 		rc = bbdd_bfdd_session_to_c_addr(&csess->src, &fsess->src,
 						 af, error);
 		if (rc != 0)
