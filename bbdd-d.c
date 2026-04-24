@@ -405,6 +405,25 @@ static int bbdd_d_jrpc_dissect_netif_name(struct bbdd_c_session_netif *netif,
 	return 0;
 }
 
+static int bbdd_d_jrpc_dissect_addr(struct bbdd_c_session_addr *addr,
+				    int af, struct json_object *value,
+				    char **error)
+{
+	if (value == NULL) {
+		addr->unset = true;
+	} else {
+		int rc;
+
+		rc = bbdd_jrpc_strcpy(value, addr->str, sizeof(addr->str),
+				      error);
+		if (rc < 0)
+			return rc;
+
+		addr->af = af;
+	}
+	return 0;
+}
+
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
 				    char **error)
@@ -439,8 +458,9 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 
-		[pol_src] = { .key = "src", .type = json_type_string },
 		[pol_dst] = { .key = "dst", .type = json_type_string },
+		[pol_src] = { .key = "src", .type = json_type_string,
+			      .nullable = true },
 
 		[pol_min_tx_us] = { .key = "min_tx_us", .type = json_type_int },
 		[pol_min_rx_us] = { .key = "min_rx_us", .type = json_type_int },
@@ -495,27 +515,22 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	af = bbdd_c_session_flag_isset(sess->flags.ipv6) ? AF_INET6 : AF_INET;
 	// xxx also scope ID is necessary for link-local addresses
 
-	if (seen[pol_src]) {
-		if (bbdd_jrpc_strcpy(values[pol_src],
-				     sess->src, sizeof(sess->src), error) < 0)
-			goto fail;
-		sess->src_af = af;
-	}
-	if (seen[pol_dst]) {
-		if (bbdd_jrpc_strcpy(values[pol_dst],
-				     sess->dst, sizeof(sess->dst), error) < 0)
-			goto fail;
-		sess->dst_af = af;
-	}
+	if (seen[pol_src] &&
+	    bbdd_d_jrpc_dissect_addr(&sess->src, af, values[pol_src], error))
+		goto fail;
+
+	if (seen[pol_dst] &&
+	    bbdd_d_jrpc_dissect_addr(&sess->dst, af, values[pol_dst], error))
+		goto fail;
 
 	if (seen[pol_netif_name] &&
 	    bbdd_d_jrpc_dissect_netif_name(&sess->netif,
-					   values[pol_netif_name], error))
+					   values[pol_netif_name], error) < 0)
 		goto fail;
 
 	if (seen[pol_vrf_name] &&
 	    bbdd_d_jrpc_dissect_netif_name(&sess->vrf.netif,
-					   values[pol_vrf_name], error))
+					   values[pol_vrf_name], error) < 0)
 		goto fail;
 
 	if (seen[pol_vrf_table]) {
@@ -691,6 +706,14 @@ static void bbdd_d_session_to_c_vrf(struct bbdd_d_session *dsess,
 	}
 }
 
+static void bbdd_d_session_to_c_addr(struct bbdd_c_session_addr *to,
+				     struct bbdd_sockaddr *from)
+{
+	to->af = from->sa.sa_family;
+	if (to->af != 0)
+		bbdd_d_sockaddr_ntop(&from->sa, to->str, sizeof(to->str));
+}
+
 static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 				struct bbdd_c_session *csess)
 {
@@ -701,12 +724,8 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 		csess->flags.flags[i].seen = csess->flags.flags[i].value =
 			dsess->flags.flags[i];
 
-	if ((csess->src_af = dsess->src.sa.sa_family))
-		bbdd_d_sockaddr_ntop(&dsess->src.sa,
-				     csess->src, sizeof(csess->src));
-	if ((csess->dst_af = dsess->dst.sa.sa_family))
-		bbdd_d_sockaddr_ntop(&dsess->dst.sa,
-				     csess->dst, sizeof(csess->dst));
+	bbdd_d_session_to_c_addr(&csess->src, &dsess->src);
+	bbdd_d_session_to_c_addr(&csess->dst, &dsess->dst);
 
 	if (dsess->ifindex != 0) {
 		if_indextoname(dsess->ifindex, csess->netif.name);
@@ -1109,6 +1128,17 @@ put_obj:
 		bbdd_d_respond_memerr(peer, id);
 }
 
+static int bbdd_d_session_apply_c_addr(struct bbdd_sockaddr *to,
+				       const struct bbdd_c_session_addr *from,
+				       char **error)
+{
+	if (from->unset)
+		to->sa.sa_family = 0;
+	else if (from->af != 0)
+		return bbdd_sock_parse_addr_af(from->af, from->str, to, error);
+	return 0;
+}
+
 static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				  const struct bbdd_c_session *csess,
 				  struct bbdd_nl *nl,
@@ -1158,18 +1188,10 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 	sport = ntohs(dsess->src.sin46.port);
 
-	if (csess->src_af) {
-		err = bbdd_sock_parse_addr_af(csess->src_af, csess->src,
-					      &dsess->src, error);
-		if (err)
-			return err;
-	}
-	if (csess->dst_af) {
-		err = bbdd_sock_parse_addr_af(csess->dst_af, csess->dst,
-					      &dsess->dst, error);
-		if (err)
-			return err;
-	}
+	err = bbdd_d_session_apply_c_addr(&dsess->src, &csess->src, error) ?:
+	      bbdd_d_session_apply_c_addr(&dsess->dst, &csess->dst, error);
+	if (err)
+		return err;
 
 	/* Preserve the source port. */
 	dsess->src.sin46.port = htons(sport);
@@ -1229,23 +1251,26 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 }
 
 /* Returns < 0 for errors, 0 for not a match, 1 for match. */
-static int bbdd_d_session_addr_matches(int a_af, const char a[INET6_ADDRSTRLEN],
+static int bbdd_d_session_addr_matches(const struct bbdd_c_session_addr *query,
 				       const struct bbdd_sockaddr *b_addr,
 				       char **error)
 {
 	struct in6_addr a_addr = {};
 	int rc;
 
-	rc = bbdd_inet_pton(a_af, a, &a_addr, error);
+	if (query->af == 0)
+		return 1;
+
+	rc = bbdd_inet_pton(query->af, query->str, &a_addr, error);
 	if (rc < 0)
 		return rc;
 
-	if (a_af != b_addr->sin46.family)
+	if (query->af != b_addr->sin46.family)
 		return 0;
 
 	/* Note: b_addr will have had sport / dport set, the query won't. */
 
-	switch (a_af) {
+	switch (query->af) {
 	case AF_INET:
 		return !memcmp(&a_addr, &b_addr->sin.sin_addr, 4);
 	case AF_INET6:
@@ -1268,19 +1293,13 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 		    query->flags.flags[i].value != dsess->flags.flags[i])
 			return 0;
 
-	if (query->src_af) {
-		rc = bbdd_d_session_addr_matches(query->src_af, query->src,
-						 &dsess->src, error);
-		if (rc <= 0)
-			return rc;
-	}
+	rc = bbdd_d_session_addr_matches(&query->src, &dsess->src, error);
+	if (rc <= 0)
+		return rc;
 
-	if (query->dst_af) {
-		rc = bbdd_d_session_addr_matches(query->dst_af, query->dst,
-						 &dsess->dst, error);
-		if (rc <= 0)
-			return rc;
-	}
+	rc = bbdd_d_session_addr_matches(&query->dst, &dsess->dst, error);
+	if (rc <= 0)
+		return rc;
 
 	/* When matching on netif, we just consider unset and ifindex. At this
 	 * point, the name and index are known to match each other and have been
@@ -1362,7 +1381,7 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 	uint16_t sport;
 	int rc;
 
-	if (!csess->dst_af) {
+	if (!csess->dst.af) {
 		bbdd_util_fmterr(error, "No destination address");
 		return -1;
 	}
@@ -1511,10 +1530,10 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 	if (rc < 0)
 		goto free_discrs;
 
-	if (change.src_af != 0)
-		af = change.src_af;
-	else if (change.dst_af != 0)
-		af = change.dst_af;
+	if (change.src.af != 0)
+		af = change.src.af;
+	else if (change.dst.af != 0)
+		af = change.dst.af;
 
 	for (size_t i = 0; i < ndiscrs; i++) {
 		struct bbdd_d_session *dsess;

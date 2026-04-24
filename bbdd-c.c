@@ -775,12 +775,16 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		printf("discr %u ", sess->discr);
 		seen = true;
 	}
-	if (sess->src_af) {
-		printf("src %s ", sess->src);
+	if (sess->src.af) {
+		printf("src %s ", sess->src.str);
+		seen = true;
+	} else if (bbdd_env.verbosity > 0) {
+		printf("no src ");
 		seen = true;
 	}
-	if (sess->dst_af) {
-		printf("dst %s ", sess->dst);
+
+	if (sess->dst.af) {
+		printf("dst %s ", sess->dst.str);
 		seen = true;
 	}
 	if (sess->min_tx_us_seen) {
@@ -1322,9 +1326,9 @@ static int bbdd_c_parse_kw_addr(int *up_argc, char ***up_argv, const char *kw,
 }
 
 static int
-bbdd_c_parse_netif_check_apply(struct bbdd_c_session_netif *ret_netif,
-			       struct bbdd_c_session_netif *new_netif,
-			       const char *kw, const char *flag_kw)
+bbdd_c_session_parse_netif_check_apply(struct bbdd_c_session_netif *ret_netif,
+				       struct bbdd_c_session_netif *new_netif,
+				       const char *kw, const char *flag_kw)
 {
 	if (ret_netif->unset) {
 		fprintf(stderr, "Duplicate keyword `%s', `no %s' already given.\n",
@@ -1337,9 +1341,9 @@ bbdd_c_parse_netif_check_apply(struct bbdd_c_session_netif *ret_netif,
 }
 
 static int
-bbdd_c_parse_netif_ifindex(int *up_argc, char ***up_argv,
-			   const char *flag_kw, const char *ix_kw,
-			   struct bbdd_c_session_netif *ret_netif)
+bbdd_c_session_parse_netif_ifindex(int *up_argc, char ***up_argv,
+				   const char *flag_kw, const char *ix_kw,
+				   struct bbdd_c_session_netif *ret_netif)
 {
 	struct bbdd_c_session_netif netif = *ret_netif;
 	int rc;
@@ -1349,13 +1353,13 @@ bbdd_c_parse_netif_ifindex(int *up_argc, char ***up_argv,
 	if (rc <= 0)
 		return rc;
 
-	return bbdd_c_parse_netif_check_apply(ret_netif, &netif,
-					      ix_kw, flag_kw);
+	return bbdd_c_session_parse_netif_check_apply(ret_netif, &netif,
+						      ix_kw, flag_kw);
 }
 
 static int
-bbdd_c_parse_netif_kw(int *up_argc, char ***up_argv, const char *kw,
-		      struct bbdd_c_session_netif *ret_netif)
+bbdd_c_session_parse_netif_kw(int *up_argc, char ***up_argv, const char *kw,
+			      struct bbdd_c_session_netif *ret_netif)
 {
 	struct bbdd_c_session_netif netif = *ret_netif;
 	int rc;
@@ -1365,14 +1369,14 @@ bbdd_c_parse_netif_kw(int *up_argc, char ***up_argv, const char *kw,
 	if (rc <= 0)
 		return rc;
 
-	return bbdd_c_parse_netif_check_apply(ret_netif, &netif,
-					      kw, kw);
+	return bbdd_c_session_parse_netif_check_apply(ret_netif, &netif,
+						      kw, kw);
 }
 
 static int
-bbdd_c_parse_netif_flag(int *up_argc, char ***up_argv,
-			const char *kw, const char *ix_kw,
-			struct bbdd_c_session_netif *ret_netif)
+bbdd_c_session_parse_netif_flag(int *up_argc, char ***up_argv,
+				const char *kw, const char *ix_kw,
+				struct bbdd_c_session_netif *ret_netif)
 {
 	struct bbdd_c_session_flag flag = {
 		.seen = ret_netif->unset,
@@ -1399,8 +1403,9 @@ bbdd_c_parse_netif_flag(int *up_argc, char ***up_argv,
 	return 1;
 }
 
-static int bbdd_c_parse_netif(int *up_argc, char ***up_argv, const char *kw,
-			      struct bbdd_c_session_netif *ret_netif)
+static int bbdd_c_session_parse_netif(int *up_argc, char ***up_argv,
+				      const char *kw,
+				      struct bbdd_c_session_netif *ret_netif)
 {
 #define INDEX "-index"
 	char ix_kw[strlen(kw) + sizeof(INDEX)];
@@ -1409,10 +1414,64 @@ static int bbdd_c_parse_netif(int *up_argc, char ***up_argv, const char *kw,
 
 	/* Parse this as either `<kw>-index X', or `<kw> X', or when both fail,
 	 * as `no <kw>'. */
-	return bbdd_c_parse_netif_ifindex(up_argc, up_argv, kw, ix_kw,
-					  ret_netif) ?:
-	       bbdd_c_parse_netif_kw(up_argc, up_argv, kw, ret_netif) ?:
-	       bbdd_c_parse_netif_flag(up_argc, up_argv, kw, ix_kw, ret_netif);
+	return bbdd_c_session_parse_netif_ifindex(up_argc, up_argv, kw, ix_kw,
+						  ret_netif) ?:
+	       bbdd_c_session_parse_netif_kw(up_argc, up_argv, kw, ret_netif) ?:
+	       bbdd_c_session_parse_netif_flag(up_argc, up_argv, kw, ix_kw,
+					       ret_netif);
+}
+
+static int
+bbdd_c_session_parse_addr_kw(int *up_argc, char ***up_argv, const char *kw,
+			     struct bbdd_c_session_addr *ret_addr)
+{
+	struct bbdd_c_session_addr addr = *ret_addr;
+	int rc;
+
+	rc = bbdd_c_parse_kw_addr(up_argc, up_argv, kw, addr.str, &addr.af);
+	if (rc <= 0)
+		return rc;
+
+	if (ret_addr->unset) {
+		fprintf(stderr, "Duplicate keyword `%s', `no %s' already given.\n",
+			kw, kw);
+		return -1;
+	}
+
+	*ret_addr = addr;
+	return 1;
+}
+
+static int
+bbdd_c_session_parse_addr_flag(int *up_argc, char ***up_argv, const char *kw,
+			       struct bbdd_c_session_addr *ret_addr)
+{
+	struct bbdd_c_session_flag flag = {
+		.seen = ret_addr->unset,
+		.value = false,
+	};
+	int rc;
+
+	rc = bbdd_c_parse_kw_flag(up_argc, up_argv, kw, &flag);
+	if (rc <= 0)
+		return rc;
+
+	if (ret_addr->af != 0) {
+		fprintf(stderr, "Duplicate keyword `no %s', `%s' already given.\n",
+			kw, kw);
+		return -1;
+	}
+
+	ret_addr->unset = true;
+	return 1;
+}
+
+static int bbdd_c_session_parse_addr(int *up_argc, char ***up_argv,
+				     const char *kw,
+				     struct bbdd_c_session_addr *addr)
+{
+	return bbdd_c_session_parse_addr_kw(up_argc, up_argv, kw, addr) ?:
+	       bbdd_c_session_parse_addr_flag(up_argc, up_argv, kw, addr);
 }
 
 #define BBDD_C_SESSION_EXPAND_NAME_STR(NAME, name, ...)	#name,
@@ -1455,6 +1514,17 @@ static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
 	return 0;
 }
 
+static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
+				   const char *kw,
+				   const struct bbdd_c_session_addr *addr)
+{
+	if (addr->unset)
+		return json_object_object_add(params_obj, kw, NULL);
+	if (addr->af != 0)
+		return bbdd_jrpc_append_str(params_obj, kw, addr->str);
+	return 0;
+}
+
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 {
 	struct json_object *params_obj;
@@ -1476,10 +1546,6 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 
 	if ((sess->discr_seen &&
 	     bbdd_jrpc_append_int(params_obj, "discr", sess->discr)) ||
-	    (sess->src_af &&
-	     bbdd_jrpc_append_str(params_obj, "src", sess->src)) ||
-	    (sess->dst_af &&
-	     bbdd_jrpc_append_str(params_obj, "dst", sess->dst)) ||
 	    (sess->min_tx_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_tx_us", sess->min_tx_us)) ||
 	    (sess->min_rx_us_seen &&
@@ -1491,6 +1557,8 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	    (sess->detect_mult_seen &&
 	     bbdd_jrpc_append_int(params_obj, "detect_mult",
 				  sess->detect_mult)) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "src", &sess->src) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "dst", &sess->dst) ||
 	    bbdd_c_jrpc_append_netif(params_obj, "netif", &sess->netif) ||
 	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &sess->vrf.netif) ||
 	    (sess->vrf.table_seen &&
@@ -1621,19 +1689,23 @@ bbdd_c_session_check_params_netif(const struct bbdd_c_session_netif *netif)
 
 static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 {
-	if (sess->src_af != 0 && sess->dst_af != 0 &&
-	    sess->src_af != sess->dst_af) {
+	if (sess->src.af != 0 && sess->dst.af != 0 &&
+	    sess->src.af != sess->dst.af) {
 		fprintf(stderr, "src and dst are given from different protocols: `%s' (%s) vs. `%s' (%s).\n",
-			sess->src, sess->src_af == AF_INET ? "IPv4" : "IPv6",
-			sess->dst, sess->dst_af == AF_INET ? "IPv4" : "IPv6");
+			sess->src.str,
+			sess->src.af == AF_INET ? "IPv4" : "IPv6",
+			sess->dst.str,
+			sess->dst.af == AF_INET ? "IPv4" : "IPv6");
 		return -1;
 	}
-	if ((sess->src_af == AF_INET || sess->dst_af == AF_INET) &&
+	// xxx we don't need the ipv6 flag. That's an artifact of bfdd wire
+	// protocol. But -d uses it to determine AF of address strings :-|
+	if ((sess->src.af == AF_INET || sess->dst.af == AF_INET) &&
 	    sess->flags.ipv6.seen && sess->flags.ipv6.value) {
 		fprintf(stderr, "src or dst given as IPv4, but `ipv6' flag given as well.\n");
 		return -1;
 	}
-	if (sess->src_af == AF_INET6 || sess->dst_af == AF_INET6) {
+	if (sess->src.af == AF_INET6 || sess->dst.af == AF_INET6) {
 		sess->flags.ipv6.seen = true;
 		sess->flags.ipv6.value = true;
 	}
@@ -1712,12 +1784,6 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
 					       &sess->flags.shutdown)) ||
 
-		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "src",
-					       sess->src,
-					       &sess->src_af)) ||
-		    (rc = bbdd_c_parse_kw_addr(&argc, &argv, "dst",
-					       sess->dst,
-					       &sess->dst_af)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "discr",
 					      &sess->discr,
 					      &sess->discr_seen)) ||
@@ -1736,10 +1802,14 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "detect-mult",
 					     &sess->detect_mult,
 					     &sess->detect_mult_seen)) ||
-		    (rc = bbdd_c_parse_netif(&argc, &argv, "netif",
-					     &sess->netif)) ||
-		    (rc = bbdd_c_parse_netif(&argc, &argv, "vrf",
-					     &sess->vrf.netif)) ||
+		    (rc = bbdd_c_session_parse_addr(&argc, &argv,
+						    "src", &sess->src)) ||
+		    (rc = bbdd_c_session_parse_addr(&argc, &argv,
+						    "dst", &sess->dst)) ||
+		    (rc = bbdd_c_session_parse_netif(&argc, &argv,
+						     "netif", &sess->netif)) ||
+		    (rc = bbdd_c_session_parse_netif(&argc, &argv,
+						     "vrf", &sess->vrf.netif)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "vrf-table",
 					      &sess->vrf.table,
 					      &sess->vrf.table_seen)) ||

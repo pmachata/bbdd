@@ -102,16 +102,23 @@ struct bbdd_c_session_vrf {
 	uint32_t table;			int table_seen;
 };
 
+struct bbdd_c_session_addr {
+	/* Request to unset address, or explicit request to match sessions
+	 * without address. When set, af == 0. */
+	bool unset;
+	char str[INET6_ADDRSTRLEN];	int af;
+};
+
 struct bbdd_c_session {
 	struct bbdd_c_session_flags flags;
-	char src[INET6_ADDRSTRLEN];	int src_af;
-	char dst[INET6_ADDRSTRLEN];	int dst_af;
 	uint32_t discr;			int discr_seen;
 	uint32_t min_tx_us;		int min_tx_us_seen;
 	uint32_t min_rx_us;		int min_rx_us_seen;
 	uint32_t hold_time;		int hold_time_seen;
 	uint8_t ttl;			int ttl_seen;
 	uint8_t detect_mult;		int detect_mult_seen;
+	struct bbdd_c_session_addr src;
+	struct bbdd_c_session_addr dst;
 	struct bbdd_c_session_netif netif;
 	struct bbdd_c_session_vrf vrf;
 };

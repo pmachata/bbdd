@@ -288,6 +288,22 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 	free(bfdd);
 }
 
+static int bbdd_bfdd_session_to_c_addr(struct bbdd_c_session_addr *to,
+				       const struct in6_addr *from,
+				       int af, char **error)
+{
+	const char *ret;
+
+	ret = inet_ntop(af, from, to->str, sizeof(to->str));
+	if (ret == NULL) {
+		bbdd_util_fmterr(error, "Failed to convert address: %m");
+		return -1;
+	}
+
+	to->af = af;
+	return 0;
+}
+
 int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 			   struct bbdd_c_session *csess,
 			   char **error)
@@ -297,6 +313,7 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	int af = (flags & SESSION_IPV6) ? AF_INET6 : AF_INET;
 	size_t addr_sz = (flags & SESSION_IPV6) ? 16 : 4;
 	unsigned char zeroes[16] = {};
+	int rc;
 
 	if (flags & SESSION_ECHO) {
 		bbdd_util_fmterr(error, "Echo not supported");
@@ -323,19 +340,15 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 
 	/* Source address is not mandatory. */
 	if (memcmp(&fsess->src, zeroes, addr_sz) != 0) {
-		csess->src_af = af;
-		if (!inet_ntop(af, &fsess->src, csess->src,
-			       sizeof(csess->src))) {
-			bbdd_util_fmterr(error, "Failed to convert source address: %m");
-			return -1;
-		}
+		rc = bbdd_bfdd_session_to_c_addr(&csess->src, &fsess->src,
+						 af, error);
+		if (rc != 0)
+			return rc;
 	}
 
-	csess->dst_af = af;
-	if (!inet_ntop(af, &fsess->dst, csess->dst, sizeof(csess->dst))) {
-		bbdd_util_fmterr(error, "Failed to convert destination address: %m");
-		return -1;
-	}
+	rc = bbdd_bfdd_session_to_c_addr(&csess->dst, &fsess->dst, af, error);
+	if (rc != 0)
+		return rc;
 
 	csess->discr = ntohl(fsess->lid);
 	csess->discr_seen = (csess->discr != 0);
