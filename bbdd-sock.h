@@ -54,6 +54,7 @@ int bbdd_sock_split_addr_proto(char *arg, const char **proto,
 			       const char **addr, const char **port,
 			       char **error);
 int bbdd_sock_name_to_af(const char *proto, char **error);
+const char *bbdd_af_to_sock_name(int af);
 
 /* Parse a string in format of <address> */
 int bbdd_sock_parse_addr_af(int af, const char *arg, struct bbdd_sockaddr *sa,

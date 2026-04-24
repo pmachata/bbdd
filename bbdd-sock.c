@@ -348,6 +348,14 @@ int bbdd_sock_name_to_af(const char *proto, char **error)
 	return -1;
 }
 
+const char *bbdd_af_to_sock_name(int af)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(bbdd_sock_protos); i++)
+		if (bbdd_sock_protos[i].af == af)
+			return bbdd_sock_protos[i].name;
+	return NULL;
+}
+
 int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 			       const char **ret_addr, const char **ret_port,
 			       char **error)

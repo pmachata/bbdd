@@ -405,23 +405,58 @@ static int bbdd_d_jrpc_dissect_netif_name(struct bbdd_c_session_netif *netif,
 	return 0;
 }
 
+static int bbdd_d_jrpc_dissect_addr_obj(struct bbdd_c_session_addr *addr,
+					struct json_object *obj,
+					char **error)
+{
+	enum {
+		pol_addr,
+		pol_family,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_addr] =   { .key = "addr",   .type = json_type_string,
+				 .required = true },
+		[pol_family] = { .key = "family", .type = json_type_string,
+				 .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	const char *family_str;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	assert(values[pol_addr] != NULL);
+	assert(values[pol_family] != NULL);
+
+	family_str = json_object_get_string(values[pol_family]);
+	if (strcmp(family_str, "ipv4") == 0)
+		addr->af = AF_INET;
+	else if (strcmp(family_str, "ipv6") == 0)
+		addr->af = AF_INET6;
+	else {
+		bbdd_util_fmterr(error, "Unknown address family `%s'",
+				 family_str);
+		return -1;
+	}
+
+	return bbdd_jrpc_strcpy(values[pol_addr],
+				addr->str, sizeof(addr->str), error);
+}
+
 static int bbdd_d_jrpc_dissect_addr(struct bbdd_c_session_addr *addr,
-				    int af, struct json_object *value,
+				    struct json_object *value,
 				    char **error)
 {
 	if (value == NULL) {
 		addr->unset = true;
-	} else {
-		int rc;
-
-		rc = bbdd_jrpc_strcpy(value, addr->str, sizeof(addr->str),
-				      error);
-		if (rc < 0)
-			return rc;
-
-		addr->af = af;
+		return 0;
 	}
-	return 0;
+
+	return bbdd_d_jrpc_dissect_addr_obj(addr, value, error);
 }
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
@@ -458,8 +493,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 
-		[pol_dst] = { .key = "dst", .type = json_type_string },
-		[pol_src] = { .key = "src", .type = json_type_string,
+		[pol_dst] = { .key = "dst", .type = json_type_object },
+		[pol_src] = { .key = "src", .type = json_type_object,
 			      .nullable = true },
 
 		[pol_min_tx_us] = { .key = "min_tx_us", .type = json_type_int },
@@ -489,7 +524,6 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	int af;
 	int rc;
 
 	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
@@ -512,15 +546,12 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 	/* Note: Caller needs to validate / recognize protocol change, here we
 	 * just parse things out. */
-	af = bbdd_c_session_flag_isset(sess->flags.ipv6) ? AF_INET6 : AF_INET;
-	// xxx also scope ID is necessary for link-local addresses
-
 	if (seen[pol_src] &&
-	    bbdd_d_jrpc_dissect_addr(&sess->src, af, values[pol_src], error))
+	    bbdd_d_jrpc_dissect_addr(&sess->src, values[pol_src], error))
 		goto fail;
 
 	if (seen[pol_dst] &&
-	    bbdd_d_jrpc_dissect_addr(&sess->dst, af, values[pol_dst], error))
+	    bbdd_d_jrpc_dissect_addr(&sess->dst, values[pol_dst], error))
 		goto fail;
 
 	if (seen[pol_netif_name] &&
@@ -1145,14 +1176,36 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				  char **error)
 {
 	uint16_t sport;
+	int af;
 	int err;
 
-	/* The change request could only include VRF table, and we have no way
-	 * of uniquely determining which VRF was meant by that. Only here at the
-	 * application time do we see both the configured VRF name and the table
-	 * ID. So construct a VRF configuration view from the current dsess,
-	 * with the csess changes applied on top, and check that _that_ is
-	 * consistent. */
+	/* Some things cannot be validated during parsing, but only when we see
+	 * the actual data. Validate them here. */
+
+	/* Validate address changes vs. destination AF. Destination address is
+	 * mandatory, but it could be unset if this is a new session. In that
+	 * case we know the change request must have a destination address. */
+	if (dsess->dst.sin46.family != 0)
+		af = dsess->dst.sin46.family;
+	else
+		af = csess->dst.af;
+	assert(af != 0);
+
+	if (csess->src.af != 0 && csess->src.af != af) {
+		bbdd_util_fmterr(error, "%s session, but %s source address given",
+				 bbdd_af_to_sock_name(af),
+				 bbdd_af_to_sock_name(csess->src.af));
+		return -1;
+	}
+	if (csess->dst.af != 0 && csess->dst.af != af) {
+		bbdd_util_fmterr(error, "%s session, but %s destination address given",
+				 bbdd_af_to_sock_name(af),
+				 bbdd_af_to_sock_name(csess->dst.af));
+		return -1;
+	}
+
+	/* To validate VRF, construct a VRF configuration view from the current
+	 * dsess, with the csess changes applied on top, and check that. */
 	{
 		struct bbdd_c_session_vrf sess_vrf = {};
 
@@ -1520,7 +1573,6 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 	uint32_t *discrs;
 	size_t ndiscrs;
 	char *error;
-	int af = 0;
 	int rc;
 
 	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
@@ -1533,24 +1585,12 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 	if (rc < 0)
 		goto free_discrs;
 
-	if (change.src.af != 0)
-		af = change.src.af;
-	else if (change.dst.af != 0)
-		af = change.dst.af;
-
 	for (size_t i = 0; i < ndiscrs; i++) {
 		struct bbdd_d_session *dsess;
 
 		dsess = bbdd_sess_dir_get_session(d->sdir, discrs[i]);
 		if (dsess == NULL)
 			continue;
-
-		if (af != 0 && af != dsess->dst.sin46.family) {
-			bbdd_util_fmterr(&error, "Session protocol change requested for id %d",
-					 dsess->local.discr);
-			bbdd_d_respond_invalid_params(peer, id, &error);
-			goto free_discrs;
-		}
 
 		if (change.discr_seen && change.discr != dsess->local.discr) {
 			bbdd_util_fmterr(&error, "Cannot change session discriminator from %d to %d",
@@ -1561,6 +1601,8 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &error);
 		if (rc != 0) {
+			bbdd_util_wraperr(&error, "Session %u: %s",
+					  dsess->local.discr, error);
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_discrs;
 		}
