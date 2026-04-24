@@ -1020,7 +1020,7 @@ static void bbdd_c_session_help(void)
 		"	          detect-mult | netif | netif-index | vrf | vrf-index |\n"
 		"	          vrf-table }\n"
 		"	UNSET-KEY ::= { src | netif | vrf }\n"
-		"	FLAG ::= { multihop | demand | cbit | ipv6 | passive | shutdown }\n"
+		"	FLAG ::= { multihop | demand | cbit | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value\n"
 		"	no NETIF-KEY	-- unset a given key\n"
 		"\n"
@@ -1706,27 +1706,6 @@ bbdd_c_session_check_params_netif(const struct bbdd_c_session_netif *netif)
 
 static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 {
-	if (sess->src.af != 0 && sess->dst.af != 0 &&
-	    sess->src.af != sess->dst.af) {
-		fprintf(stderr, "src and dst are given from different protocols: `%s' (%s) vs. `%s' (%s).\n",
-			sess->src.str,
-			sess->src.af == AF_INET ? "IPv4" : "IPv6",
-			sess->dst.str,
-			sess->dst.af == AF_INET ? "IPv4" : "IPv6");
-		return -1;
-	}
-	// xxx we don't need the ipv6 flag. That's an artifact of bfdd wire
-	// protocol. But -d uses it to determine AF of address strings :-|
-	if ((sess->src.af == AF_INET || sess->dst.af == AF_INET) &&
-	    sess->flags.ipv6.seen && sess->flags.ipv6.value) {
-		fprintf(stderr, "src or dst given as IPv4, but `ipv6' flag given as well.\n");
-		return -1;
-	}
-	if (sess->src.af == AF_INET6 || sess->dst.af == AF_INET6) {
-		sess->flags.ipv6.seen = true;
-		sess->flags.ipv6.value = true;
-	}
-
 	bbdd_c_session_check_params_netif(&sess->netif);
 	bbdd_c_session_check_params_netif(&sess->vrf.netif);
 	return 0;
@@ -1794,8 +1773,6 @@ int bbdd_c_session(int argc, char **argv)
 					       &sess->flags.multihop)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
 					       &sess->flags.cbit)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "ipv6",
-					       &sess->flags.ipv6)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
 					       &sess->flags.passive)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",

@@ -41,7 +41,6 @@ int bbdd_c_bfdd(int argc, char **argv);
 #define BBDD_C_SESSION_FLAGS(X)		\
 	X(MULTIHOP, multihop)		\
 	X(CBIT, cbit)			\
-	X(IPV6, ipv6)			\
 	X(PASSIVE, passive)		\
 	X(SHUTDOWN, shutdown)		\
 	/**/

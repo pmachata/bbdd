@@ -333,7 +333,6 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	} while (0)
 	SET_FLAG(multihop, SESSION_MULTIHOP);
 	SET_FLAG(cbit,     SESSION_CBIT);
-	SET_FLAG(ipv6,     SESSION_IPV6);
 	SET_FLAG(passive,  SESSION_PASSIVE);
 	SET_FLAG(shutdown, SESSION_SHUTDOWN);
 #undef SET_FLAG
