@@ -21,6 +21,7 @@ struct bbdd_jrpc_policy {
 	const char *key;
 	enum json_type type;
 	bool any_type;
+	bool nullable;	/* Either the given type, or nil. */
 	bool required;
 };
 

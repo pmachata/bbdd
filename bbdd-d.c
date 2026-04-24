@@ -308,16 +308,26 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 	}
 
 	if (netif->name_seen) {
-		ifindex = if_nametoindex(netif->name);
-		if (ifindex == 0) {
-			bbdd_util_fmterr(error,
-					 "No interface named `%s' found",
-					 netif->name);
-			return -1;
+		if (netif->name[0] != '\0') {
+			ifindex = if_nametoindex(netif->name);
+			if (ifindex == 0) {
+				bbdd_util_fmterr(error,
+						 "No interface named `%s' found",
+						 netif->name);
+				return -1;
+			}
+		} else {
+			ifindex = 0;
 		}
 	}
 
 	if (netif->ifindex_seen && netif->name_seen) {
+		if (netif->name[0] == '\0') {
+			bbdd_util_fmterr(error,
+					 "Interface ifindex `%u' given together with request to unset interface",
+					 netif->ifindex);
+			return -1;
+		}
 		if (netif->ifindex != ifindex ||
 		    strcmp(ifname, netif->name) != 0) {
 			bbdd_util_fmterr(error,
@@ -334,7 +344,6 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 	}
 
 	if (!netif->ifindex_seen) {
-		assert(ifindex != 0);
 		netif->ifindex_seen = 1;
 		netif->ifindex = ifindex;
 	}
@@ -349,8 +358,6 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 	uint32_t table;
 	int err;
 
-	/* Validate and backfill VRF ifindex / ifname as necessary, even if as
-	 * of this writing user has no way of setting ifindex directly. */
 	err = bbdd_d_session_validate_netif(&sess_vrf->netif, error);
 	if (err != 0)
 		return err;
@@ -379,6 +386,25 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 	return 0;
 }
 
+static int bbdd_d_jrpc_dissect_netif_name(struct bbdd_c_session_netif *netif,
+					  struct json_object *name,
+					  char **error)
+{
+	if (name == NULL) {
+		netif->unset = true;
+	} else {
+		int rc;
+
+		rc = bbdd_jrpc_strcpy(name, netif->name, sizeof(netif->name),
+				      error);
+		if (rc < 0)
+			return rc;
+
+		netif->name_seen = 1;
+	}
+	return 0;
+}
+
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
 				    char **error)
@@ -402,9 +428,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		pol_ttl,
 		pol_detect_mult,
 
-		pol_ifindex,
-		pol_ifname,
-		pol_vrf,
+		pol_netif_name,
+		pol_netif_index,
+		pol_vrf_name,
+		pol_vrf_index,
 		pol_vrf_table,
 	};
 	struct bbdd_jrpc_policy policy[] = {
@@ -423,10 +450,18 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_detect_mult] = { .key = "detect_mult",
 				      .type = json_type_int },
 
-		[pol_ifindex]   = { .key = "ifindex",   .type = json_type_int },
-		[pol_ifname]    = { .key = "ifname",    .type = json_type_string },
-		[pol_vrf]       = { .key = "vrf",       .type = json_type_string },
-		[pol_vrf_table] = { .key = "vrf_table", .type = json_type_int },
+		[pol_netif_name]  = { .key = "netif_name",
+				      .type = json_type_string,
+				      .nullable = true, },
+		[pol_netif_index] = { .key = "netif_index",
+				      .type = json_type_int },
+		[pol_vrf_name]    = { .key = "vrf_name",
+				      .type = json_type_string,
+				      .nullable = true, },
+		[pol_vrf_index]   = { .key = "vrf_index",
+				      .type = json_type_int },
+		[pol_vrf_table]   = { .key = "vrf_table",
+				      .type = json_type_int },
 	};
 
 #undef BBDD_D_SESSION_EXPAND_POLICY
@@ -473,29 +508,24 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		sess->dst_af = af;
 	}
 
-	if (seen[pol_ifname]) {
-		if (bbdd_jrpc_strcpy(values[pol_ifname],
-				     sess->netif.name, sizeof(sess->netif.name),
-				     error) < 0)
-		    goto fail;
-		sess->netif.name_seen = 1;
-	}
+	if (seen[pol_netif_name] &&
+	    bbdd_d_jrpc_dissect_netif_name(&sess->netif,
+					   values[pol_netif_name], error))
+		goto fail;
 
-	if (seen[pol_vrf]) {
-		if (bbdd_jrpc_strcpy(values[pol_vrf], sess->vrf.netif.name,
-				     sizeof(sess->vrf.netif.name), error) < 0)
-			goto fail;
-		sess->vrf.netif.name_seen = 1;
-	}
+	if (seen[pol_vrf_name] &&
+	    bbdd_d_jrpc_dissect_netif_name(&sess->vrf.netif,
+					   values[pol_vrf_name], error))
+		goto fail;
 
 	if (seen[pol_vrf_table]) {
-		if (bbdd_jrpc_get_uint32_non0(values[pol_vrf_table],
-					      &sess->vrf.table, error) < 0)
+		if (bbdd_jrpc_get_uint32(values[pol_vrf_table],
+					 &sess->vrf.table, error) < 0)
 			goto fail;
 		sess->vrf.table_seen = 1;
 	}
 
-#define __DISSECT(POLNAME, NAME, CB) do {				\
+#define DISSECT(POLNAME, NAME, CB) do {					\
 		if (seen[pol_ ## POLNAME]) {				\
 			if (CB(values[pol_ ## POLNAME], &sess->NAME,	\
 			       error) < 0)				\
@@ -504,20 +534,21 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		}							\
 	} while (0)
 
-#define DISSECT_U32(NAME) __DISSECT(NAME, NAME, bbdd_jrpc_get_uint32)
-#define DISSECT_U8(NAME) __DISSECT(NAME, NAME, bbdd_jrpc_get_uint8)
+#define DISSECT_U32(NAME) DISSECT(NAME, NAME, bbdd_jrpc_get_uint32)
+#define DISSECT_U8(NAME) DISSECT(NAME, NAME, bbdd_jrpc_get_uint8)
 
-	__DISSECT(discr, discr, bbdd_jrpc_get_uint32_non0);
+	DISSECT(discr, discr, bbdd_jrpc_get_uint32_non0);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
 	DISSECT_U32(hold_time);
 	DISSECT_U8(ttl);
 	DISSECT_U8(detect_mult);
-	__DISSECT(ifindex, netif.ifindex, bbdd_jrpc_get_uint32_non0);
+	DISSECT(netif_index, netif.ifindex, bbdd_jrpc_get_uint32_non0);
+	DISSECT(vrf_index, vrf.netif.ifindex, bbdd_jrpc_get_uint32_non0);
 
 #undef DISSECT_U8
 #undef DISSECT_U32
-#undef __DISSECT
+#undef DISSECT
 
 	return 0;
 
@@ -1096,6 +1127,10 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		struct bbdd_c_session_vrf sess_vrf = {};
 
 		bbdd_d_session_to_c_vrf(dsess, &sess_vrf);
+		if (csess->vrf.netif.unset) {
+			sess_vrf.netif.name_seen = 0;
+			sess_vrf.netif.ifindex_seen = 0;
+		}
 		if (csess->vrf.netif.name_seen) {
 			memcpy(sess_vrf.netif.name, csess->vrf.netif.name,
 			       sizeof(sess_vrf.netif.name));
@@ -1113,7 +1148,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		err = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
 		if (err != 0)
 			return err;
-
 	}
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++) {
@@ -1145,6 +1179,26 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	else
 		dsess->dst.sin46.port = htons(BFD_SINGLE_HOP_PORT);
 
+	/* Interface is given as netif_index,netif_name / vrf_index,vrf_name by
+	 * the RPC, but at this point, the indices have been validated to match
+	 * names, and cross-backfilled. So we only care about ifindex. */
+
+	if (csess->netif.unset)
+		dsess->ifindex = 0;
+	else if (csess->netif.ifindex_seen)
+		dsess->ifindex = csess->netif.ifindex;
+
+	if (csess->vrf.netif.unset) {
+		/* Unset both VRF and table. If the user wants to override the
+		 * table in the same request, do it below. */
+		dsess->vrf_ifindex = 0;
+		dsess->vrf_table = 0;
+	} else if (csess->vrf.netif.ifindex_seen) {
+		dsess->vrf_ifindex = csess->vrf.netif.ifindex;
+	}
+
+	/* Boring fields. */
+
 #define ASSIGN(DFIELD, CFIELD) do {					\
 		if (csess->CFIELD ## _seen)				\
 			dsess->DFIELD = csess->CFIELD;			\
@@ -1156,14 +1210,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(local.min_rx_us, min_rx_us);
 	ASSIGN(hold_time, hold_time);
 	ASSIGN(ttl, ttl);
-
-	/* Interface is given as ifindex and ifname by the RPC, but at this
-	 * point, both have been validated to match each other, and ifindex has
-	 * been backfilled from ifname if not given. So we only need to care
-	 * about ifindex. */
-	ASSIGN(ifindex, netif.ifindex);
-
-	ASSIGN(vrf_ifindex, vrf.netif.ifindex);
 	ASSIGN(vrf_table, vrf.table);
 
 #undef ASSIGN
@@ -1236,9 +1282,14 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 			return rc;
 	}
 
-	/* Skip matching on ifname, which is only used to transport a
-	 * human-readable netdevice name across JRPC. Instead just match
-	 * on ifindex, which should be primed from ifname if necessary. */
+	/* When matching on netif, we just consider unset and ifindex. At this
+	 * point, the name and index are known to match each other and have been
+	 * cross-filled when one was missing. */
+
+	if (query->netif.unset && dsess->ifindex != 0)
+		return 0;
+	if (query->vrf.netif.unset && dsess->vrf_ifindex != 0)
+		return 0;
 
 #define FIELD(DNAME, CNAME) do {					\
 		if (query->CNAME ## _seen && query->CNAME != dsess->DNAME) \

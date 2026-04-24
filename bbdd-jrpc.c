@@ -246,7 +246,13 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 			if (strcmp(key, pol->key) == 0) {
 				enum json_type type = json_object_get_type(val);
 
-				if (!pol->any_type && pol->type != type) {
+				if (pol->any_type)
+					goto skip_type_check;
+
+				if (pol->nullable && type == json_type_null)
+					goto skip_type_check;
+
+				if (pol->type != type) {
 					bbdd_util_fmterr(error, "The member %s is expected to be a %s, but is %s",
 						    key,
 						    json_type_to_name(pol->type),
@@ -254,6 +260,7 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 					return -1;
 				}
 
+			skip_type_check:
 				if (seen[i]) {
 					bbdd_util_fmterr(error, "Duplicate member %s",
 							 key);

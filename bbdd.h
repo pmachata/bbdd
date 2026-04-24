@@ -89,6 +89,10 @@ static inline bool bbdd_c_session_flag_isset(struct bbdd_c_session_flag flag)
 const char *bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag);
 
 struct bbdd_c_session_netif {
+	/* Request to unset interface, or explicit request to match
+	 * non-interfaced sessions. When set, name_seen and ifindex_seen are
+	 * both unset. */
+	bool unset;
 	char name[IFNAMSIZ];		int name_seen;
 	uint32_t ifindex;		int ifindex_seen;
 };

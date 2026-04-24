@@ -737,10 +737,40 @@ bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 	bbdd_c_session_show_state_end(&data->state);
 }
 
+static bool bbdd_c_session_show_netif(const struct bbdd_c_session_netif *netif,
+				      const char *kw)
+{
+	bool seen = false;
+
+	/* Prefer name to index, but show both in verbose mode. */
+
+	if (netif->name_seen) {
+		printf("%s %s ", kw, netif->name);
+		seen = true;
+	}
+
+	if ((!netif->name_seen || bbdd_env.verbosity > 0) &&
+	    netif->ifindex_seen) {
+		printf("%s-index %u ", kw, netif->ifindex);
+		seen = true;
+	}
+
+	/* Show the negative form in verbose mode. */
+	if (!netif->name_seen && !netif->ifindex_seen &&
+	    bbdd_env.verbosity > 0) {
+		printf("no %s ", kw);
+		seen = true;
+	}
+
+	return seen;
+}
+
 static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 				    struct bbdd_c_session_state *state)
 {
 	bool seen = false;
+	bool seen_vrf;
+
 	if (sess->discr_seen) {
 		printf("discr %u ", sess->discr);
 		seen = true;
@@ -774,27 +804,18 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		seen = true;
 	}
 
-	/* Prefer ifname to ifindex, but show both in verbose mode. */
-	if (sess->netif.name_seen) {
-		printf("ifname %s ", sess->netif.name);
+	if (bbdd_c_session_show_netif(&sess->netif, "netif"))
 		seen = true;
-	}
-	if ((!sess->netif.name_seen || bbdd_env.verbosity > 0) &&
-	    sess->netif.ifindex_seen) {
-		printf("ifindex %u ", sess->netif.ifindex);
-		seen = true;
-	}
 
 	/* Prefer VRF name to table ID, but show both in verbose mode. */
-	if (sess->vrf.netif.name_seen) {
-		printf("vrf %s ", sess->vrf.netif.name);
-		seen = true;
-	}
-	if ((!sess->vrf.netif.name_seen || bbdd_env.verbosity > 0) &&
+	seen_vrf = bbdd_c_session_show_netif(&sess->vrf.netif, "vrf");
+	if ((!seen_vrf || bbdd_env.verbosity > 0) &&
 	    sess->vrf.table_seen) {
-		printf("table %d ", sess->vrf.table);
-		seen = true;
+		printf("vrf-table %d ", sess->vrf.table);
+		seen_vrf = true;
 	}
+	if (seen_vrf)
+		seen = true;
 
 	if (!seen)
 		printf("(session without data)");
@@ -990,11 +1011,14 @@ static void bbdd_c_session_help(void)
 		"where	QUERY-PARAMS := PARAMS	-- parameters for session select\n"
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
-		"	PARAM ::= { KEY VALUE | [ no ] FLAG }\n"
+		"	PARAM ::= { KEY VALUE | no UNSET-KEY | [ no ] FLAG }\n"
 		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl |\n"
-		"	          detect-mult | ifname | ifindex | vrf | table }\n"
+		"	          detect-mult | netif | netif-index | vrf | vrf-index |\n"
+		"	          vrf-table }\n"
+		"	UNSET-KEY ::= { src | netif | vrf }\n"
 		"	FLAG ::= { multihop | demand | cbit | ipv6 | passive | shutdown }\n"
-		"	no FLAG		-- set the flag to negative value"
+		"	no FLAG		-- set the flag to negative value\n"
+		"	no NETIF-KEY	-- unset a given key\n"
 		"\n"
 		"Parameter KEY and VALUE details:\n"
 		"	discr U32 	-- session discriminator\n"
@@ -1005,9 +1029,10 @@ static void bbdd_c_session_help(void)
 		"	hold-time U32	-- session start wait time in miliseconds\n"
 		"	ttl U8		-- minimum packet TTL\n"
 		"	detect-mult U8	-- detection multiplier\n"
-		"	ifname STR	-- interface name\n"
-		"	ifindex U32	-- interface index\n"
+		"	netif STR	-- interface name\n"
+		"	netif-index U32	-- interface index\n"
 		"	vrf STR		-- VRF interface name\n"
+		"	vrf-index U32	-- VRF interface index\n"
 		"	table U32	-- routing table ID\n"
 		"\n"
 		"where	U8 := 8-bit numerical value (0..255)\n"
@@ -1296,6 +1321,100 @@ static int bbdd_c_parse_kw_addr(int *up_argc, char ***up_argv, const char *kw,
 			       bbdd_c_parse_addr);
 }
 
+static int
+bbdd_c_parse_netif_check_apply(struct bbdd_c_session_netif *ret_netif,
+			       struct bbdd_c_session_netif *new_netif,
+			       const char *kw, const char *flag_kw)
+{
+	if (ret_netif->unset) {
+		fprintf(stderr, "Duplicate keyword `%s', `no %s' already given.\n",
+			kw, flag_kw);
+		return -1;
+	}
+
+	*ret_netif = *new_netif;
+	return 1;
+}
+
+static int
+bbdd_c_parse_netif_ifindex(int *up_argc, char ***up_argv,
+			   const char *flag_kw, const char *ix_kw,
+			   struct bbdd_c_session_netif *ret_netif)
+{
+	struct bbdd_c_session_netif netif = *ret_netif;
+	int rc;
+
+	rc = bbdd_c_parse_kw_u32(up_argc, up_argv, ix_kw,
+				 &netif.ifindex, &netif.ifindex_seen);
+	if (rc <= 0)
+		return rc;
+
+	return bbdd_c_parse_netif_check_apply(ret_netif, &netif,
+					      ix_kw, flag_kw);
+}
+
+static int
+bbdd_c_parse_netif_kw(int *up_argc, char ***up_argv, const char *kw,
+		      struct bbdd_c_session_netif *ret_netif)
+{
+	struct bbdd_c_session_netif netif = *ret_netif;
+	int rc;
+
+	rc = bbdd_c_parse_kw_ifname(up_argc, up_argv, kw,
+				    netif.name, &netif.name_seen);
+	if (rc <= 0)
+		return rc;
+
+	return bbdd_c_parse_netif_check_apply(ret_netif, &netif,
+					      kw, kw);
+}
+
+static int
+bbdd_c_parse_netif_flag(int *up_argc, char ***up_argv,
+			const char *kw, const char *ix_kw,
+			struct bbdd_c_session_netif *ret_netif)
+{
+	struct bbdd_c_session_flag flag = {
+		.seen = ret_netif->unset,
+		.value = false,
+	};
+	int rc;
+
+	rc = bbdd_c_parse_kw_flag(up_argc, up_argv, kw, &flag);
+	if (rc <= 0)
+		return rc;
+
+	if (ret_netif->name_seen) {
+		fprintf(stderr, "Duplicate keyword `no %s', `%s' already given.\n",
+			kw, kw);
+		return -1;
+	}
+	if (ret_netif->ifindex_seen) {
+		fprintf(stderr, "Duplicate keyword `no %s', `%s' already given.\n",
+			kw, ix_kw);
+		return -1;
+	}
+
+	ret_netif->unset = true;
+	return 1;
+}
+
+static int bbdd_c_parse_netif(int *up_argc, char ***up_argv, const char *kw,
+			      struct bbdd_c_session_netif *ret_netif)
+{
+#define INDEX "-index"
+	char ix_kw[strlen(kw) + sizeof(INDEX)];
+	strcpy(stpcpy(ix_kw, kw), INDEX);
+#undef INDEX
+
+	/* Parse this as either `<kw>-index X', or `<kw> X', or when both fail,
+	 * as `no <kw>'. */
+	return bbdd_c_parse_netif_ifindex(up_argc, up_argv, kw, ix_kw,
+					  ret_netif) ?:
+	       bbdd_c_parse_netif_kw(up_argc, up_argv, kw, ret_netif) ?:
+	       bbdd_c_parse_netif_flag(up_argc, up_argv, kw, ix_kw, ret_netif);
+}
+
 #define BBDD_C_SESSION_EXPAND_NAME_STR(NAME, name, ...)	#name,
 static const char *bbdd_c_session_flag_names[] = {
 	BBDD_C_SESSION_FLAGS(BBDD_C_SESSION_EXPAND_NAME_STR)
@@ -1312,6 +1431,28 @@ static int bbdd_c_enomem(void)
 {
 	fprintf(stderr, "Failed to form RPC request: %m");
 	return -ENOMEM;
+}
+
+static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
+				    const char *base,
+				    const struct bbdd_c_session_netif *netif)
+{
+#define INDEX "_index"
+#define NAME "_name"
+	char ix_key[strlen(base) + sizeof(INDEX)];
+	char nm_key[strlen(base) + sizeof(NAME)];
+	strcpy(stpcpy(ix_key, base), INDEX);
+	strcpy(stpcpy(nm_key, base), NAME);
+#undef INDEX
+
+	if ((netif->unset &&
+	     json_object_object_add(params_obj, nm_key, NULL)) ||
+	    (netif->name_seen &&
+	     bbdd_jrpc_append_str(params_obj, nm_key, netif->name)) ||
+	    (netif->ifindex_seen &&
+	     bbdd_jrpc_append_int(params_obj, ix_key, netif->ifindex)))
+		return -1;
+	return 0;
 }
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
@@ -1350,12 +1491,8 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	    (sess->detect_mult_seen &&
 	     bbdd_jrpc_append_int(params_obj, "detect_mult",
 				  sess->detect_mult)) ||
-	    (sess->netif.ifindex_seen &&
-	     bbdd_jrpc_append_int(params_obj, "ifindex", sess->netif.ifindex)) ||
-	    (sess->netif.name_seen &&
-	     bbdd_jrpc_append_str(params_obj, "ifname", sess->netif.name)) ||
-	    (sess->vrf.netif.name_seen &&
-	     bbdd_jrpc_append_str(params_obj, "vrf", sess->vrf.netif.name)) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "netif", &sess->netif) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &sess->vrf.netif) ||
 	    (sess->vrf.table_seen &&
 	     bbdd_jrpc_append_int(params_obj, "vrf_table", sess->vrf.table)))
 		goto put_params_obj;
@@ -1468,6 +1605,20 @@ put_select:
 	return err;
 }
 
+static void
+bbdd_c_session_check_params_netif(const struct bbdd_c_session_netif *netif)
+{
+	/* Just make sure we haven't screwed up the constraints on netifs. */
+	if (netif->unset) {
+		assert(!netif->name_seen);
+		assert(!netif->ifindex_seen);
+	}
+	if (netif->name_seen)
+		assert(!netif->unset);
+	if (netif->ifindex_seen)
+		assert(!netif->unset);
+}
+
 static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 {
 	if (sess->src_af != 0 && sess->dst_af != 0 &&
@@ -1487,6 +1638,8 @@ static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
 		sess->flags.ipv6.value = true;
 	}
 
+	bbdd_c_session_check_params_netif(&sess->netif);
+	bbdd_c_session_check_params_netif(&sess->vrf.netif);
 	return 0;
 }
 
@@ -1583,16 +1736,11 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "detect-mult",
 					     &sess->detect_mult,
 					     &sess->detect_mult_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "ifindex",
-					      &sess->netif.ifindex,
-					      &sess->netif.ifindex_seen)) ||
-		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "ifname",
-						 sess->netif.name,
-						 &sess->netif.name_seen)) ||
-		    (rc = bbdd_c_parse_kw_ifname(&argc, &argv, "vrf",
-						 sess->vrf.netif.name,
-						 &sess->vrf.netif.name_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "table",
+		    (rc = bbdd_c_parse_netif(&argc, &argv, "netif",
+					     &sess->netif)) ||
+		    (rc = bbdd_c_parse_netif(&argc, &argv, "vrf",
+					     &sess->vrf.netif)) ||
+		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "vrf-table",
 					      &sess->vrf.table,
 					      &sess->vrf.table_seen)) ||
 
