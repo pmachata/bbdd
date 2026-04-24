@@ -1311,6 +1311,11 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 	uint16_t sport;
 	int rc;
 
+	if (!csess->dst_af) {
+		bbdd_util_fmterr(error, "No destination address");
+		return -1;
+	}
+
 	rc = bbdd_d_sport_get(spa, &sport);
 	if (rc) {
 		bbdd_util_fmterr(error, "Failed to allocate a unique source port for the new session");
