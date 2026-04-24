@@ -1236,15 +1236,16 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 #undef ASSIGN
 
-	/* A session marked as `shutdown' needs to be made admin down. On
-	 * contrary, an admin down session that is not `shutdown' anymore can be
-	 * set to INIT again. Otherwise don't touch the state. */
 	if (dsess->flags.shutdown) {
+		/* RFC: 6.18.6: [Unless enabling session] Set bfd.SessionState
+		 * to AdminDown */
 		dsess->local.state.state = BBDD_BFD_PKT_STATE_ADMINDOWN;
 		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_ADMIN_DOWN;
 	} else if (dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
-		dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
-		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
+		/* RFC: 6.18.6: If enabling session Set bfd.SessionState to
+		 * Down */
+		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
+		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
 	}
 
 	return 0;
@@ -1400,8 +1401,10 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 
 	dsess->src.sin46.port = sport;
 
-	dsess->local.state.state = BBDD_BFD_PKT_STATE_INIT;
-	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
+	/* RFC 6.2: Down state means that the session is down (or has just been
+	 * created). */
+	dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
+	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
 
 	dsess->remote.discr = 0;
 	dsess->remote.detect_mult = 1;
