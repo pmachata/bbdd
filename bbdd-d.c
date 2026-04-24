@@ -1182,6 +1182,12 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	/* Some things cannot be validated during parsing, but only when we see
 	 * the actual data. Validate them here. */
 
+	if (csess->discr_seen && dsess->local.discr != 0 &&
+	    csess->discr != dsess->local.discr) {
+		bbdd_util_fmterr(error, "Session discriminator change is not allowed");
+		return -1;
+	}
+
 	/* Validate address changes vs. destination AF. Destination address is
 	 * mandatory, but it could be unset if this is a new session. In that
 	 * case we know the change request must have a destination address. */
@@ -1591,13 +1597,6 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 		dsess = bbdd_sess_dir_get_session(d->sdir, discrs[i]);
 		if (dsess == NULL)
 			continue;
-
-		if (change.discr_seen && change.discr != dsess->local.discr) {
-			bbdd_util_fmterr(&error, "Cannot change session discriminator from %d to %d",
-					 dsess->local.discr, change.discr);
-			bbdd_d_respond_invalid_params(peer, id, &error);
-			goto free_discrs;
-		}
 
 		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &error);
 		if (rc != 0) {
