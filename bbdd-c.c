@@ -1244,12 +1244,8 @@ static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
 			what, str);
 		return -1;
 	}
-	if (val <= 0 || val > UINT32_MAX) {
-	oob:
-		fprintf(stderr, "Can't parse %s `%s': value out of bounds (0, uint32_max].\n",
-			what, str);
-		return -1;
-	}
+	if (val <= 0 || val > UINT32_MAX)
+		goto oob;
 
 	if (strcmp(end, "us") == 0 || *end == '\0') {
 		mult = 1;
@@ -1263,8 +1259,12 @@ static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
 		return -1;
 	}
 
-	if (val > UINT32_MAX / mult)
-		goto oob;
+	if (val > UINT32_MAX / mult) {
+oob:
+		fprintf(stderr, "Can't parse %s `%s': value out of bounds (0, uint32_max].\n",
+			what, str);
+		return -1;
+	}
 
 	*ret = (uint32_t)(val * mult);
 	return 0;
