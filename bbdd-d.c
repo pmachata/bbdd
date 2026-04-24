@@ -1919,12 +1919,23 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 
 static void
 bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
-				  const struct bfddp_session *bsess)
+				  const struct bfddp_message *msg)
 {
-	uint32_t discr = ntohl(bsess->lid);
+	uint16_t length = ntohs(msg->header.length);
+	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.session);
+	uint32_t discr;
 	char *error;
 	int rc;
 
+	if (length != exp_len) {
+		++d->diag_stats.dp_invalid_message_length;
+		if (bbdd_env.verbosity > 0)
+			fprintf(stderr, "bfdd: DP_DELETE_SESSION: Invalid length: got %u, expected %u\n",
+				length, exp_len);
+		return;
+	}
+
+	discr = ntohl(msg->data.session.lid);
 	rc = bbdd_d_handle_session_del_one(d, discr, &error);
 	if (rc != 0) {
 		++d->diag_stats.dp_no_session;
@@ -2001,7 +2012,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		return bbdd_d_bfdd_handle_add_session(d, msg);
 
 	case DP_DELETE_SESSION:
-		return bbdd_d_bfdd_handle_delete_session(d, &msg->data.session);
+		return bbdd_d_bfdd_handle_delete_session(d, msg);
 
 	case DP_REQUEST_SESSION_COUNTERS:
 		return bbdd_d_bfdd_handle_session_counters(d, msg);
