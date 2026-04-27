@@ -273,11 +273,11 @@ static bool bbdd_jrpc_validate_version(struct json_object *ver_obj,
 	return true;
 }
 
-int bbdd_jrpc_dissect_request(struct json_object *obj,
-			      struct json_object **id,
-			      const char **method,
-			      struct json_object **params,
-			      char **error)
+static int bbdd_jrpc_dissect_message(struct json_object *obj,
+				     struct json_object **id,
+				     const char **method,
+				     struct json_object **params,
+				     char **error)
 {
 	enum {
 		pol_jsonrpc,
@@ -289,7 +289,7 @@ int bbdd_jrpc_dissect_request(struct json_object *obj,
 		[pol_jsonrpc] = { .key = "jsonrpc", .type = json_type_string,
 				  .required = true },
 		[pol_id] =      { .key = "id", .any_type = true,
-				  .required = true },
+				  .required = (id != NULL) },
 		[pol_method] =  { .key = "method", .type = json_type_string,
 				  .required = true },
 		[pol_params] =  { .key = "params", .any_type = true },
@@ -306,10 +306,23 @@ int bbdd_jrpc_dissect_request(struct json_object *obj,
 	if (!bbdd_jrpc_validate_version(values[pol_jsonrpc], error))
 		return -1;
 
-	*id = values[pol_id];
+	if (id != NULL)
+		*id = values[pol_id];
 	*method = json_object_get_string(values[pol_method]);
 	*params = values[pol_params];
 	return 0;
+}
+
+int bbdd_jrpc_dissect_request(struct json_object *obj,
+			      struct json_object **id,
+			      const char **method,
+			      struct json_object **params,
+			      char **error)
+{
+	assert(id != NULL);
+	assert(method != NULL);
+	assert(params != NULL);
+	return bbdd_jrpc_dissect_message(obj, id, method, params, error);
 }
 
 int bbdd_jrpc_dissect_response(struct json_object *obj,
@@ -356,6 +369,16 @@ int bbdd_jrpc_dissect_response(struct json_object *obj,
 	*result = seen[pol_result] ? values[pol_result] : values[pol_error];
 	*is_error = seen[pol_error];
 	return 0;
+}
+
+int bbdd_jrpc_dissect_notif(struct json_object *obj,
+			    const char **method,
+			    struct json_object **params,
+			    char **error)
+{
+	assert(method != NULL);
+	assert(params != NULL);
+	return bbdd_jrpc_dissect_message(obj, NULL, method, params, error);
 }
 
 int bbdd_jrpc_dissect_error(struct json_object *obj,

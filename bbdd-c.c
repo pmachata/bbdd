@@ -2083,7 +2083,11 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 				  char **)
 {
 	struct bbdd_c_monitor_ctx *ctx = arg;
+	struct json_object *notif_obj;
+	struct json_object *params;
 	struct bbdd_sock sender;
+	const char *method;
+	char *error;
 	char *msg;
 	int err;
 
@@ -2093,8 +2097,24 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 		return 0;
 	}
 
-	printf("%s\n", msg);
+	notif_obj = json_tokener_parse(msg);
+	if (notif_obj == NULL) {
+		fprintf(stderr, "Monitor message not JSON: `%s'\n", msg);
+		goto free_msg;
+	}
+
+	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
+	if (err) {
+		bbdd_util_printerr(&error, "Failed to dissect monitor event");
+		goto put_notif_obj;
+	}
+
+	printf("%s: %s\n", method, msg);
 	fflush(stdout);
+
+put_notif_obj:
+	json_object_put(notif_obj);
+free_msg:
 	free(msg);
 	return 0;
 }

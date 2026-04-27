@@ -60,6 +60,10 @@ int bbdd_jrpc_dissect_response(struct json_object *obj,
 			       struct json_object **result,
 			       bool *is_error,
 			       char **error);
+int bbdd_jrpc_dissect_notif(struct json_object *obj,
+			    const char **method,
+			    struct json_object **params,
+			    char **error);
 int bbdd_jrpc_dissect_error(struct json_object *obj,
 			    int64_t *code,
 			    const char **message,
