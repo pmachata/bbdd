@@ -17,4 +17,7 @@ int bbdd_poll_unset_fd(struct bbdd_poll_ctx *ctx, int fd);
 
 void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx);
 
+int bbdd_poll_set_signals(struct bbdd_poll_ctx *ctx, char **error);
+void bbdd_poll_unset_signals(struct bbdd_poll_ctx *ctx);
+
 int bbdd_poll_loop(struct bbdd_poll_ctx *ctx, char **error);

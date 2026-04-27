@@ -4,8 +4,11 @@
 #include <assert.h>
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/signalfd.h>
 
 #include "bbdd.h"
 #include "bbdd-util.h"
@@ -20,6 +23,7 @@ struct bbdd_poll_ctx {
 	struct bbdd_poll_cb *cbs;
 	size_t num;
 	bool should_quit;
+	int sig_fd;
 };
 
 void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx)
@@ -36,7 +40,7 @@ struct bbdd_poll_ctx *bbdd_poll_init(void)
 	pctx = malloc(sizeof(*pctx));
 	if (pctx == NULL)
 		return NULL;
-	*pctx = (struct bbdd_poll_ctx){};
+	*pctx = (struct bbdd_poll_ctx){ .sig_fd = -1 };
 	return pctx;
 }
 
@@ -128,6 +132,64 @@ int bbdd_poll_unset_fd(struct bbdd_poll_ctx *pctx, int fd)
 			return 0;
 		}
 	return -ESRCH;
+}
+
+static int bbdd_poll_sig_cb(struct bbdd_poll_ctx *pctx, short, void *,
+			    char **)
+{
+	struct signalfd_siginfo info;
+	sigset_t mask;
+
+	read(pctx->sig_fd, &info, sizeof(info));
+
+	/* Graceful shutdown on first signal. Restore the default disposition
+	 * and unblock so that a subsequent signal (e.g. a repeated Ctrl-C)
+	 * terminates the process immediately. */
+	signal(SIGINT, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
+	sigprocmask(SIG_UNBLOCK, &mask, NULL);
+
+	bbdd_poll_request_quit(pctx);
+	return 0;
+}
+
+int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
+{
+	sigset_t mask;
+	int sig_fd;
+	int err;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
+	sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+	if (sig_fd < 0) {
+		bbdd_util_fmterr(error, "signalfd: %m");
+		return -1;
+	}
+
+	err = bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
+			       bbdd_poll_sig_cb, NULL, error);
+	if (err != 0) {
+		close(sig_fd);
+		return -1;
+	}
+
+	pctx->sig_fd = sig_fd;
+	return 0;
+}
+
+void bbdd_poll_unset_signals(struct bbdd_poll_ctx *pctx)
+{
+	assert(pctx->sig_fd >= 0);
+	bbdd_poll_unset_fd(pctx, pctx->sig_fd);
+	close(pctx->sig_fd);
+	pctx->sig_fd = -1;
 }
 
 int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)

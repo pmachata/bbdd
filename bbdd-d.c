@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,7 +16,6 @@
 #include <arpa/inet.h>
 #include <netpacket/packet.h>
 #include <sys/resource.h>
-#include <sys/signalfd.h>
 
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
@@ -2623,28 +2621,6 @@ fini_veth:
 	return err;
 }
 
-static int bbdd_d_sig_cb(struct bbdd_poll_ctx *pctx, short, void *data,
-			 char **)
-{
-	struct signalfd_siginfo info;
-	sigset_t mask;
-	int fd = *(int *) data;
-
-	read(fd, &info, sizeof(info));
-
-	/* Graceful shutdown on first signal. Restore the default disposition
-	 * and unblock so that a subsequent signal (e.g. a repeated Ctrl-C)
-	 * terminates the process immediately. */
-	signal(SIGINT, SIG_DFL);
-	signal(SIGTERM, SIG_DFL);
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGINT);
-	sigaddset(&mask, SIGTERM);
-	sigprocmask(SIG_UNBLOCK, &mask, NULL);
-
-	bbdd_poll_request_quit(pctx);
-	return 0;
-}
 
 static int bbdd_d_do_start(void)
 {
@@ -2653,9 +2629,7 @@ static int bbdd_d_do_start(void)
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
-	sigset_t sig_mask;
 	char *error;
-	int sig_fd;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
@@ -2710,22 +2684,10 @@ static int bbdd_d_do_start(void)
 		goto sock_close_d;
 	}
 
-	sigemptyset(&sig_mask);
-	sigaddset(&sig_mask, SIGINT);
-	sigaddset(&sig_mask, SIGTERM);
-	sigprocmask(SIG_BLOCK, &sig_mask, NULL);
-
-	sig_fd = signalfd(-1, &sig_mask, SFD_NONBLOCK | SFD_CLOEXEC);
-	if (sig_fd < 0) {
-		fprintf(stderr, "Failed to create signalfd: %m\n");
-		goto sock_close_d;
-	}
-
-	err = bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
-			       bbdd_d_sig_cb, &sig_fd, &error);
+	err = bbdd_poll_set_signals(pctx, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to register signal fd");
-		goto sig_fd_close;
+		bbdd_util_printerr(&error, "Failed to set up signal handling");
+		goto sock_close_d;
 	}
 
 	err = bbdd_poll_loop(pctx, &error);
@@ -2735,8 +2697,7 @@ static int bbdd_d_do_start(void)
 	if (d.bfdd != NULL)
 		bbdd_bfdd_close(d.bfdd);
 
-sig_fd_close:
-	close(sig_fd);
+	bbdd_poll_unset_signals(pctx);
 sock_close_d:
 	bbdd_sock_close_d(&d.ctl);
 bpf_destroy:
