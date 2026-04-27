@@ -53,13 +53,13 @@ bbdd_bfd_pkt_diag(const struct bbdd_bfd_pkt *packet)
 }
 
 static inline uint8_t
-bbdd_bpf_pkt_state(const struct bbdd_bfd_pkt *packet)
+bbdd_bfd_pkt_state(const struct bbdd_bfd_pkt *packet)
 {
 	return packet->state_bits >> 6;
 }
 
 static inline uint8_t
-bbdd_bpf_pkt_bits(const struct bbdd_bfd_pkt *packet)
+bbdd_bfd_pkt_bits(const struct bbdd_bfd_pkt *packet)
 {
 	return packet->state_bits & 0x3f;
 }

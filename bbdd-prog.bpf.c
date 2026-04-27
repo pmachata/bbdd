@@ -362,7 +362,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	if (bfd == NULL)
 		goto tx_not_bfd;
 
-	final = bbdd_bpf_pkt_bits(bfd) & BBDD_BFD_PKT_BIT_FINAL;
+	final = bbdd_bfd_pkt_bits(bfd) & BBDD_BFD_PKT_BIT_FINAL;
 
 	id = bpf_ntohl(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &id);

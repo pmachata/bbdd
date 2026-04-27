@@ -275,14 +275,14 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 		      struct bbdd_d_session_data *data,
 		      bool *poll, bool *final)
 {
-	uint8_t bits = bbdd_bpf_pkt_bits(packet);
+	uint8_t bits = bbdd_bfd_pkt_bits(packet);
 	uint32_t remote_discr = ntohl(packet->my_disc);
 	uint32_t local_discr = ntohl(packet->your_disc);
 	enum bbdd_bfd_pkt_state state;
 
 	/* Note: Version and length are validated in BPF. */
 
-	state = bbdd_bpf_pkt_state(packet);
+	state = bbdd_bfd_pkt_state(packet);
 
 	if (packet->required_echo_rx != 0 ||
 	    bits & (BBDD_BFD_PKT_BIT_AUTH |
