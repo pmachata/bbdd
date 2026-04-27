@@ -1210,8 +1210,8 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		if (new_src_af != 0 && new_src_af != new_dst_af) {
 			bbdd_util_fmterr(error,
 					 "%s destination but %s source address",
-					 bbdd_af_to_sock_name(new_dst_af),
-					 bbdd_af_to_sock_name(new_src_af));
+					 bbdd_sock_af_to_str(new_dst_af),
+					 bbdd_sock_af_to_str(new_src_af));
 			return -1;
 		}
 	}
@@ -2247,7 +2247,7 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 	addr = json_object_get_string(values[pol_addr]);
 	port = json_object_get_string(values[pol_port]);
 
-	af = bbdd_sock_name_to_af(proto, &error);
+	af = bbdd_sock_af_from_str(proto, &error);
 	if (af < 0)
 		return bbdd_d_respond_invalid_params(peer, id, &error);
 

@@ -338,7 +338,7 @@ static struct bbdd_sock_proto bbdd_sock_protos[] = {
 	{ AF_INET6, "ipv6" },
 };
 
-int bbdd_sock_name_to_af(const char *proto, char **error)
+int bbdd_sock_af_from_str(const char *proto, char **error)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(bbdd_sock_protos); i++)
 		if (strcmp(proto, bbdd_sock_protos[i].name) == 0)
@@ -348,7 +348,7 @@ int bbdd_sock_name_to_af(const char *proto, char **error)
 	return -1;
 }
 
-const char *bbdd_af_to_sock_name(int af)
+const char *bbdd_sock_af_to_str(int af)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(bbdd_sock_protos); i++)
 		if (bbdd_sock_protos[i].af == af)
@@ -374,7 +374,7 @@ int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 	*colon = '\0';
 	*ret_proto = arg;
 
-	af = bbdd_sock_name_to_af(arg, error);
+	af = bbdd_sock_af_from_str(arg, error);
 	if (af < 0)
 		return af;
 
