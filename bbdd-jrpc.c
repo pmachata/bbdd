@@ -15,44 +15,6 @@
 
 #include "bbdd-util.h"
 
-static int __bbdd_jrpc_object_add(struct json_object *obj,
-				  const char *key,
-				  struct json_object *val_obj)
-{
-	int rc;
-
-	if (val_obj == NULL)
-		return -1;
-
-	rc = json_object_object_add(obj, key, val_obj);
-	if (rc != 0)
-		goto err_put_val_obj;
-
-	return 0;
-
-err_put_val_obj:
-	json_object_put(val_obj);
-	return -1;
-}
-
-int bbdd_jrpc_object_add_int(struct json_object *obj,
-			     const char *key, int64_t val)
-{
-	return __bbdd_jrpc_object_add(obj, key, json_object_new_int64(val));
-}
-
-int bbdd_jrpc_object_add_str(struct json_object *obj,
-			     const char *key, const char *str)
-{
-	return __bbdd_jrpc_object_add(obj, key, json_object_new_string(str));
-}
-
-int bbdd_jrpc_object_add_bool(struct json_object *obj,
-			      const char *key, bool val)
-{
-	return __bbdd_jrpc_object_add(obj, key, json_object_new_boolean(val));
-}
-
 static int bbdd_jrpc_object_add_error(struct json_object *obj,
 				      int code, const char *message,
 				      struct json_object *data)
@@ -64,11 +26,11 @@ static int bbdd_jrpc_object_add_error(struct json_object *obj,
 	if (err_obj == NULL)
 		return -1;
 
-	rc = bbdd_jrpc_object_add_int(err_obj, "code", code);
+	rc = bbdd_jrpc_append_int(err_obj, "code", code);
 	if (rc != 0)
 		goto err_put_err_obj;
 
-	rc = bbdd_jrpc_object_add_str(err_obj, "message", message);
+	rc = bbdd_jrpc_append_str(err_obj, "message", message);
 	if (rc != 0)
 		goto err_put_err_obj;
 
@@ -99,7 +61,7 @@ struct json_object *bbdd_jrpc_new_object(struct json_object *id)
 	if (obj == NULL)
 		return NULL;
 
-	rc = bbdd_jrpc_object_add_str(obj, "jsonrpc", "2.0");
+	rc = bbdd_jrpc_append_str(obj, "jsonrpc", "2.0");
 	if (rc != 0)
 		goto err_put_obj;
 
@@ -133,7 +95,7 @@ struct json_object *bbdd_jrpc_new_request(int id, const char *method)
 		goto put_id;
 	}
 
-	rc = bbdd_jrpc_object_add_str(request, "method", method);
+	rc = bbdd_jrpc_append_str(request, "method", method);
 	if (rc != 0) {
 		fprintf(stderr, "Failed to form a request object.\n");
 		goto put_request;

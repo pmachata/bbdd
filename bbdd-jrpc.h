@@ -25,13 +25,6 @@ struct bbdd_jrpc_policy {
 	bool required;
 };
 
-int bbdd_jrpc_object_add_int(struct json_object *obj,
-			     const char *key, int64_t val);
-int bbdd_jrpc_object_add_str(struct json_object *obj,
-			     const char *key, const char *str);
-int bbdd_jrpc_object_add_bool(struct json_object *obj,
-			      const char *key, bool val);
-
 struct json_object *bbdd_jrpc_new_object(struct json_object *id);
 struct json_object *bbdd_jrpc_new_request(int id, const char *method);
 struct json_object *bbdd_jrpc_new_error(struct json_object *id,

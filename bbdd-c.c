@@ -212,7 +212,7 @@ static int bbdd_c_ping_jrpc(void)
 
 	srand((unsigned int)time(NULL));
 	r = rand();
-	rc = bbdd_jrpc_object_add_int(request, "params", r);
+	rc = bbdd_jrpc_append_int(request, "params", r);
 	if (rc != 0) {
 		fprintf(stderr, "Failed to form a request object.\n");
 		err = -1;
@@ -1878,10 +1878,10 @@ static int bbdd_c_bfdd_connect_jrpc(const char *proto,
 	if (params_obj == NULL)
 		goto put_request;
 
-	if (bbdd_jrpc_object_add_str(params_obj, "proto", proto) != 0 ||
-	    bbdd_jrpc_object_add_str(params_obj, "addr", addr) != 0 ||
+	if (bbdd_jrpc_append_str(params_obj, "proto", proto) ||
+	    bbdd_jrpc_append_str(params_obj, "addr", addr) ||
 	    (port != NULL &&
-	     bbdd_jrpc_object_add_str(params_obj, "port", port))) {
+	     bbdd_jrpc_append_str(params_obj, "port", port))) {
 		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
