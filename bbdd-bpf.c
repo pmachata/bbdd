@@ -985,10 +985,88 @@ bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 	}
 }
 
+static struct json_object *
+bbdd_bpf_rb_format_tx_no_neighbor(
+	const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem, char **error)
+{
+	return NULL;
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_rx_discr_0(
+	const struct bbdd_bpf_rb_elem_rx_discr_0 *elem, char **error)
+{
+	return NULL;
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_rx_unx_packet(
+	const struct bbdd_bpf_rb_elem_rx_unx_packet *elem, char **error)
+{
+	return NULL;
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_rx_timeout(
+	const struct bbdd_bpf_rb_elem_rx_timeout *elem, char **error)
+{
+	return NULL;
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head, char **error)
+{
+	const void *data = head;
+
+	switch (head->type) {
+	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
+		return bbdd_bpf_rb_format_tx_no_neighbor(data, error);
+	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
+		return bbdd_bpf_rb_format_rx_discr_0(data, error);
+	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
+		return bbdd_bpf_rb_format_rx_unx_packet(data, error);
+	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
+		return bbdd_bpf_rb_format_rx_timeout(data, error);
+	}
+
+	bbdd_util_fmterr(error, "Unknown ring buffer element type %d",
+			 head->type);
+	return NULL;
+}
+
+static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
+				 struct bbdd_mon *mon,
+				 const struct bbdd_bpf_rb_elem_head *head)
+{
+	struct json_object *msg;
+	char *error;
+	int rc;
+
+	msg = bbdd_bpf_rb_format_jrpc(head, &error);
+	if (msg == NULL) {
+		msg = bbdd_jrpc_new_error_int_error(NULL, error);
+		if (msg == NULL)
+			goto err;
+	}
+
+	rc = bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_ringbuf, &error);
+	json_object_put(msg);
+	if (rc != 0)
+		goto err;
+
+	return;
+
+err:
+	++bpf->diag_stats.monitor_error;
+	bbdd_util_printerr(&error, "Failed to send monitor message");
+}
+
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = ctx;
 	const struct bbdd_bpf_rb_elem_head *head = data;
+
+	bbdd_bpf_rb_mon_send(rb_ctx->bpf, rb_ctx->mon, head);
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:

@@ -13,6 +13,7 @@
 	FIELD(ring_buffer_error)		\
 	FIELD(sk_lookup_no_socket)		\
 	FIELD(sk_lookup_assign_error)		\
+	FIELD(monitor_error)			\
 	/**/
 
 #define BBDD_PROG_SESSION_DIAG_STATS(FIELD)	\
