@@ -27,6 +27,7 @@
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-mon.h"
 #include "bbdd-nl.h"
 #include "bbdd-prog.h"
 #include "bbdd-util.h"
@@ -47,6 +48,7 @@ struct bbdd_bpf_rb_context {
 	struct ring_buffer *rb;
 	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
+	struct bbdd_mon *mon;
 	char **error;
 };
 
@@ -1023,7 +1025,7 @@ static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data,
 static struct bbdd_bpf_rb_context *
 bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 		 struct bbdd_nl *nl, struct bbdd_sess_dir *sdir,
-		 char **error)
+		 struct bbdd_mon *mon, char **error)
 {
 	struct bbdd_bpf_rb_context *rb_ctx;
 	struct ring_buffer *rb;
@@ -1053,6 +1055,7 @@ bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 		.rb = rb,
 		.nl = nl,
 		.sdir = sdir,
+		.mon = mon,
 	};
 	return rb_ctx;
 
@@ -1345,6 +1348,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
 				 struct bbdd_sess_dir *sdir,
+				 struct bbdd_mon *mon,
 				 char **error)
 {
 	struct bbdd_bpf *bpf;
@@ -1366,7 +1370,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto free_bpf;
 	}
 
-	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, error);
+	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, mon, error);
 	if (bpf->rb_ctx == NULL)
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;

@@ -17,6 +17,10 @@ struct bbdd_bpf_global_config;
 
 struct bbdd_prog_session_data_stats;
 
+/* bbdd-mon.c */
+
+struct bbdd_mon;
+
 /* bbdd-bpf.c */
 
 struct bbdd_bpf;
@@ -26,6 +30,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
 				 struct bbdd_sess_dir *sdir,
+				 struct bbdd_mon *mon,
 				 char **error);
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf);
 

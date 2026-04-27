@@ -2714,7 +2714,7 @@ static int bbdd_d_do_start(void)
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
 
-	d.bpf = bbdd_bpf_create(pctx, d.nl, &bpf_conf, d.sdir, &error);
+	d.bpf = bbdd_bpf_create(pctx, d.nl, &bpf_conf, d.sdir, d.mon, &error);
 	if (d.bpf == NULL) {
 		bbdd_util_printerr(&error,  "Failed to initialize BPF");
 		goto fini_veth;
