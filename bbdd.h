@@ -121,6 +121,7 @@ struct bbdd_c_session {
 };
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
+struct json_object *bbdd_c_jrpc_addr_obj(const char *addr, int af);
 
 /* bbdd-d.c */
 

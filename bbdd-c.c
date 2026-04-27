@@ -1514,6 +1514,25 @@ static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
 	return 0;
 }
 
+struct json_object *bbdd_c_jrpc_addr_obj(const char *addr, int af)
+{
+	struct json_object *obj;
+
+	obj = json_object_new_object();
+	if (obj == NULL)
+		return NULL;
+
+	if (bbdd_jrpc_append_str(obj, "addr", addr) ||
+	    bbdd_jrpc_append_str(obj, "family", bbdd_sock_af_to_str(af)))
+		goto put_obj;
+
+	return obj;
+
+put_obj:
+	json_object_put(obj);
+	return NULL;
+}
+
 static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
 				   const char *kw,
 				   const struct bbdd_c_session_addr *addr)
@@ -1525,14 +1544,11 @@ static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
 	if (addr->af == 0)
 		return 0;
 
-	obj = json_object_new_object();
+	obj = bbdd_c_jrpc_addr_obj(addr->str, addr->af);
 	if (obj == NULL)
 		return -1;
 
-	if (bbdd_jrpc_append_str(obj, "addr", addr->str) ||
-	    bbdd_jrpc_append_str(obj, "family",
-				 bbdd_af_to_sock_name(addr->af)) ||
-	    json_object_object_add(params_obj, kw, obj))
+	if (json_object_object_add(params_obj, kw, obj))
 		goto obj_put;
 
 	return 0;
