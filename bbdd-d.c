@@ -1176,7 +1176,6 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				  char **error)
 {
 	uint16_t sport;
-	int af;
 	int err;
 
 	/* Some things cannot be validated during parsing, but only when we see
@@ -1188,26 +1187,33 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		return -1;
 	}
 
-	/* Validate address changes vs. destination AF. Destination address is
-	 * mandatory, but it could be unset if this is a new session. In that
-	 * case we know the change request must have a destination address. */
-	if (dsess->dst.sin46.family != 0)
-		af = dsess->dst.sin46.family;
-	else
-		af = csess->dst.af;
-	assert(af != 0);
+	/* Validate that src and dst will end up with the same address family.
+	 * Determine what each will be after applying the change. */
+	{
+		int new_dst_af;
+		int new_src_af;
 
-	if (csess->src.af != 0 && csess->src.af != af) {
-		bbdd_util_fmterr(error, "%s session, but %s source address given",
-				 bbdd_af_to_sock_name(af),
-				 bbdd_af_to_sock_name(csess->src.af));
-		return -1;
-	}
-	if (csess->dst.af != 0 && csess->dst.af != af) {
-		bbdd_util_fmterr(error, "%s session, but %s destination address given",
-				 bbdd_af_to_sock_name(af),
-				 bbdd_af_to_sock_name(csess->dst.af));
-		return -1;
+		assert(!csess->dst.unset);
+		if (csess->dst.af != 0)
+			new_dst_af = csess->dst.af;
+		else
+			new_dst_af = dsess->dst.sin46.family;
+		assert(new_dst_af != 0);
+
+		if (csess->src.unset)
+			new_src_af = 0;
+		else if (csess->src.af != 0)
+			new_src_af = csess->src.af;
+		else
+			new_src_af = dsess->src.sin46.family;
+
+		if (new_src_af != 0 && new_src_af != new_dst_af) {
+			bbdd_util_fmterr(error,
+					 "%s destination but %s source address",
+					 bbdd_af_to_sock_name(new_dst_af),
+					 bbdd_af_to_sock_name(new_src_af));
+			return -1;
+		}
 	}
 
 	/* To validate VRF, construct a VRF configuration view from the current
