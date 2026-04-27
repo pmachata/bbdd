@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 #include <assert.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -12,6 +13,8 @@
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-mon.h"
+#include "bbdd-poll.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
@@ -2057,4 +2060,203 @@ int bbdd_c_bfdd(int argc, char **argv)
 
 	fprintf(stderr, "What is \"%s\"?\n", *argv);
 	return -1;
+}
+
+static void bbdd_c_monitor_help(void)
+{
+	fprintf(stderr,
+		"Usage: bbdd monitor [ TOPICS ]\n"
+		"\n"
+		"where  TOPICS := TOPIC [ TOPICS ]\n"
+		"       TOPIC  := { all | ringbuf | session }\n"
+		"\n"
+		"Subscribe to daemon monitoring topics and print received notifications.\n"
+		"When no TOPICS are given, all topics are subscribed.\n"
+	);
+}
+
+struct bbdd_c_monitor_ctx {
+	struct bbdd_sock cli;
+};
+
+static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
+				  char **)
+{
+	struct bbdd_c_monitor_ctx *ctx = arg;
+	struct bbdd_sock sender;
+	char *msg;
+	int err;
+
+	err = bbdd_sock_recv(&ctx->cli, &sender, &msg);
+	if (err < 0) {
+		bbdd_poll_request_quit(pctx);
+		return 0;
+	}
+
+	printf("%s\n", msg);
+	fflush(stdout);
+	free(msg);
+	return 0;
+}
+
+static struct json_object *
+bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id)
+{
+	struct json_object *topics_arr;
+	struct json_object *params_obj;
+	struct json_object *request;
+
+	request = bbdd_jrpc_new_request(id, "monitor-subscribe");
+	if (request == NULL)
+		return NULL;
+
+	params_obj = json_object_new_object();
+	if (params_obj == NULL)
+		goto put_request;
+
+	topics_arr = json_object_new_array();
+	if (topics_arr == NULL)
+		goto put_params;
+
+#define X(NAME)								\
+	if (topics.enabled[BBDD_MON_TOPIC_ ## NAME]) {			\
+		struct json_object *s = json_object_new_string(#NAME);	\
+		if (s == NULL || json_object_array_add(topics_arr, s)) {	\
+			json_object_put(s);				\
+			goto put_topics;				\
+		}							\
+	}
+	BBDD_MON_TOPICS(X)
+#undef X
+
+	if (bbdd_jrpc_append_obj(params_obj, "topics", &topics_arr))
+		goto put_topics;
+
+	if (bbdd_jrpc_append_obj(request, "params", &params_obj))
+		goto put_params;
+
+	return request;
+
+put_topics:
+	json_object_put(topics_arr);
+put_params:
+	json_object_put(params_obj);
+put_request:
+	json_object_put(request);
+	return NULL;
+}
+
+static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
+{
+	struct bbdd_c_monitor_ctx mctx = {};
+	struct bbdd_poll_ctx *pctx;
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *result;
+	struct bbdd_sock peer;
+	const int id = 1;
+	char *error;
+	int err;
+
+	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir);
+	if (err < 0) {
+		fprintf(stderr, "Failed to open socket: %m\n");
+		return -1;
+	}
+
+	request = bbdd_c_monitor_build_request(topics, id);
+	if (request == NULL) {
+		err = -1;
+		goto close_cli;
+	}
+
+	response = bbdd_c_send_request_on(request, &mctx.cli, &peer);
+	json_object_put(request);
+	if (response == NULL) {
+		err = -1;
+		goto close_cli;
+	}
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_null,
+					    &result)) {
+		json_object_put(response);
+		err = -1;
+		goto close_cli;
+	}
+
+	json_object_put(result);
+	json_object_put(response);
+
+	pctx = bbdd_poll_init();
+	if (pctx == NULL) {
+		fprintf(stderr, "Failed to initialize poll context: %m\n");
+		err = -1;
+		goto close_cli;
+	}
+
+	err = bbdd_poll_set_signals(pctx, &error);
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to set up signal handling");
+		goto fini_pctx;
+	}
+
+	err = bbdd_poll_set_fd(pctx, mctx.cli.fd, POLLIN,
+			       bbdd_c_monitor_recv_cb, &mctx, &error);
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to register monitor socket");
+		goto unset_signals;
+	}
+
+	err = bbdd_poll_loop(pctx, &error);
+	if (err != 0)
+		bbdd_util_printerr(&error, "Monitor loop failed");
+
+unset_signals:
+	bbdd_poll_unset_signals(pctx);
+fini_pctx:
+	bbdd_poll_fini(pctx);
+close_cli:
+	bbdd_sock_close_c(&mctx.cli);
+	return err;
+}
+
+int bbdd_c_monitor(int argc, char **argv)
+{
+	struct bbdd_mon_topics topics = {};
+	bool have_topics = false;
+	bool have_all = false;
+
+	while (argc > 0) {
+		if (strcmp(*argv, "help") == 0) {
+			bbdd_c_monitor_help();
+			return 0;
+		} else if (strcmp(*argv, "all") == 0) {
+			have_all = true;
+			have_topics = true;
+		} else {
+			bool found = false;
+
+#define MATCH(NAME)							\
+			if (strcmp(*argv, #NAME) == 0) {		\
+				topics.enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
+				found = true;				\
+			}
+			BBDD_MON_TOPICS(MATCH)
+#undef MATCH
+
+			if (!found) {
+				fprintf(stderr, "What is \"%s\"?\n", *argv);
+				return -1;
+			}
+			have_topics = true;
+		}
+		NEXT_ARG_FWD();
+	}
+
+	if (!have_topics || have_all) {
+		for (int i = 0; i < bbdd_mon_ntopics; i++)
+			topics.enabled[i] = true;
+	}
+
+	return bbdd_c_monitor_jrpc(topics);
 }

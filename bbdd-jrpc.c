@@ -65,10 +65,12 @@ struct json_object *bbdd_jrpc_new_object(struct json_object *id)
 	if (rc != 0)
 		goto err_put_obj;
 
-	rc = json_object_object_add(obj, "id", id);
-	if (rc != 0)
-		goto err_put_obj;
-	json_object_get(id);
+	if (id != NULL) {
+		rc = json_object_object_add(obj, "id", id);
+		if (rc != 0)
+			goto err_put_obj;
+		json_object_get(id);
+	}
 
 	return obj;
 

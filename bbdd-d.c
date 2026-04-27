@@ -26,6 +26,7 @@
 #include "bbdd-bfdd.h"
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-mon.h"
 #include "bbdd-nl.h"
 #include "bbdd-prog.h"
 #include "bbdd-poll.h"
@@ -79,6 +80,7 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 struct bbdd_d {
 	struct bbdd_bfdd *bfdd;
 	struct bbdd_bpf *bpf;
+	struct bbdd_mon *mon;
 	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
@@ -2294,6 +2296,67 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 	bbdd_d_respond_empty(peer, id);
 }
 
+static void bbdd_d_handle_monitor_subscribe(struct bbdd_d *d,
+					    struct bbdd_sock *peer,
+					    struct json_object *params_obj,
+					    struct json_object *id)
+{
+	enum {
+		pol_topics,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_topics] = { .key = "topics", .type = json_type_array,
+				 .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct bbdd_mon_topics topics = {};
+	struct json_object *topics_arr;
+	char *error = NULL;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), &error);
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	topics_arr = values[pol_topics];
+
+	rc = bbdd_jrpc_validate_array(topics_arr, json_type_string, &error);
+	if (rc != 0)
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+
+	size_t len = json_object_array_length(topics_arr);
+	if (len == 0) {
+		bbdd_util_fmterr(&error, "topics: list must be non-empty");
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+	}
+
+	for (size_t i = 0; i < len; i++) {
+		struct json_object *elm;
+
+		elm = json_object_array_get_idx(topics_arr, i);
+		const char *name = json_object_get_string(elm);
+
+#define MATCH(NAME)							\
+		if (strcmp(name, #NAME) == 0) {				\
+			topics.enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
+			continue;					\
+		}
+		BBDD_MON_TOPICS(MATCH)
+#undef MATCH
+
+		bbdd_util_fmterr(&error, "Unknown topic `%s'", name);
+		return bbdd_d_respond_invalid_params(peer, id, &error);
+	}
+
+	rc = bbdd_mon_subscribe(d->mon, peer, topics, &error);
+	if (rc != 0)
+		return bbdd_d_respond_interr(peer, id, &error);
+
+	bbdd_d_respond_empty(peer, id);
+}
+
 static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 				 struct bbdd_d *d,
 				 struct bbdd_sock *peer,
@@ -2325,6 +2388,8 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 		bbdd_d_handle_bfdd_connected(d, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
 		bbdd_d_handle_bfdd_disconnect(d, peer, params_obj, id);
+	else if (strcmp(method, "monitor-subscribe") == 0)
+		bbdd_d_handle_monitor_subscribe(d, peer, params_obj, id);
 	else
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
@@ -2629,13 +2694,19 @@ static int bbdd_d_do_start(void)
 		goto poll_fini;
 	}
 
+	d.mon = bbdd_mon_init();
+	if (d.mon == NULL) {
+		fprintf(stderr, "Failed to create monitoring message bus: %m\n");
+		goto sess_dir_destroy;
+	}
+
 	err = bbdd_d_start_init_veth(d.nl,
 				     &veth_rx_ifindex,
 				     &veth_tx_ifindex,
 				     &error);
 	if (err) {
 		bbdd_util_printerr(&error,  "Failed to prepare veth pair");
-		goto sess_dir_destroy;
+		goto mon_fini;
 	}
 
 	bpf_conf = (struct bbdd_bpf_global_config) {
@@ -2680,6 +2751,8 @@ bpf_destroy:
 	bbdd_bpf_destroy(d.bpf);
 fini_veth:
 	bbdd_d_start_fini_veth(d.nl);
+mon_fini:
+	bbdd_mon_fini(d.mon);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(d.sdir);
 poll_fini:
