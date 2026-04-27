@@ -91,7 +91,7 @@ struct bbdd_d {
 static void __bbdd_d_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
 	if (obj != NULL) {
-		bbdd_jrpc_send(ctl, obj);
+		bbdd_util_jrpc_send(ctl, obj);
 		json_object_put(obj);
 	}
 }
@@ -169,7 +169,7 @@ static void bbdd_d_handle_ping(struct bbdd_sock *peer,
 		goto put_obj;
 	json_object_get(params_obj);
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 	return;
 
@@ -189,7 +189,7 @@ static void bbdd_d_respond_empty(struct bbdd_sock *peer, struct json_object *id)
 	if (json_object_object_add(obj, "result", NULL))
 		goto put_obj;
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 	return;
 
@@ -278,7 +278,7 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	if (rc != 0)
 		goto put_obj;
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 	return;
 
@@ -1141,7 +1141,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	if (json_object_object_add(obj, "result", result_obj))
 		goto put_result_obj;
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 	return;
 
@@ -1736,7 +1736,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 		goto put_array;
 	result_obj = NULL;
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 	return;
 
@@ -2290,7 +2290,7 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 		return bbdd_d_respond_memerr(peer, id);
 	}
 
-	bbdd_jrpc_send(peer, obj);
+	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);
 }
 

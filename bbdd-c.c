@@ -130,7 +130,7 @@ static struct json_object *bbdd_c_send_request_on(struct json_object *request,
 	char *response;
 	int err;
 
-	err = bbdd_jrpc_send(peer, request);
+	err = bbdd_util_jrpc_send(peer, request);
 	if (err < 0) {
 		fprintf(stderr, "Failed to send the RPC message: %m\n");
 		return NULL;

@@ -24,8 +24,6 @@ extern struct bbdd_env {
 	bool numeric;
 } bbdd_env;
 
-int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
-
 /* bbdd-bpf.c */
 
 struct bbdd_bpf;

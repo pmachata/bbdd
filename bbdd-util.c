@@ -86,3 +86,21 @@ void bbdd_util_printerr(char **error, const char *fmt, ...)
 	bbdd_util_vprinterr(error, fmt, ap);
 	va_end(ap);
 }
+
+int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj)
+{
+	const char *str;
+	size_t len;
+	ssize_t rc;
+
+	str = json_object_to_json_string(obj);
+	if (str == NULL)
+		return -1;
+
+	len = strlen(str);
+	rc = sendto(sock->fd, str, len, 0,
+		    (struct sockaddr *) &sock->sa, sock->sa.len);
+	if (rc < 0)
+		return -1;
+	return (size_t)rc == len ? 0 : -1;
+}

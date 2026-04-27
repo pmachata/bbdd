@@ -1,6 +1,13 @@
 /* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0 */
 #pragma once
 #include <stdarg.h>
+#include <json-c/json_object.h>
+
+/* bbdd-sock.c */
+
+struct bbdd_sock;
+
+/* bbdd-util.c */
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*(x)))
 
@@ -27,3 +34,5 @@ void bbdd_util_printerr(char **error, const char *fmt, ...);
  * *error. */
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_verberr(char **error, const char *fmt, ...);
+
+int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);

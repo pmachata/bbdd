@@ -85,8 +85,6 @@ int bbdd_jrpc_strcpy(size_t buf_len;
 		     struct json_object *obj, char buf[buf_len], size_t buf_len,
 		     char **error);
 
-int bbdd_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
-
 int bbdd_jrpc_append_str(struct json_object *params_obj,
 			 const char *name, const char *value);
 int bbdd_jrpc_append_int(struct json_object *params_obj,
