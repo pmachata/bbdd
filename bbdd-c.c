@@ -1655,31 +1655,16 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 		goto put_request;
 	}
 
-	if (select_obj != NULL &&
-	    json_object_object_add(params_obj, "select", select_obj)) {
+	if ((select_obj != NULL &&
+	     bbdd_jrpc_append_obj(params_obj, "select", &select_obj)) ||
+	    (change_obj != NULL &&
+	     bbdd_jrpc_append_obj(params_obj, "change", &change_obj)) ||
+	    (bulk.seen && bulk.value &&
+	     bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) ||
+	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
 		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
-	select_obj = NULL;
-
-	if (change_obj != NULL &&
-	    json_object_object_add(params_obj, "change", change_obj)) {
-		err = bbdd_c_enomem();
-		goto put_params_obj;
-	}
-	change_obj = NULL;
-
-	if (bulk.seen && bulk.value &&
-	    bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) {
-		err = bbdd_c_enomem();
-		goto put_params_obj;
-	}
-
-	if (json_object_object_add(request, "params", params_obj)) {
-		err = bbdd_c_enomem();
-		goto put_params_obj;
-	}
-	params_obj = NULL;
 
 	response = bbdd_c_send_request(request);
 	if (response == NULL) {
@@ -1881,16 +1866,11 @@ static int bbdd_c_bfdd_connect_jrpc(const char *proto,
 	if (bbdd_jrpc_append_str(params_obj, "proto", proto) ||
 	    bbdd_jrpc_append_str(params_obj, "addr", addr) ||
 	    (port != NULL &&
-	     bbdd_jrpc_append_str(params_obj, "port", port))) {
+	     bbdd_jrpc_append_str(params_obj, "port", port)) ||
+	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
 		err = bbdd_c_enomem();
 		goto put_params_obj;
 	}
-
-	if (json_object_object_add(request, "params", params_obj) != 0) {
-		err = bbdd_c_enomem();
-		goto put_params_obj;
-	}
-	params_obj = NULL;
 
 	response = bbdd_c_send_request(request);
 	if (response == NULL) {

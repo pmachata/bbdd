@@ -966,7 +966,6 @@ bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess)
 	struct json_object *entry_obj;
 	struct json_object *local_obj;
 	struct json_object *remote_obj;
-	int rc;
 
 	/* STATE ::= {
 	 *     "local": STATE_END,
@@ -985,15 +984,9 @@ bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess)
 	if (remote_obj == NULL)
 		goto put_local_obj;
 
-	rc = json_object_object_add(entry_obj, "remote", remote_obj);
-	if (rc != 0)
+	if (bbdd_jrpc_append_obj(entry_obj, "remote", &remote_obj) ||
+	    bbdd_jrpc_append_obj(entry_obj, "local", &local_obj))
 		goto put_remote_obj;
-	remote_obj = NULL;
-
-	rc = json_object_object_add(entry_obj, "local", local_obj);
-	if (rc != 0)
-		goto put_local_obj;
-	local_obj = NULL;
 
 	return entry_obj;
 
@@ -1035,15 +1028,9 @@ struct json_object *bbdd_d_session_json(struct bbdd_bpf *bpf,
 	if (sess_obj == NULL)
 		goto put_state_obj;
 
-	rc = json_object_object_add(entry_obj, "data", sess_obj);
-	if (rc != 0)
+	if (bbdd_jrpc_append_obj(entry_obj, "data", &sess_obj) ||
+	    bbdd_jrpc_append_obj(entry_obj, "state", &state_obj))
 		goto put_sess_obj;
-	sess_obj = NULL;
-
-	rc = json_object_object_add(entry_obj, "state", state_obj);
-	if (rc != 0)
-		goto put_state_obj;
-	state_obj = NULL;
 
 	return entry_obj;
 
@@ -1669,7 +1656,6 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 	struct json_object *entry_obj;
 	struct json_object *stats_obj;
 	char *error = NULL;
-	int rc;
 
 	/* The response is as follows:
 	 *
@@ -1711,28 +1697,18 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 		if (entry_obj == NULL)
 			goto put_stats_obj;
 
-		rc = json_object_object_add(entry_obj, "discr",
-					    json_object_new_uint64(discr));
-		if (rc != 0)
+		if (bbdd_jrpc_append_uint64(entry_obj, "discr", discr) ||
+		    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj))
 			goto put_entry_obj;
-
-		rc = json_object_object_add(entry_obj, "stats", stats_obj);
-		if (rc != 0)
-			goto put_entry_obj;
-		stats_obj = NULL;
 
 		if (json_object_array_add(array, entry_obj) != 0)
 			goto put_entry_obj;
 		entry_obj = NULL;
 	}
 
-	if (json_object_object_add(result_obj, "sessions", array))
+	if (bbdd_jrpc_append_obj(result_obj, "sessions", &array) ||
+	    bbdd_jrpc_append_obj(obj, "result", &result_obj))
 		goto put_array;
-	array = NULL;
-
-	if (json_object_object_add(obj, "result", result_obj))
-		goto put_array;
-	result_obj = NULL;
 
 	bbdd_util_jrpc_send(peer, obj);
 	json_object_put(obj);

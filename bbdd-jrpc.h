@@ -86,3 +86,6 @@ int bbdd_jrpc_append_bool(struct json_object *params_obj,
 			  const char *name, bool value);
 int bbdd_jrpc_append_uint64(struct json_object *params_obj,
 			    const char *name, uint64_t value);
+int bbdd_jrpc_append_obj(struct json_object *params_obj,
+			 const char *name,
+			 struct json_object **objp);
