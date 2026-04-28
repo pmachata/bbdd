@@ -712,18 +712,21 @@ bbdd_c_session_show_state_end(const struct bbdd_d_session_state_end *end)
 	       bbdd_d_bfd_diag_to_str(end->diag));
 }
 
-static void bbdd_c_show_time_us(const char *label, uint32_t us)
+/* Only uint32_t should ever be valid, but we use the function for dumping of
+ * monitoring events as well, and it makes no sense to validate those, so allow
+ * dumping of uint64_t. */
+static void bbdd_c_show_time_us(const char *label, uint64_t us)
 {
 	if (bbdd_env.numeric) {
-		printf("%s %u ", label, us);
+		printf("%s %" PRIu64 " ", label, us);
 		return;
 	}
 	if (us % 1000000 == 0)
-		printf("%s %us ", label, us / 1000000);
+		printf("%s %" PRIu64 "s ", label, us / 1000000);
 	else if (us % 1000 == 0)
-		printf("%s %ums ", label, us / 1000);
+		printf("%s %" PRIu64 "ms ", label, us / 1000);
 	else
-		printf("%s %uus ", label, us);
+		printf("%s %" PRIu64 "us ", label, us);
 }
 
 static void
@@ -2071,6 +2074,289 @@ static void bbdd_c_monitor_help(void)
 	);
 }
 
+static int bbdd_c_monitor_dissect_addr_str(struct json_object *obj,
+					   const char **ret_str, char **error)
+{
+	enum {
+		pol_addr,
+		pol_family,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_addr]   = { .key = "addr",   .type = json_type_string,
+				 .required = true },
+		[pol_family] = { .key = "family", .type = json_type_string },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	*ret_str = json_object_get_string(values[pol_addr]);
+	return 0;
+}
+
+struct bbdd_c_monitor_packet {
+	struct json_object *version;
+	struct json_object *bits;
+	struct json_object *state;
+	struct json_object *diag;
+	struct json_object *detect_mult;
+	struct json_object *my_disc;
+	struct json_object *your_disc;
+	struct json_object *desired_tx;
+	struct json_object *required_rx;
+};
+
+static int bbdd_c_monitor_dissect_packet(struct json_object *bfd_obj,
+					 struct bbdd_c_monitor_packet *packet,
+					 char **error)
+{
+	enum {
+		pol_version,
+		pol_bits,
+		pol_state,
+		pol_diag,
+		pol_detect_mult,
+		pol_my_disc,
+		pol_your_disc,
+		pol_desired_tx,
+		pol_required_rx,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_version]     = { .key = "version",
+				      .type = json_type_int },
+		[pol_bits]        = { .key = "bits",
+				      .type = json_type_array },
+		[pol_state]       = { .key = "state",
+				      .type = json_type_string },
+		[pol_diag]        = { .key = "diag",
+				      .type = json_type_string },
+		[pol_detect_mult] = { .key = "detect_mult",
+				      .type = json_type_int },
+		[pol_my_disc]     = { .key = "my-disc",
+				      .type = json_type_int },
+		[pol_your_disc]   = { .key = "your-disc",
+				      .type = json_type_int },
+		[pol_desired_tx]  = { .key = "desired-tx",
+				      .type = json_type_int },
+		[pol_required_rx] = { .key = "required-rx",
+				      .type = json_type_int },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(bfd_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
+
+	if (seen[pol_bits]) {
+		rc = bbdd_jrpc_validate_array(values[pol_bits],
+					      json_type_string, error);
+		if (rc != 0)
+			return rc;
+	}
+
+#define FIELD(F) .F = seen[pol_ ## F] ? values[pol_ ## F] : NULL
+
+	*packet = (struct bbdd_c_monitor_packet) {
+		FIELD(version),
+		FIELD(bits),
+		FIELD(state),
+		FIELD(diag),
+		FIELD(detect_mult),
+		FIELD(my_disc),
+		FIELD(your_disc),
+		FIELD(desired_tx),
+		FIELD(required_rx),
+	};
+
+	return 0;
+
+#undef FIELD
+}
+
+enum bbdd_c_monitor_print_rc {
+	BBDD_C_MONITOR_PRINT_ERROR,
+	BBDD_C_MONITOR_PRINT_NOTHING,
+	BBDD_C_MONITOR_PRINT_OK,
+	BBDD_C_MONITOR_PRINT_UNHANDLED,
+};
+
+static void
+bbdd_c_monitor_print_packet(const struct bbdd_c_monitor_packet *packet)
+{
+	printf("bfd [ ");
+	if (packet->version != NULL)
+		printf("version %" PRIu64 " ",
+		       json_object_get_uint64(packet->version));
+	if (packet->bits != NULL) {
+		printf("bits [ ");
+
+		for (size_t i = 0, len = json_object_array_length(packet->bits);
+		     i < len; i++) {
+			struct json_object *elm;
+
+			elm = json_object_array_get_idx(packet->bits, i);
+			printf("%s ", json_object_get_string(elm));
+		}
+		printf("] ");
+	}
+	if (packet->state != NULL)
+		printf("state %s ", json_object_get_string(packet->state));
+	if (packet->diag != NULL)
+		printf("diag %s ", json_object_get_string(packet->diag));
+	if (packet->detect_mult != NULL)
+		printf("detect-mult %" PRIu64 " ",
+		       json_object_get_uint64(packet->detect_mult));
+	if (packet->my_disc != NULL)
+		printf("my-disc %" PRIu64 " ",
+		       json_object_get_uint64(packet->my_disc));
+	if (packet->your_disc != NULL)
+		printf("your-disc %" PRIu64 " ",
+		       json_object_get_uint64(packet->your_disc));
+	if (packet->desired_tx != NULL) {
+		uint64_t us = json_object_get_uint64(packet->desired_tx);
+		bbdd_c_show_time_us("desired-tx", us);
+	}
+	if (packet->required_rx != NULL) {
+		uint64_t us = json_object_get_uint64(packet->required_rx);
+		bbdd_c_show_time_us("required-rx", us);
+	}
+	printf("] ");
+}
+
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
+					 char **error)
+{
+	enum {
+		pol_ifindex,
+		pol_skb_len,
+		pol_ttl,
+		pol_multihop,
+		pol_src,
+		pol_dst,
+		pol_bfd,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ifindex]  = { .key = "ifindex",  .type = json_type_int },
+		[pol_skb_len]  = { .key = "skb-len",  .type = json_type_int },
+		[pol_ttl]      = { .key = "ttl",      .type = json_type_int },
+		[pol_multihop] = { .key = "multihop", .type = json_type_boolean },
+		[pol_src]      = { .key = "src",      .type = json_type_object },
+		[pol_dst]      = { .key = "dst",      .type = json_type_object },
+		[pol_bfd]      = { .key = "bfd",      .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct bbdd_c_monitor_packet packet;
+	const char *src_str = NULL;
+	const char *dst_str = NULL;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_src]) {
+		rc = bbdd_c_monitor_dissect_addr_str(values[pol_src], &src_str,
+						     error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	if (seen[pol_dst]) {
+		rc = bbdd_c_monitor_dissect_addr_str(values[pol_dst], &dst_str,
+						     error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	if (seen[pol_bfd]) {
+		rc = bbdd_c_monitor_dissect_packet(values[pol_bfd], &packet,
+						   error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	assert(rc == 0);
+
+	if (seen[pol_ifindex]) {
+		printf("ifindex %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_ifindex]));
+		rc = 1;
+	}
+	if (seen[pol_skb_len]) {
+		printf("skb-len %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_skb_len]));
+		rc = 1;
+	}
+	if (seen[pol_src]) {
+		printf("src %s ", src_str);
+		rc = 1;
+	}
+	if (seen[pol_dst]) {
+		printf("dst %s ", dst_str);
+		rc = 1;
+	}
+	if (seen[pol_ttl]) {
+		printf("ttl %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_ttl]));
+		rc = 1;
+	}
+	if (seen[pol_multihop] &&
+	    json_object_get_boolean(values[pol_multihop])) {
+		printf("multihop ");
+		rc = 1;
+	}
+	if (seen[pol_bfd]) {
+		bbdd_c_monitor_print_packet(&packet);
+		rc = 1;
+	}
+
+	return rc == 1 ? BBDD_C_MONITOR_PRINT_OK
+		       : BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
+static void bbdd_c_monitor_handle_notif(const char *method,
+					struct json_object *params)
+{
+	char *error;
+	enum bbdd_c_monitor_print_rc rc = BBDD_C_MONITOR_PRINT_UNHANDLED;
+
+	printf("%s: ", method);
+
+	if (bbdd_c_result_show_json(params))
+		return;
+
+	if (strcmp(method, "ringbuf:rx-discr-0") == 0)
+		rc = bbdd_c_monitor_handle_ringbuf_rx_discr_0(params, &error);
+
+	switch (rc) {
+	case BBDD_C_MONITOR_PRINT_ERROR:
+		bbdd_util_printerr(&error, "Failed to dissect monitor event `%s'",
+				   method);
+		/* Fall through. */
+	case BBDD_C_MONITOR_PRINT_UNHANDLED:
+		__bbdd_c_result_show_json(params);
+		break;
+
+	case BBDD_C_MONITOR_PRINT_NOTHING:
+		printf("(no data)");
+		/* Fall through. */
+	case BBDD_C_MONITOR_PRINT_OK:
+		printf("\n");
+		break;
+	}
+}
+
 struct bbdd_c_monitor_ctx {
 	struct bbdd_sock cli;
 };
@@ -2112,8 +2398,7 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 		return 0;
 	}
 
-	printf("%s\n", msg);
-	fflush(stdout);
+	bbdd_c_monitor_handle_notif(method, params);
 
 put_notif_obj:
 	json_object_put(notif_obj);

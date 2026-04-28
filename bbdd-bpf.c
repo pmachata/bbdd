@@ -986,6 +986,113 @@ bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 }
 
 static struct json_object *
+bbdd_bpf_jrpc_addr_obj(uint16_t ethtype, const struct bbdd_bpf_addr *bpf_addr,
+		       char **error)
+{
+	char buf[INET6_ADDRSTRLEN];
+	struct bbdd_sockaddr addr;
+	int err;
+
+	err = bbdd_bpf_addr_to_sockaddr(ethtype, bpf_addr, &addr, "monitor",
+					error);
+	if (err != 0)
+		return NULL;
+
+	err = bbdd_sockaddr_ntop(&addr, buf, sizeof(buf), error);
+	if (err != 0)
+		return NULL;
+
+	return bbdd_c_jrpc_addr_obj(buf, addr.sa.sa_family);
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet)
+{
+	struct json_object *obj;
+	struct json_object *f;
+	uint8_t bits;
+	int err;
+
+	obj = json_object_new_array();
+	if (obj == NULL)
+		return obj;
+
+	bits = bbdd_bfd_pkt_bits(packet);
+
+#define APPEND(BIT, NAME, name) do {				\
+		if (!(bits & BBDD_BFD_PKT_BIT_ ## NAME))	\
+			break;					\
+								\
+		f = json_object_new_string(#name);		\
+		if (f == NULL)					\
+			goto err;				\
+								\
+		err = json_object_array_add(obj, f);		\
+		if (err != 0)					\
+			goto err;				\
+		f = NULL;					\
+	} while (0);
+
+	BBDD_BFD_PKT_BITS(APPEND);
+	return obj;
+
+#undef APPEND
+
+err:
+	json_object_put(obj);
+	return NULL;
+}
+
+static struct json_object *
+bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
+{
+	enum bbdd_bfd_pkt_state state;
+	enum bbdd_bfd_pkt_diag diag;
+	struct json_object *obj;
+	struct json_object *bitarr;
+	int rc;
+
+	obj = json_object_new_object();
+	if (obj == NULL)
+		goto oom;
+
+	bitarr = bbdd_bpf_rb_format_packet_bitarr(packet);
+	if (bitarr == NULL)
+		goto oom;
+
+	rc = json_object_object_add(obj, "bits", bitarr);
+	if (rc != 0)
+		goto oom;
+	bitarr = NULL;
+
+	state = bbdd_bfd_pkt_state(packet);
+	diag = bbdd_bfd_pkt_diag(packet);
+
+	if (bbdd_jrpc_append_int(obj, "version",
+				 bbdd_bfd_pkt_version(packet)) ||
+	    bbdd_jrpc_append_str(obj, "state",
+				 bbdd_d_bfd_state_to_str(state)) ||
+	    bbdd_jrpc_append_str(obj, "diag",
+				 bbdd_d_bfd_diag_to_str(diag)) ||
+	    bbdd_jrpc_append_int(obj, "detect_mult",
+				 packet->detection_multiplier) ||
+	    bbdd_jrpc_append_int(obj, "my-disc",    ntohl(packet->my_disc)) ||
+	    bbdd_jrpc_append_int(obj, "your-disc",  ntohl(packet->your_disc)) ||
+	    bbdd_jrpc_append_int(obj, "desired-tx", ntohl(packet->desired_tx)) ||
+	    bbdd_jrpc_append_int(obj, "required-rx",
+				 ntohl(packet->required_rx)))
+		goto oom;
+
+	return obj;
+
+oom:
+	bbdd_util_fmterr(error, "%m");
+	json_object_put(bitarr);
+	json_object_put(obj);
+	return NULL;
+}
+
+static struct json_object *
 bbdd_bpf_rb_format_tx_no_neighbor(
 	const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem, char **error)
 {
@@ -996,6 +1103,56 @@ static struct json_object *
 bbdd_bpf_rb_format_rx_discr_0(
 	const struct bbdd_bpf_rb_elem_rx_discr_0 *elem, char **error)
 {
+	struct json_object *src_obj;
+	struct json_object *dst_obj;
+	struct json_object *pkt_obj;
+	struct json_object *params;
+	struct json_object *obj;
+
+	obj = bbdd_jrpc_new_notif("ringbuf:rx-discr-0");
+	if (obj == NULL)
+		goto err;
+
+	src_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->saddr, error);
+	if (src_obj == NULL)
+		goto put_obj;
+
+	dst_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->daddr, error);
+	if (dst_obj == NULL)
+		goto put_src_obj;
+
+	pkt_obj = bbdd_bpf_rb_format_bfd_pkt(&elem->packet, error);
+	if (pkt_obj == NULL)
+		goto put_dst_obj;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_pkt_obj;
+
+	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
+	    bbdd_jrpc_append_int(params, "skb-len", elem->skb_len) ||
+	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
+	    bbdd_jrpc_append_bool(params, "multihop", elem->multihop) ||
+	    bbdd_jrpc_append_obj(params, "src", &src_obj) ||
+	    bbdd_jrpc_append_obj(params, "dst", &dst_obj) ||
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj) ||
+	    bbdd_jrpc_append_obj(obj, "params", &params))
+		goto put_params;
+
+	return obj;
+
+put_params:
+	json_object_put(params);
+put_pkt_obj:
+	json_object_put(pkt_obj);
+put_dst_obj:
+	json_object_put(dst_obj);
+put_src_obj:
+	json_object_put(src_obj);
+put_obj:
+	json_object_put(obj);
+err:
+	bbdd_util_fmterr(error, "%m");
 	return NULL;
 }
 

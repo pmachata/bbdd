@@ -31,14 +31,22 @@ enum bbdd_bfd_pkt_diag {
 	BBDD_BFD_PKT_DIAG_ADMIN_DOWN,
 	BBDD_BFD_PKT_DIAG_REV_CONCAT_PATH_DOWN,
 };
-enum bbdd_bfd_pkt_bits {
-	BBDD_BFD_PKT_BIT_POLL = (1 << 5),
-	BBDD_BFD_PKT_BIT_FINAL = (1 << 4),
-	BBDD_BFD_PKT_BIT_CPI = (1 << 3),
-	BBDD_BFD_PKT_BIT_AUTH = (1 << 2),
-	BBDD_BFD_PKT_BIT_DEMAND = (1 << 1),
-	BBDD_BFD_PKT_BIT_MULTI = (1 << 0),
+
+#define BBDD_BFD_PKT_BITS(X)			\
+	X(0, MULTI,  multi)			\
+	X(1, DEMAND, demand)			\
+	X(2, AUTH,   auth)			\
+	X(3, CPI,    cpi)			\
+	X(4, FINAL,  final)			\
+	X(5, POLL,   poll)			\
+	/**/
+
+#define ENUM(N, NAME, name)			\
+	BBDD_BFD_PKT_BIT_ ## NAME = (1 << N),
+enum bbdd_bfd_pkt_bit {
+	BBDD_BFD_PKT_BITS(ENUM)
 };
+#undef ENUM
 
 static inline uint8_t
 bbdd_bfd_pkt_version(const struct bbdd_bfd_pkt *packet)
