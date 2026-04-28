@@ -1198,6 +1198,28 @@ static struct json_object *
 bbdd_bpf_rb_format_rx_timeout(
 	const struct bbdd_bpf_rb_elem_rx_timeout *elem, char **error)
 {
+	struct json_object *params;
+	struct json_object *obj;
+
+	obj = bbdd_jrpc_new_notif("ringbuf:rx-timeout");
+	if (obj == NULL)
+		return NULL;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_obj;
+
+	if (bbdd_jrpc_append_int(params, "discr", elem->discr) ||
+	    bbdd_jrpc_append_obj(obj, "params", &params))
+		goto put_params;
+
+	return obj;
+
+put_params:
+	json_object_put(params);
+put_obj:
+	json_object_put(obj);
+	bbdd_util_fmterr(error, "%m");
 	return NULL;
 }
 
