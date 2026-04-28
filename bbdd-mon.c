@@ -68,6 +68,15 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	return 0;
 }
 
+void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
+{
+	struct bbdd_mon_cli *cli;
+	int ret = 0;
+
+	DL_FOREACH(mon->head, cli)
+		bbdd_util_jrpc_send(&cli->sock, msg);
+}
+
 int bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		  enum bbdd_mon_topic topic, char **error)
 {

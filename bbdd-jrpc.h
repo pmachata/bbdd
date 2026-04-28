@@ -27,6 +27,7 @@ struct bbdd_jrpc_policy {
 
 struct json_object *bbdd_jrpc_new_object(struct json_object *id);
 struct json_object *bbdd_jrpc_new_request(int id, const char *method);
+struct json_object *bbdd_jrpc_new_notif(const char *method);
 struct json_object *bbdd_jrpc_new_error(struct json_object *id,
 					enum bbdd_jrpc_e code,
 					const char *message,

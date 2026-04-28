@@ -2662,6 +2662,17 @@ fini_veth:
 	return err;
 }
 
+static void bbdd_d_mon_send_monitor_end(struct bbdd_mon *mon)
+{
+	struct json_object *notif;
+
+	notif = bbdd_jrpc_new_notif("monitor-end");
+	if (notif == NULL)
+		return;
+
+	bbdd_mon_broadcast(mon, notif);
+	json_object_put(notif);
+}
 
 static int bbdd_d_do_start(void)
 {
@@ -2740,6 +2751,8 @@ static int bbdd_d_do_start(void)
 	err = bbdd_poll_loop(pctx, &error);
 	if (err != 0)
 		bbdd_util_printerr(&error, NULL);
+
+	bbdd_d_mon_send_monitor_end(d.mon);
 
 	if (d.bfdd != NULL)
 		bbdd_bfdd_close(d.bfdd);

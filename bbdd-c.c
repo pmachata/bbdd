@@ -2109,7 +2109,14 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 		goto put_notif_obj;
 	}
 
-	printf("%s: %s\n", method, msg);
+	if (strcmp(method, "monitor-end") == 0) {
+		json_object_put(notif_obj);
+		free(msg);
+		bbdd_poll_request_quit(pctx);
+		return 0;
+	}
+
+	printf("%s\n", msg);
 	fflush(stdout);
 
 put_notif_obj:

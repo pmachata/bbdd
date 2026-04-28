@@ -112,6 +112,26 @@ put_id:
 	return request;
 }
 
+struct json_object *bbdd_jrpc_new_notif(const char *method)
+{
+	struct json_object *request;
+	int rc;
+
+	request = bbdd_jrpc_new_object(NULL);
+	if (request == NULL)
+		return NULL;
+
+	rc = bbdd_jrpc_append_str(request, "method", method);
+	if (rc != 0)
+		goto put_request;
+
+	return request;
+
+put_request:
+	json_object_put(request);
+	return NULL;
+}
+
 struct json_object *bbdd_jrpc_new_error_data(struct json_object *id,
 					     enum bbdd_jrpc_e code,
 					     const char *message,
