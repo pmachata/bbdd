@@ -68,21 +68,31 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	return 0;
 }
 
-void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
+void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+		     enum bbdd_mon_topic topic)
 {
 	struct bbdd_mon_cli *cli;
-	int ret = 0;
+	struct bbdd_mon_cli *tmp;
 
-	DL_FOREACH(mon->head, cli)
-		bbdd_util_jrpc_send(&cli->sock, msg);
+	DL_FOREACH_SAFE(mon->head, cli, tmp) {
+		if (!((int)topic == -1 || cli->topics.enabled[topic]))
+			continue;
+
+		if (bbdd_util_jrpc_send(&cli->sock, msg) != 0) {
+			DL_DELETE(mon->head, cli);
+			free(cli);
+		}
+	}
 }
 
-int bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
-		  enum bbdd_mon_topic topic, char **error)
+void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
 {
-	struct bbdd_mon_cli *cli;
-	int ret = 0;
+	__bbdd_mon_send(mon, msg, (enum bbdd_mon_topic) -1);
+}
 
+void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+		   enum bbdd_mon_topic topic)
+{
 	if (bbdd_env.verbosity > 0) {
 		const char *str;
 
@@ -91,15 +101,5 @@ int bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 			fprintf(stderr, "%s\n", str);
 	}
 
-	DL_FOREACH(mon->head, cli) {
-		if (!cli->topics.enabled[topic])
-			continue;
-
-		if (bbdd_util_jrpc_send(&cli->sock, msg) != 0) {
-			bbdd_util_fmterr(error, "%m");
-			ret = -1;
-		}
-	}
-
-	return ret;
+	__bbdd_mon_send(mon, msg, topic);
 }

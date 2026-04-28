@@ -1040,7 +1040,6 @@ static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
 {
 	struct json_object *msg;
 	char *error;
-	int rc;
 
 	msg = bbdd_bpf_rb_format_jrpc(head, &error);
 	if (msg == NULL) {
@@ -1049,11 +1048,8 @@ static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
 			goto err;
 	}
 
-	rc = bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_ringbuf, &error);
+	bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_ringbuf);
 	json_object_put(msg);
-	if (rc != 0)
-		goto err;
-
 	return;
 
 err:

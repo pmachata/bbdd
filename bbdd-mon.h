@@ -36,6 +36,7 @@ void bbdd_mon_fini(struct bbdd_mon *mon);
 
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error);
+
 void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg);
-int bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
-		  enum bbdd_mon_topic topic, char **error);
+void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+		   enum bbdd_mon_topic topic);
