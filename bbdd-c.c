@@ -103,26 +103,22 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 	return true;
 }
 
-static bool __bbdd_c_result_show_json(struct json_object *result)
+static void __bbdd_c_result_show_json(struct json_object *result)
 {
 	const char *dump;
 
-	if (bbdd_env.show_json) {
-		dump = json_object_to_json_string(result);
-		fprintf(stdout, "%s", dump);
-		return true;
-	}
-
-	return false;
+	dump = json_object_to_json_string(result);
+	fprintf(stdout, "%s\n", dump);
+	fflush(stdout);
 }
 
 static bool bbdd_c_result_show_json(struct json_object *result)
 {
-	bool ret = __bbdd_c_result_show_json(result);
+	if (!bbdd_env.show_json)
+		return false;
 
-	if (ret)
-		putchar('\n');
-	return ret;
+	__bbdd_c_result_show_json(result);
+	return true;
 }
 
 static struct json_object *bbdd_c_send_request_on(struct json_object *request,
