@@ -2325,6 +2325,58 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 		       : BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_ringbuf_rx_unx_packet(struct json_object *params,
+					    char **error)
+{
+	enum {
+		pol_skb_len,
+		pol_ttl,
+		pol_bfd,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_skb_len] = { .key = "skb-len", .type = json_type_int },
+		[pol_ttl]     = { .key = "ttl",     .type = json_type_int },
+		[pol_bfd]     = { .key = "bfd",     .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct bbdd_c_monitor_packet packet;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_bfd]) {
+		rc = bbdd_c_monitor_dissect_packet(values[pol_bfd], &packet,
+						   error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	assert(rc == 0);
+
+	if (seen[pol_skb_len]) {
+		printf("skb-len %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_skb_len]));
+		rc = 1;
+	}
+	if (seen[pol_ttl]) {
+		printf("ttl %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_ttl]));
+		rc = 1;
+	}
+	if (seen[pol_bfd]) {
+		bbdd_c_monitor_print_packet(&packet);
+		rc = 1;
+	}
+
+	return rc == 1 ? BBDD_C_MONITOR_PRINT_OK
+		       : BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
 static void bbdd_c_monitor_handle_notif(const char *method,
 					struct json_object *params)
 {
@@ -2338,6 +2390,8 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 
 	if (strcmp(method, "ringbuf:rx-discr-0") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_rx_discr_0(params, &error);
+	else if (strcmp(method, "ringbuf:rx-unx-packet") == 0)
+		rc = bbdd_c_monitor_handle_ringbuf_rx_unx_packet(params, &error);
 
 	switch (rc) {
 	case BBDD_C_MONITOR_PRINT_ERROR:

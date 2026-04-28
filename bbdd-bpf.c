@@ -1160,6 +1160,37 @@ static struct json_object *
 bbdd_bpf_rb_format_rx_unx_packet(
 	const struct bbdd_bpf_rb_elem_rx_unx_packet *elem, char **error)
 {
+	struct json_object *params;
+	struct json_object *pkt_obj;
+	struct json_object *obj;
+
+	obj = bbdd_jrpc_new_notif("ringbuf:rx-unx-packet");
+	if (obj == NULL)
+		return NULL;
+
+	pkt_obj = bbdd_bpf_rb_format_bfd_pkt(&elem->packet, error);
+	if (pkt_obj == NULL)
+		goto put_obj;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_pkt_obj;
+
+	if (bbdd_jrpc_append_int(params, "skb-len", elem->skb_len) ||
+	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj) ||
+	    bbdd_jrpc_append_obj(obj, "params", &params))
+		goto put_params;
+
+	return obj;
+
+put_params:
+	json_object_put(params);
+put_pkt_obj:
+	json_object_put(pkt_obj);
+put_obj:
+	json_object_put(obj);
+	bbdd_util_fmterr(error, "%m");
 	return NULL;
 }
 
