@@ -1096,6 +1096,37 @@ static struct json_object *
 bbdd_bpf_rb_format_tx_no_neighbor(
 	const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem, char **error)
 {
+	struct json_object *addr_obj;
+	struct json_object *params;
+	struct json_object *obj;
+
+	obj = bbdd_jrpc_new_notif("ringbuf:tx-no-neighbor");
+	if (obj == NULL)
+		goto err;
+
+	addr_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->addr, error);
+	if (addr_obj == NULL)
+		goto put_obj;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_addr_obj;
+
+	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
+	    bbdd_jrpc_append_obj(params, "addr", &addr_obj) ||
+	    bbdd_jrpc_append_obj(obj, "params", &params))
+		goto put_params;
+
+	return obj;
+
+put_params:
+	json_object_put(params);
+put_addr_obj:
+	json_object_put(addr_obj);
+put_obj:
+	json_object_put(obj);
+err:
+	bbdd_util_fmterr(error, "%m");
 	return NULL;
 }
 

@@ -2408,6 +2408,51 @@ bbdd_c_monitor_handle_ringbuf_rx_timeout(struct json_object *params,
 		       : BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_ringbuf_tx_no_neigh(struct json_object *params,
+					  char **error)
+{
+	enum {
+		pol_ifindex,
+		pol_addr,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
+		[pol_addr]    = { .key = "addr",    .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	const char *addr_str;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_addr]) {
+		rc = bbdd_c_monitor_dissect_addr_str(values[pol_addr], &addr_str,
+						     error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	assert(rc == 0);
+
+	if (seen[pol_ifindex]) {
+		printf("ifindex %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_ifindex]));
+		rc = 1;
+	}
+	if (seen[pol_addr]) {
+		printf("addr %s ", addr_str);
+		rc = 1;
+	}
+
+	return rc == 1 ? BBDD_C_MONITOR_PRINT_OK
+		       : BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
 static void bbdd_c_monitor_handle_notif(const char *method,
 					struct json_object *params)
 {
@@ -2425,6 +2470,8 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		rc = bbdd_c_monitor_handle_ringbuf_rx_unx_packet(params, &error);
 	else if (strcmp(method, "ringbuf:rx-timeout") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_rx_timeout(params, &error);
+	else if (strcmp(method, "ringbuf:tx-no-neighbor") == 0)
+		rc = bbdd_c_monitor_handle_ringbuf_tx_no_neigh(params, &error);
 
 	switch (rc) {
 	case BBDD_C_MONITOR_PRINT_ERROR:
