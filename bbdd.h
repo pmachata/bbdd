@@ -22,6 +22,7 @@ extern struct bbdd_env {
 	int verbosity;
 	bool show_json;
 	bool numeric;
+	bool timestamp;
 } bbdd_env;
 
 /* bbdd-bpf.c */

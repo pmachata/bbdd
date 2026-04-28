@@ -23,10 +23,12 @@ static int bbdd_help(void)
 	     "\n"
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
-	     "                    -V | --version | --sockdir <DIR> | --json | -N ]\n"
+	     "                    -V | --version | --sockdir <DIR> | --json |\n"
+	     "                    -N | -t | --timestamp ]\n"
 	     "	     COMMAND := { start | stop | ping | session | global | bfdd | monitor }\n"
 	     "\n"
-	     "  -N   suppress human-readable unit conversion (show raw microseconds)\n"
+	     "  -N             suppress human-readable unit conversion (show raw microseconds)\n"
+	     "  -t/--timestamp prefix monitor notifications with a timestamp\n"
 	     );
 	return 0;
 }
@@ -72,6 +74,7 @@ int main(int argc, char **argv)
 		{ "help",	no_argument,	   NULL, 'h' },
 		{ "json",	no_argument,	   NULL, opt_json },
 		{ "quiet",	no_argument,	   NULL, 'q' },
+		{ "timestamp",	no_argument,	   NULL, 't' },
 		{ "verbose",	no_argument,	   NULL, 'v' },
 		{ "version",	no_argument,	   NULL, 'V' },
 		{ "sockdir",	required_argument, NULL, opt_sockaddr },
@@ -81,7 +84,7 @@ int main(int argc, char **argv)
 	int rc;
 
 	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
-	while ((opt = getopt_long(argc, argv, "hqvVN",
+	while ((opt = getopt_long(argc, argv, "hqtvVN",
 				  long_options, NULL)) >= 0) {
 		switch (opt) {
 		case 'V':
@@ -104,6 +107,9 @@ int main(int argc, char **argv)
 			break;
 		case 'N':
 			bbdd_env.numeric = true;
+			break;
+		case 't':
+			bbdd_env.timestamp = true;
 			break;
 		default:
 			fprintf(stderr, "Unknown option.\n");

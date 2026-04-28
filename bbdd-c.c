@@ -2453,11 +2453,27 @@ bbdd_c_monitor_handle_ringbuf_tx_no_neigh(struct json_object *params,
 		       : BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static void bbdd_c_monitor_print_timestamp(void)
+{
+	struct timespec ts;
+	struct tm tm;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	localtime_r(&ts.tv_sec, &tm);
+	printf("[%04d-%02d-%02dT%02d:%02d:%02d.%03ld] ",
+	       tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+	       tm.tm_hour, tm.tm_min, tm.tm_sec,
+	       ts.tv_nsec / 1000000);
+}
+
 static void bbdd_c_monitor_handle_notif(const char *method,
 					struct json_object *params)
 {
 	char *error;
 	enum bbdd_c_monitor_print_rc rc = BBDD_C_MONITOR_PRINT_UNHANDLED;
+
+	if (bbdd_env.timestamp)
+		bbdd_c_monitor_print_timestamp();
 
 	printf("%s: ", method);
 
