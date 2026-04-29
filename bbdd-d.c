@@ -1529,11 +1529,15 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	 * created). */
 	dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
+	/* Arbitrary defaults. */
+	dsess->local.detect_mult = 1;
+	dsess->local.min_rx_us = bbdd_prog_slow_interval_us;
+	dsess->local.min_tx_us = bbdd_prog_slow_interval_us;
 
 	dsess->remote.discr = 0;
-	dsess->remote.detect_mult = 1;
 	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
+	dsess->remote.detect_mult = 1;
 	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
 
