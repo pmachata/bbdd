@@ -25,6 +25,14 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 
 uint32_t bbdd_nl_tc_h_root(void);
 
+struct bbdd_nl_ifinfo {
+	uint32_t master;
+	uint32_t table;
+};
+
+int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
+		       struct bbdd_nl_ifinfo *info, char **error);
+
 int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
 			  uint32_t *table, char **error);
 

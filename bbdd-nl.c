@@ -374,8 +374,7 @@ uint32_t bbdd_nl_tc_h_root(void)
 
 struct bbdd_nl_vrf_table_cb {
 	struct bbdd_nl_cb base;
-	uint32_t *table;
-	bool found;
+	struct bbdd_nl_ifinfo *info;
 };
 
 static int bbdd_nl_vrf_infodata_attr(const struct nlattr *attr, void *data)
@@ -383,10 +382,8 @@ static int bbdd_nl_vrf_infodata_attr(const struct nlattr *attr, void *data)
 	struct bbdd_nl_vrf_table_cb *cb = data;
 
 	if (mnl_attr_get_type(attr) == IFLA_VRF_TABLE &&
-	    mnl_attr_validate(attr, MNL_TYPE_U32) >= 0) {
-		*cb->table = mnl_attr_get_u32(attr);
-		cb->found = true;
-	}
+	    mnl_attr_validate(attr, MNL_TYPE_U32) >= 0)
+		cb->info->table = mnl_attr_get_u32(attr);
 	return MNL_CB_OK;
 }
 
@@ -412,15 +409,20 @@ static int bbdd_nl_vrf_linkinfo_attr(const struct nlattr *attr, void *data)
 
 static int bbdd_nl_vrf_link_attr(const struct nlattr *attr, void *data)
 {
+	struct bbdd_nl_vrf_linkinfo_ctx ctx = {};
 	struct bbdd_nl_vrf_table_cb *cb = data;
 
-	if (mnl_attr_get_type(attr) == IFLA_LINKINFO) {
-		struct bbdd_nl_vrf_linkinfo_ctx ctx = {};
-
+	switch (mnl_attr_get_type(attr)) {
+	case IFLA_MASTER:
+		if (mnl_attr_validate(attr, MNL_TYPE_U32) >= 0)
+			cb->info->master = mnl_attr_get_u32(attr);
+		break;
+	case IFLA_LINKINFO:
 		mnl_attr_parse_nested(attr, bbdd_nl_vrf_linkinfo_attr, &ctx);
 		if (ctx.kind && strcmp(ctx.kind, "vrf") == 0 && ctx.infodata)
 			mnl_attr_parse_nested(ctx.infodata,
 					      bbdd_nl_vrf_infodata_attr, cb);
+		break;
 	}
 	return MNL_CB_OK;
 }
@@ -433,16 +435,18 @@ static int bbdd_nl_vrf_table_cb_fn(const struct nlmsghdr *nlh, void *data)
 	return MNL_CB_OK;
 }
 
-int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
-			  uint32_t *table, char **error)
+int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
+		       struct bbdd_nl_ifinfo *info, char **error)
 {
 	struct bbdd_nl_vrf_table_cb cb = {
 		.base = { .error = error },
-		.table = table,
+		.info = info,
 	};
 	struct nlmsghdr *nlh;
 	struct ifinfomsg *ifi;
 	ssize_t rc;
+
+	*info = (struct bbdd_nl_ifinfo){};
 
 	nlh = mnl_nlmsg_put_header(bbdd_nl_buf(nl));
 	nlh->nlmsg_type = RTM_GETLINK;
@@ -469,12 +473,26 @@ int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
 		return -1;
 	}
 
-	if (!cb.found) {
-		bbdd_util_fmterr(error,
-				 "Interface %u is not a VRF device", ifindex);
+	return 0;
+}
+
+int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
+			  uint32_t *table, char **error)
+{
+	struct bbdd_nl_ifinfo ifinfo;
+	int rc;
+
+	rc = bbdd_nl_get_ifinfo(nl, ifindex, &ifinfo, error);
+	if (rc != 0)
+		return rc;
+
+	if (ifinfo.table == 0) {
+		bbdd_util_fmterr(error, "Interface %u is not a VRF device",
+				 ifindex);
 		return -1;
 	}
 
+	*table = ifinfo.table;
 	return 0;
 }
 
