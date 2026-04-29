@@ -93,5 +93,6 @@ void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
 void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		   enum bbdd_mon_topic topic)
 {
+	assert((int)topic != -1);
 	__bbdd_mon_send(mon, msg, topic);
 }
