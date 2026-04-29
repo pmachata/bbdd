@@ -496,6 +496,42 @@ int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
 	return 0;
 }
 
+int bbdd_nl_get_l3_master(struct bbdd_nl *nl, uint32_t ifindex,
+			  uint32_t *table, char **error)
+{
+	uint32_t current = ifindex;
+
+	/* Arbitrarily cut off, because very deep chains are more likely an
+	 * error than anything else. A reasonable nesting could be something
+	 * like eth-lag-vlan-bridge-vrf, five iterations. I'm giving 2x of that
+	 * just to be on the safe side, but I don't really see how this would
+	 * look like and still be reasonable. */
+	for (int depth = 0; depth < 10; depth++) {
+		struct bbdd_nl_ifinfo info;
+		int rc;
+
+		rc = bbdd_nl_get_ifinfo(nl, current, &info, error);
+		if (rc != 0)
+			return rc;
+
+		if (info.table != 0) {
+			*table = info.table;
+			return 0;
+		}
+
+		if (info.master == 0) {
+			*table = 0;
+			return 0;
+		}
+
+		current = info.master;
+	}
+
+	bbdd_util_fmterr(error, "Master chain for ifindex %u is too deep",
+			 ifindex);
+	return -1;
+}
+
 int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			  const struct bbdd_sockaddr *addr, char **error)
 {

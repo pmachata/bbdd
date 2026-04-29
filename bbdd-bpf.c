@@ -659,8 +659,8 @@ error:
 static int
 bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 				struct bbdd_sess_dir *sdir,
-				uint32_t ifindex,
-				uint8_t ttl, bool multihop,
+				uint32_t ifindex, uint8_t ttl,
+				bool multihop, uint32_t table,
 				const struct bbdd_sockaddr *pk_src,
 				const struct bbdd_sockaddr *pk_dst,
 				char **error)
@@ -677,6 +677,9 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 			continue;
 
 		if (dsess->ifindex != 0 && dsess->ifindex != ifindex)
+			continue;
+
+		if (dsess->vrf_table != table)
 			continue;
 
 		if (ttl < dsess->ttl)
@@ -884,14 +887,20 @@ poll_respond:
 
 static void
 bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
-			   struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir)
+			   struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir,
+			   struct bbdd_nl *nl)
 {
 	struct bbdd_sockaddr saddr;
 	struct bbdd_sockaddr daddr;
 	uint32_t discr;
+	uint32_t table;
 	int err;
 	unsigned int nmatch;
 	char *error;
+
+	err = bbdd_nl_get_l3_master(nl, elem->ifindex, &table, &error);
+	if (err != 0)
+		goto error;
 
 	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr, &saddr,
 					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
@@ -907,7 +916,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 
 	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
 					      elem->ifindex, elem->ttl,
-					      elem->multihop,
+					      elem->multihop, table,
 					      &saddr, &daddr, &error);
 	if (err < 0)
 		goto error;
@@ -1295,7 +1304,8 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		bbdd_bpf_rb_handle_no_neigh(data, rb_ctx->nl);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir);
+		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir,
+					   rb_ctx->nl);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_UNX_PKT:
 		bbdd_bpf_rb_handle_unx_pkt(data, rb_ctx->bpf, rb_ctx->sdir);
