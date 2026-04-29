@@ -720,34 +720,16 @@ bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 			       struct bbdd_d_session *dsess,
 			       struct bbdd_bpf_session *bsess)
 {
-	struct json_object *obj;
-	bool printed = false;
-	char *error = NULL;
+	char *error;
 	int err;
-
-	obj = bbdd_d_session_json(bpf, dsess, &error);
-	if (obj != NULL) {
-		const char *str;
-
-		str = json_object_to_json_string(obj);
-		if (str != NULL) {
-			fprintf(stderr, "state change %s\n", str);
-			printed = true;
-		}
-	}
-
-	json_object_put(obj);
-
-	if (!printed)
-		bbdd_util_printerr(&error, "state change: Formatting error");
-	else
-		assert(error == NULL);
 
 	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, false,
 					&error);
 	if (err != 0)
 		bbdd_util_printerr(&error, "session %u state change: Failed to update session",
 				   dsess->local.discr);
+
+	bbdd_d_session_state_changed(dsess, bpf, bpf->rb_ctx->mon);
 }
 
 static void
@@ -945,7 +927,6 @@ bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
 {
 	uint32_t local_discr = ntohl(elem->packet.your_disc);
 
-	fprintf(stderr, "Unexpected packet in session %u\n", local_discr);
 	return bbdd_bpf_handle_packet(bpf, sdir, local_discr, &elem->packet,
 				      elem->skb_len, elem->ttl);
 }
@@ -958,8 +939,6 @@ bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 	uint32_t local_discr = elem->discr;
 	struct bbdd_bpf_session *bsess;
 	struct bbdd_d_session *dsess;
-
-	fprintf(stderr, "Timeout in session %u\n", local_discr);
 
 	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
 	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);

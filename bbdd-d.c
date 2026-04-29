@@ -1146,6 +1146,33 @@ put_obj:
 		bbdd_d_respond_memerr(peer, id);
 }
 
+void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
+				  struct bbdd_bpf *bpf,
+				  struct bbdd_mon *mon)
+{
+	struct json_object *obj;
+	char *error = NULL;
+	bool printed = false;
+
+	obj = bbdd_d_session_json(bpf, dsess, &error);
+	if (obj != NULL) {
+		const char *str;
+
+		str = json_object_to_json_string(obj);
+		if (str != NULL) {
+			fprintf(stderr, "state change %s\n", str);
+			printed = true;
+		}
+	}
+	json_object_put(obj);
+
+	if (!printed)
+		bbdd_util_printerr(&error, "session %u changed",
+				   dsess->local.discr);
+	else
+		assert(error == NULL);
+}
+
 static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				     const struct bbdd_c_session *csess,
 				     bool set_src, struct bbdd_sockaddr *src,
@@ -1244,10 +1271,11 @@ static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
 static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				  const struct bbdd_c_session *csess,
 				  struct bbdd_nl *nl,
-				  char **error)
+				  bool *changed, char **error)
 {
 	struct bbdd_sockaddr src = {};  bool set_src;
 	struct bbdd_sockaddr dst = {};  bool set_dst;
+	struct bbdd_d_session orig_dsess = *dsess;
 	int err;
 
 	/* Some things cannot be validated during parsing, but only when we see
@@ -1323,6 +1351,12 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			return err;
 	}
 
+	/* Now that we've validated everything, apply it infallibly. */
+	__bbdd_d_session_apply_c(dsess, csess,
+				 set_src, &src,
+				 set_dst, &dst);
+	if (changed != NULL)
+		*changed = memcmp(&orig_dsess, dsess, sizeof(*dsess)) != 0;
 	return 0;
 }
 
@@ -1446,12 +1480,8 @@ oom:
 	return -1;
 }
 
-static int bbdd_d_session_add(const struct bbdd_c_session *csess,
-			      struct bbdd_nl *nl,
-			      struct bbdd_sess_dir *sdir,
-			      struct bbdd_bpf *bpf,
-			      struct bbdd_d_sport_alloc *spa,
-			      char **error)
+static int bbdd_d_session_add(struct bbdd_d *d,
+			      const struct bbdd_c_session *csess, char **error)
 {
 	struct bbdd_d_session *dsess;
 	uint16_t sport;
@@ -1462,13 +1492,13 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 		return -1;
 	}
 
-	rc = bbdd_d_sport_get(spa, &sport);
+	rc = bbdd_d_sport_get(&d->spa, &sport);
 	if (rc) {
 		bbdd_util_fmterr(error, "Failed to allocate a unique source port for the new session");
 		return -1;
 	}
 
-	dsess = bbdd_sess_dir_add_session(sdir, csess->discr);
+	dsess = bbdd_sess_dir_add_session(d->sdir, csess->discr);
 	if (dsess == NULL) {
 		bbdd_util_fmterr(error, "%m");
 		goto put_port;
@@ -1488,20 +1518,23 @@ static int bbdd_d_session_add(const struct bbdd_c_session *csess,
 	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
 
-	rc = bbdd_d_session_apply_c(dsess, csess, nl, error);
+	rc = bbdd_d_session_apply_c(dsess, csess, d->nl, NULL, error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	rc = bbdd_bpf_session_add(bpf, dsess, error);
+	rc = bbdd_bpf_session_add(d->bpf, dsess, error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
+	/* Only notify when everything works out, and do it always, because this
+	 * is a new session. */
+	bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
 	return 0;
 
 sess_dir_del_session:
-	bbdd_sess_dir_del_session(sdir, dsess);
+	bbdd_sess_dir_del_session(d->sdir, dsess);
 put_port:
-	bbdd_d_sport_put(spa, sport);
+	bbdd_d_sport_put(&d->spa, sport);
 	return -1;
 }
 
@@ -1527,8 +1560,7 @@ static void bbdd_d_handle_session_add(struct bbdd_d *d,
 		return __bbdd_d_respond_invalid_params(peer, id, "Duplicate session");
 	}
 
-	rc = bbdd_d_session_add(&csess, d->nl, d->sdir, d->bpf, &d->spa,
-				&error);
+	rc = bbdd_d_session_add(d, &csess, &error);
 	if (rc < 0)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -1609,12 +1641,14 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 	for (size_t i = 0; i < ndiscrs; i++) {
 		struct bbdd_d_session *dsess;
+		bool changed;
 
 		dsess = bbdd_sess_dir_get_session(d->sdir, discrs[i]);
 		if (dsess == NULL)
 			continue;
 
-		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &error);
+		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &changed,
+					    &error);
 		if (rc != 0) {
 			bbdd_util_wraperr(&error, "Session %u: %s",
 					  dsess->local.discr, error);
@@ -1627,6 +1661,9 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 			bbdd_d_respond_interr(peer, id, &error);
 			goto free_discrs;
 		}
+
+		if (changed)
+			bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
 
 		set = true;
 	}
@@ -1875,6 +1912,7 @@ bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	struct bbdd_d_session *dsess;
 	struct bbdd_c_session csess;
 	uint32_t discr;
+	bool changed;
 	char *error;
 	int rc;
 
@@ -1902,21 +1940,23 @@ bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		rc = bbdd_d_session_add(&csess, d->nl, d->sdir, d->bpf, &d->spa,
-					&error);
+		rc = bbdd_d_session_add(d, &csess, &error);
 		if (rc != 0)
 			goto no_session;
 		return;
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &error);
+	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &changed, &error);
 	if (rc != 0)
 		goto interr;
 
 	rc = bbdd_bpf_session_update(d->bpf, dsess, &error);
 	if (rc != 0)
 		goto interr;
+
+	if (changed)
+		bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
 
 	return;
 

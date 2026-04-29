@@ -93,13 +93,5 @@ void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
 void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		   enum bbdd_mon_topic topic)
 {
-	if (bbdd_env.verbosity > 0) {
-		const char *str;
-
-		str = json_object_to_json_string(msg);
-		if (str != NULL)
-			fprintf(stderr, "%s\n", str);
-	}
-
 	__bbdd_mon_send(mon, msg, topic);
 }

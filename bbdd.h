@@ -29,6 +29,10 @@ extern struct bbdd_env {
 
 struct bbdd_bpf;
 
+/* bbdd-mon.c */
+
+struct bbdd_mon;
+
 /* bbdd-c.c */
 
 int bbdd_c_stop(int argc, char **argv);
@@ -200,6 +204,10 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
 
 const char *bbdd_d_bfd_diag_to_str(enum bbdd_bfd_pkt_diag dv);
 int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv);
+
+void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
+				  struct bbdd_bpf *bpf,
+				  struct bbdd_mon *mon);
 
 /* json-c */
 struct json_object;
