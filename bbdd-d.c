@@ -1150,27 +1150,46 @@ void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 				  struct bbdd_bpf *bpf,
 				  struct bbdd_mon *mon)
 {
-	struct json_object *obj;
+	struct json_object *sess_obj;
+	struct json_object *params;
+	struct json_object *msg;
 	char *error = NULL;
-	bool printed = false;
+	int rc = -1;
 
-	obj = bbdd_d_session_json(bpf, dsess, &error);
-	if (obj != NULL) {
-		const char *str;
+	msg = bbdd_jrpc_new_notif("session:change");
+	if (msg == NULL)
+		return;
 
-		str = json_object_to_json_string(obj);
-		if (str != NULL) {
-			fprintf(stderr, "state change %s\n", str);
-			printed = true;
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_msg;
+
+	sess_obj = bbdd_d_session_json(bpf, dsess, &error);
+	if (sess_obj != NULL) {
+		if (bbdd_jrpc_append_obj(params, "session", &sess_obj)) {
+			json_object_put(sess_obj);
+			goto no_session;
 		}
+	} else {
+no_session:
+		if (bbdd_jrpc_append_int(params, "discr", dsess->local.discr))
+			goto put_params;
 	}
-	json_object_put(obj);
 
-	if (!printed)
-		bbdd_util_printerr(&error, "session %u changed",
+	if (bbdd_jrpc_append_obj(msg, "params", &params))
+		goto put_params;
+
+	bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_session);
+	rc = 0;
+
+put_params:
+	json_object_put(params);
+put_msg:
+	json_object_put(msg);
+
+	if (rc != 0)
+		bbdd_util_printerr(&error, "session %u: failed to format notification",
 				   dsess->local.discr);
-	else
-		assert(error == NULL);
 }
 
 static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,

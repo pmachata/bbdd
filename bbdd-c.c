@@ -833,8 +833,6 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 
 	if (state->poll_pending_seen && state->poll_pending)
 		printf("poll-pending ");
-
-	printf("\n");
 }
 
 static int bbdd_c_session_show_jrpc_result(struct json_object *response,
@@ -864,8 +862,10 @@ static int bbdd_c_session_show_jrpc_result(struct json_object *response,
 		goto put_result;
 	}
 
-	for (size_t i = 0; i < num_sessions; i++)
+	for (size_t i = 0; i < num_sessions; i++) {
 		bbdd_c_session_show_one(&sessions[i], &states[i]);
+		printf("\n");
+	}
 	if (num_sessions == 0 && bbdd_env.verbosity > 0)
 		printf("(no sessions)\n");
 	free(sessions);
@@ -2453,6 +2453,47 @@ bbdd_c_monitor_handle_ringbuf_tx_no_neigh(struct json_object *params,
 		       : BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
+{
+	enum {
+		pol_discr,
+		pol_session,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_discr]   = { .key = "discr",   .type = json_type_int },
+		[pol_session] = { .key = "session", .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct bbdd_c_session_state state = {};
+	struct bbdd_c_session sess = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_session]) {
+		rc = bbdd_c_jrpc_dissect_session_list(values[pol_session],
+						      &sess, &state, error);
+		if (rc != 0)
+			goto try_discr;
+		bbdd_c_session_show_one(&sess, &state);
+		return BBDD_C_MONITOR_PRINT_OK;
+	}
+
+try_discr:
+	if (seen[pol_discr]) {
+		printf("discr %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_discr]));
+		return BBDD_C_MONITOR_PRINT_OK;
+	}
+
+	return BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
 static void bbdd_c_monitor_print_timestamp(void)
 {
 	struct timespec ts;
@@ -2488,6 +2529,8 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		rc = bbdd_c_monitor_handle_ringbuf_rx_timeout(params, &error);
 	else if (strcmp(method, "ringbuf:tx-no-neighbor") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_tx_no_neigh(params, &error);
+	else if (strcmp(method, "session:change") == 0)
+		rc = bbdd_c_monitor_handle_session_change(params, &error);
 
 	switch (rc) {
 	case BBDD_C_MONITOR_PRINT_ERROR:
