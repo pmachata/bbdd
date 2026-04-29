@@ -1146,91 +1146,12 @@ put_obj:
 		bbdd_d_respond_memerr(peer, id);
 }
 
-static int bbdd_d_session_apply_c_addr(struct bbdd_sockaddr *to,
-				       const struct bbdd_c_session_addr *from,
-				       char **error)
-{
-	if (from->unset)
-		to->sa.sa_family = 0;
-	else if (from->af != 0)
-		return bbdd_sock_parse_addr_af(from->af, from->str, to, error);
-	return 0;
-}
-
-static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
-				  const struct bbdd_c_session *csess,
-				  struct bbdd_nl *nl,
-				  char **error)
+static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+				     const struct bbdd_c_session *csess,
+				     bool set_src, struct bbdd_sockaddr *src,
+				     bool set_dst, struct bbdd_sockaddr *dst)
 {
 	uint16_t sport;
-	int err;
-
-	/* Some things cannot be validated during parsing, but only when we see
-	 * the actual data. Validate them here. */
-
-	if (csess->discr_seen && dsess->local.discr != 0 &&
-	    csess->discr != dsess->local.discr) {
-		bbdd_util_fmterr(error, "Session discriminator change is not allowed");
-		return -1;
-	}
-
-	/* Validate that src and dst will end up with the same address family.
-	 * Determine what each will be after applying the change. */
-	{
-		int new_dst_af;
-		int new_src_af;
-
-		assert(!csess->dst.unset);
-		if (csess->dst.af != 0)
-			new_dst_af = csess->dst.af;
-		else
-			new_dst_af = dsess->dst.sin46.family;
-		assert(new_dst_af != 0);
-
-		if (csess->src.unset)
-			new_src_af = 0;
-		else if (csess->src.af != 0)
-			new_src_af = csess->src.af;
-		else
-			new_src_af = dsess->src.sin46.family;
-
-		if (new_src_af != 0 && new_src_af != new_dst_af) {
-			bbdd_util_fmterr(error,
-					 "%s destination but %s source address",
-					 bbdd_sock_af_to_str(new_dst_af),
-					 bbdd_sock_af_to_str(new_src_af));
-			return -1;
-		}
-	}
-
-	/* To validate VRF, construct a VRF configuration view from the current
-	 * dsess, with the csess changes applied on top, and check that. */
-	{
-		struct bbdd_c_session_vrf sess_vrf = {};
-
-		bbdd_d_session_to_c_vrf(dsess, &sess_vrf);
-		if (csess->vrf.netif.unset) {
-			sess_vrf.netif.name_seen = 0;
-			sess_vrf.netif.ifindex_seen = 0;
-		}
-		if (csess->vrf.netif.name_seen) {
-			memcpy(sess_vrf.netif.name, csess->vrf.netif.name,
-			       sizeof(sess_vrf.netif.name));
-			sess_vrf.netif.name_seen = 1;
-		}
-		if (csess->vrf.netif.ifindex_seen) {
-			sess_vrf.netif.ifindex = csess->vrf.netif.ifindex;
-			sess_vrf.netif.ifindex_seen = 1;
-		}
-		if (csess->vrf.table_seen) {
-			sess_vrf.table = csess->vrf.table;
-			sess_vrf.table_seen = 1;
-		}
-
-		err = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
-		if (err != 0)
-			return err;
-	}
 
 	for (int i = 0; i < bbdd_c_session_nflags; i++) {
 		struct bbdd_c_session_flag cflag = csess->flags.flags[i];
@@ -1240,10 +1161,10 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 	sport = ntohs(dsess->src.sin46.port);
 
-	err = bbdd_d_session_apply_c_addr(&dsess->src, &csess->src, error) ?:
-	      bbdd_d_session_apply_c_addr(&dsess->dst, &csess->dst, error);
-	if (err)
-		return err;
+	if (set_src)
+		dsess->src = *src;
+	if (set_dst)
+		dsess->dst = *dst;
 
 	/* Preserve the source port. */
 	dsess->src.sin46.port = htons(sport);
@@ -1298,6 +1219,108 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		 * Down */
 		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
+	}
+}
+
+static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
+				       const struct bbdd_c_session_addr *from,
+				       char **error)
+{
+	if (from->unset) {
+		*set = true;
+		to->sa.sa_family = 0;
+		return 0;
+
+	} else if (from->af != 0) {
+		*set = true;
+		return bbdd_sock_parse_addr_af(from->af, from->str, to, error);
+
+	} else {
+		*set = false;
+		return 0;
+	}
+}
+
+static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+				  const struct bbdd_c_session *csess,
+				  struct bbdd_nl *nl,
+				  char **error)
+{
+	struct bbdd_sockaddr src = {};  bool set_src;
+	struct bbdd_sockaddr dst = {};  bool set_dst;
+	int err;
+
+	/* Some things cannot be validated during parsing, but only when we see
+	 * the actual data. Validate them here. */
+
+	if (csess->discr_seen && dsess->local.discr != 0 &&
+	    csess->discr != dsess->local.discr) {
+		bbdd_util_fmterr(error, "Session discriminator change is not allowed");
+		return -1;
+	}
+
+	/* Validate that src and dst will end up with the same address family.
+	 * Determine what each will be after applying the change. */
+	{
+		int new_dst_af;
+		int new_src_af;
+
+		assert(!csess->dst.unset);
+		if (csess->dst.af != 0)
+			new_dst_af = csess->dst.af;
+		else
+			new_dst_af = dsess->dst.sin46.family;
+		assert(new_dst_af != 0);
+
+		if (csess->src.unset)
+			new_src_af = 0;
+		else if (csess->src.af != 0)
+			new_src_af = csess->src.af;
+		else
+			new_src_af = dsess->src.sin46.family;
+
+		if (new_src_af != 0 && new_src_af != new_dst_af) {
+			bbdd_util_fmterr(error,
+					 "%s destination but %s source address",
+					 bbdd_sock_af_to_str(new_dst_af),
+					 bbdd_sock_af_to_str(new_src_af));
+			return -1;
+		}
+	}
+
+	/* Parse the addresses.*/
+	err = bbdd_d_session_apply_c_addr(&set_src, &src, &csess->src, error) ?:
+	      bbdd_d_session_apply_c_addr(&set_dst, &dst, &csess->dst, error);
+	if (err)
+		return err;
+
+	/* To validate VRF, construct a VRF configuration view from the current
+	 * dsess, with the csess changes applied on top, and check that. */
+	{
+		struct bbdd_c_session_vrf sess_vrf = {};
+
+		bbdd_d_session_to_c_vrf(dsess, &sess_vrf);
+		if (csess->vrf.netif.unset) {
+			sess_vrf.netif.name_seen = 0;
+			sess_vrf.netif.ifindex_seen = 0;
+		}
+		if (csess->vrf.netif.name_seen) {
+			memcpy(sess_vrf.netif.name, csess->vrf.netif.name,
+			       sizeof(sess_vrf.netif.name));
+			sess_vrf.netif.name_seen = 1;
+		}
+		if (csess->vrf.netif.ifindex_seen) {
+			sess_vrf.netif.ifindex = csess->vrf.netif.ifindex;
+			sess_vrf.netif.ifindex_seen = 1;
+		}
+		if (csess->vrf.table_seen) {
+			sess_vrf.table = csess->vrf.table;
+			sess_vrf.table_seen = 1;
+		}
+
+		err = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
+		if (err != 0)
+			return err;
 	}
 
 	return 0;
