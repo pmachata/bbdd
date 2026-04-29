@@ -25,12 +25,12 @@ int bbdd_util_fmterr(char **strp, const char *fmt, ...);
 __attribute__((format(printf, 2, 3)))
 int bbdd_util_wraperr(char **strp, const char *fmt, ...);
 
-/* If rc != 0, *error shall be a valid error string, which is printed out
- * and freed. A nop when rc == 0. */
+/* Prints the given message. Then when *error is non-NULL, it appends a
+ * ": $error" afterwards. Puts the resulting pointer back to *error. */
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_printerr(char **error, const char *fmt, ...);
 
-/* Like bbdd_util_printerr, but only prints when verbosity > 0; always frees
+/* Like bbdd_util_printerr(), but only prints when verbosity > 0; always frees
  * *error. */
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_verberr(char **error, const char *fmt, ...);
