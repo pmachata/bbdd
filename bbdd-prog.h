@@ -57,9 +57,9 @@ struct bbdd_bpf_global_config {
 };
 
 enum bbdd_bpf_rb_elem_type {
-	BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR,
+	BBDD_BPF_RB_ELEM_TX_NO_NEIGH,
 	BBDD_BPF_RB_ELEM_RX_DISCR_0,
-	BBDD_BPF_RB_ELEM_RX_UNX_PACKET,
+	BBDD_BPF_RB_ELEM_RX_UNX_PKT,
 	BBDD_BPF_RB_ELEM_RX_TIMEOUT,
 };
 
@@ -71,7 +71,7 @@ struct bbdd_bpf_rb_elem_head {
 	enum bbdd_bpf_rb_elem_type type;
 };
 
-struct bbdd_bpf_rb_elem_tx_no_neighbor {
+struct bbdd_bpf_rb_elem_tx_no_neigh {
 	struct bbdd_bpf_rb_elem_head head;
 	int ifindex;
 	__u16 ethtype;
@@ -90,7 +90,7 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bfd_pkt packet;
 };
 
-struct bbdd_bpf_rb_elem_rx_unx_packet {
+struct bbdd_bpf_rb_elem_rx_unx_pkt {
 	struct bbdd_bpf_rb_elem_head head;
 	__u16 skb_len;
 	__u8 ttl;

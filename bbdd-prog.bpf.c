@@ -59,10 +59,10 @@ struct {
 			BBDD_BPF_RB_ELEM_RX_TIMEOUT,			\
 		 struct bbdd_bpf_rb_elem_rx_discr_0:			\
 			BBDD_BPF_RB_ELEM_RX_DISCR_0,			\
-		 struct bbdd_bpf_rb_elem_rx_unx_packet:			\
-			BBDD_BPF_RB_ELEM_RX_UNX_PACKET,			\
-		 struct bbdd_bpf_rb_elem_tx_no_neighbor:		\
-			BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR)
+		 struct bbdd_bpf_rb_elem_rx_unx_pkt:			\
+			BBDD_BPF_RB_ELEM_RX_UNX_PKT,			\
+		 struct bbdd_bpf_rb_elem_tx_no_neigh:			\
+			BBDD_BPF_RB_ELEM_TX_NO_NEIGH)
 
 #define BBDD_NOTIFY_ELEM_INIT(ELEM)					\
 	do {								\
@@ -79,10 +79,10 @@ struct {
 		(ELEM) = bbdd__elem;					\
 	} while (0)
 
-static void bbdd_tx_notify_no_neighbor(u16 proto,
-				       const struct bpf_fib_lookup *params)
+static void bbdd_tx_notify_no_neigh(u16 proto,
+				    const struct bpf_fib_lookup *params)
 {
-	struct bbdd_bpf_rb_elem_tx_no_neighbor *elem;
+	struct bbdd_bpf_rb_elem_tx_no_neigh *elem;
 
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
@@ -131,11 +131,10 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 }
 
 static void
-bbdd_rx_notify_unx_packet(struct __sk_buff *skb,
-			  const struct bbdd_bfd_pkt *packet,
-			  u8 ttl)
+bbdd_rx_notify_unx_pkt(struct __sk_buff *skb,
+		       const struct bbdd_bfd_pkt *packet, u8 ttl)
 {
-	struct bbdd_bpf_rb_elem_rx_unx_packet *elem;
+	struct bbdd_bpf_rb_elem_rx_unx_pkt *elem;
 
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
@@ -410,8 +409,8 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 			BUMP(data->diag_stats.tx_req_encap);
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
-			bbdd_tx_notify_no_neighbor(skb->protocol, &params);
-			BUMP(data->diag_stats.tx_no_neighbor);
+			bbdd_tx_notify_no_neigh(skb->protocol, &params);
+			BUMP(data->diag_stats.tx_no_neigh);
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:
 			BUMP(data->diag_stats.tx_req_fragmentation);
@@ -633,7 +632,7 @@ int bbdd_recv(struct __sk_buff *skb)
 
 	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
 	if (ret != 0) {
-		bbdd_rx_notify_unx_packet(skb, bfd, digest.ttl);
+		bbdd_rx_notify_unx_pkt(skb, bfd, digest.ttl);
 		return TC_ACT_SHOT;
 	}
 

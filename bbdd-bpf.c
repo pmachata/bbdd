@@ -632,15 +632,15 @@ bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 }
 
 static void
-bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem,
-			       struct bbdd_nl *nl)
+bbdd_bpf_rb_handle_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
+			    struct bbdd_nl *nl)
 {
 	struct bbdd_sockaddr addr = {};
 	char *error;
 	int err;
 
 	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->addr, &addr,
-					"BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR",
+					"BBDD_BPF_RB_ELEM_TX_NO_NEIGH",
 					&error);
 	if (err != 0)
 		goto error;
@@ -927,9 +927,9 @@ error:
 }
 
 static void
-bbdd_bpf_rb_handle_unx_packet(const struct bbdd_bpf_rb_elem_rx_unx_packet *elem,
-			      struct bbdd_bpf *bpf,
-			      struct bbdd_sess_dir *sdir)
+bbdd_bpf_rb_handle_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
+			   struct bbdd_bpf *bpf,
+			   struct bbdd_sess_dir *sdir)
 {
 	uint32_t local_discr = ntohl(elem->packet.your_disc);
 
@@ -1078,14 +1078,14 @@ oom:
 }
 
 static struct json_object *
-bbdd_bpf_rb_format_tx_no_neighbor(
-	const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem, char **error)
+bbdd_bpf_rb_format_tx_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
+			       char **error)
 {
 	struct json_object *addr_obj;
 	struct json_object *params;
 	struct json_object *obj;
 
-	obj = bbdd_jrpc_new_notif("ringbuf:tx-no-neighbor");
+	obj = bbdd_jrpc_new_notif("ringbuf:tx-no-neigh");
 	if (obj == NULL)
 		goto err;
 
@@ -1173,14 +1173,14 @@ err:
 }
 
 static struct json_object *
-bbdd_bpf_rb_format_rx_unx_packet(
-	const struct bbdd_bpf_rb_elem_rx_unx_packet *elem, char **error)
+bbdd_bpf_rb_format_rx_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
+			      char **error)
 {
 	struct json_object *params;
 	struct json_object *pkt_obj;
 	struct json_object *obj;
 
-	obj = bbdd_jrpc_new_notif("ringbuf:rx-unx-packet");
+	obj = bbdd_jrpc_new_notif("ringbuf:rx-unx-pkt");
 	if (obj == NULL)
 		return NULL;
 
@@ -1245,12 +1245,12 @@ bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head, char **error)
 	const void *data = head;
 
 	switch (head->type) {
-	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
-		return bbdd_bpf_rb_format_tx_no_neighbor(data, error);
+	case BBDD_BPF_RB_ELEM_TX_NO_NEIGH:
+		return bbdd_bpf_rb_format_tx_no_neigh(data, error);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
 		return bbdd_bpf_rb_format_rx_discr_0(data, error);
-	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
-		return bbdd_bpf_rb_format_rx_unx_packet(data, error);
+	case BBDD_BPF_RB_ELEM_RX_UNX_PKT:
+		return bbdd_bpf_rb_format_rx_unx_pkt(data, error);
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
 		return bbdd_bpf_rb_format_rx_timeout(data, error);
 	}
@@ -1291,14 +1291,14 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	bbdd_bpf_rb_mon_send(rb_ctx->bpf, rb_ctx->mon, head);
 
 	switch (head->type) {
-	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
-		bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl);
+	case BBDD_BPF_RB_ELEM_TX_NO_NEIGH:
+		bbdd_bpf_rb_handle_no_neigh(data, rb_ctx->nl);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
 		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
-	case BBDD_BPF_RB_ELEM_RX_UNX_PACKET:
-		bbdd_bpf_rb_handle_unx_packet(data, rb_ctx->bpf, rb_ctx->sdir);
+	case BBDD_BPF_RB_ELEM_RX_UNX_PKT:
+		bbdd_bpf_rb_handle_unx_pkt(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
 		bbdd_bpf_rb_handle_timeout(data, rb_ctx->bpf, rb_ctx->sdir);

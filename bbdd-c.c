@@ -2326,8 +2326,8 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 }
 
 static enum bbdd_c_monitor_print_rc
-bbdd_c_monitor_handle_ringbuf_rx_unx_packet(struct json_object *params,
-					    char **error)
+bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(struct json_object *params,
+					 char **error)
 {
 	enum {
 		pol_skb_len,
@@ -2516,18 +2516,18 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 	if (bbdd_env.timestamp)
 		bbdd_c_monitor_print_timestamp();
 
-	printf("%s: ", method);
+	printf("%-20s: ", method);
 
 	if (bbdd_c_result_show_json(params))
 		return;
 
 	if (strcmp(method, "ringbuf:rx-discr-0") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_rx_discr_0(params, &error);
-	else if (strcmp(method, "ringbuf:rx-unx-packet") == 0)
-		rc = bbdd_c_monitor_handle_ringbuf_rx_unx_packet(params, &error);
+	else if (strcmp(method, "ringbuf:rx-unx-pkt") == 0)
+		rc = bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(params, &error);
 	else if (strcmp(method, "ringbuf:rx-timeout") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_rx_timeout(params, &error);
-	else if (strcmp(method, "ringbuf:tx-no-neighbor") == 0)
+	else if (strcmp(method, "ringbuf:tx-no-neigh") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_tx_no_neigh(params, &error);
 	else if (strcmp(method, "session:change") == 0)
 		rc = bbdd_c_monitor_handle_session_change(params, &error);
