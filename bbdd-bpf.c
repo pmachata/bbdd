@@ -49,7 +49,6 @@ struct bbdd_bpf_rb_context {
 	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_mon *mon;
-	char **error;
 };
 
 #define SOCK(AF, PORT, NAME) \
@@ -632,20 +631,27 @@ bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 	return -EPROTO;
 }
 
-static int
+static void
 bbdd_bpf_rb_handle_no_neighbor(const struct bbdd_bpf_rb_elem_tx_no_neighbor *elem,
-			       struct bbdd_nl *nl, char **error)
+			       struct bbdd_nl *nl)
 {
 	struct bbdd_sockaddr addr = {};
+	char *error;
 	int err;
 
 	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->addr, &addr,
 					"BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR",
-					error);
-	if (err)
-		return err;
+					&error);
+	if (err != 0)
+		goto error;
 
-	return bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, error);
+	err = bbdd_nl_refresh_neigh(nl, (uint32_t)elem->ifindex, &addr, &error);
+	if (err != 0)
+		goto error;
+	return;
+
+error:
+	bbdd_util_printerr(&error, "no neighbor");
 }
 
 /* Return number of found sessions, or < 0 on error. The last matched session,
@@ -1286,8 +1292,8 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGHBOR:
-		return bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl,
-						      rb_ctx->error);
+		bbdd_bpf_rb_handle_no_neighbor(data, rb_ctx->nl);
+		break;
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
 		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir);
 		break;
@@ -1301,15 +1307,12 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	return 0;
 }
 
-static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data,
-			    char **error)
+static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data, char **)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = data;
 	int ret;
 
-	rb_ctx->error = error;
 	ret = ring_buffer__consume(rb_ctx->rb);
-	rb_ctx->error = NULL;
 	if (ret < 0)
 		return -1;
 
