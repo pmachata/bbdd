@@ -1523,7 +1523,7 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 		goto put_port;
 	}
 
-	dsess->src.sin46.port = sport;
+	dsess->src.sin46.port = htons(sport);
 
 	/* RFC 6.2: Down state means that the session is down (or has just been
 	 * created). */
@@ -1718,7 +1718,7 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 
 	bbdd_bpf_session_del(d->bpf, dsess);
 
-	sport = dsess->src.sin46.port;
+	sport = ntohs(dsess->src.sin46.port);
 	bbdd_d_sport_put(&d->spa, sport);
 
 	bbdd_sess_dir_del_session(d->sdir, dsess);
