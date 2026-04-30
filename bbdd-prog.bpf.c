@@ -654,7 +654,7 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	detect_time_ns = config->detect_time_us * NS_PER_US;
+	detect_time_ns = config->detect_time_us * (u64)NS_PER_US;
 	ret = bpf_timer_start(&data->timer, detect_time_ns, 0);
 	if (ret) {
 		BUMP(data->diag_stats.rx_fail_timer);
