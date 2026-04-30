@@ -489,6 +489,44 @@ static int bfd_session_expired(void *hmap, u32 *key,
 	return 0;
 }
 
+static void bbdd_recv_rearm_timer(__u32 discr,
+				  const struct bbdd_prog_session_config *config,
+				  struct bbdd_prog_session_data *data)
+{
+	u64 detect_time_ns;
+	int ret;
+
+	if (!data->timer_initd) {
+
+		ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
+				     CLOCK_MONOTONIC);
+		if (ret && ret != -EBUSY) {
+			BUMP(data->diag_stats.rx_fail_timer);
+			return;
+		}
+
+		ret = bpf_timer_set_callback(&data->timer, bfd_session_expired);
+		if (ret) {
+			BUMP(data->diag_stats.rx_fail_timer);
+			return;
+		}
+
+		data->timer_initd = true;
+	}
+
+	detect_time_ns = config->detect_time_us * (u64)NS_PER_US;
+	ret = bpf_timer_start(&data->timer, detect_time_ns, 0);
+	if (ret) {
+		BUMP(data->diag_stats.rx_fail_timer);
+		return;
+	}
+
+	// xxx when decreasing time, we will probably need to signal to datapath
+	// that the timer should be rearmed. Imagine going from 4s timeout to
+	// say 1ms timeout. We would miss thousands of timeout events before the
+	// timer fires and gives us an opportunity to rearm.
+}
+
 static bool bbdd_recv_parse_ipv4(struct __sk_buff *skb,
 				 struct bbdd_bfd_rx_pkt_digest *digest)
 {
@@ -567,9 +605,8 @@ int bbdd_recv(struct __sk_buff *skb)
 	u8 bfd_buf[sizeof(struct bbdd_bfd_pkt)] = {};
 	struct bbdd_bfd_rx_pkt_digest digest = {};
 	struct bbdd_prog_session_data *data;
-	struct bbdd_prog_session_config *config;
+	const struct bbdd_prog_session_config *config;
 	struct bbdd_bfd_pkt *bfd;
-	u64 detect_time_ns;
 	u32 discr;
 	int ret;
 
@@ -640,27 +677,7 @@ int bbdd_recv(struct __sk_buff *skb)
 	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
 
 	/* Rearm timer. */
-	// xxx should only be done when userspace says so
-	ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
-			     CLOCK_MONOTONIC);
-	if (ret && ret != -EBUSY) {
-		BUMP(data->diag_stats.rx_fail_timer);
-		return TC_ACT_SHOT;
-	}
-
-	ret = bpf_timer_set_callback(&data->timer, bfd_session_expired);
-	if (ret) {
-		BUMP(data->diag_stats.rx_fail_timer);
-		return TC_ACT_SHOT;
-	}
-
-	detect_time_ns = config->detect_time_us * (u64)NS_PER_US;
-	ret = bpf_timer_start(&data->timer, detect_time_ns, 0);
-	if (ret) {
-		BUMP(data->diag_stats.rx_fail_timer);
-		return TC_ACT_SHOT;
-	}
-
+	bbdd_recv_rearm_timer(discr, config, data);
 	return TC_ACT_SHOT;
 }
 

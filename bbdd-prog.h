@@ -27,6 +27,7 @@ struct bbdd_prog_session_data {
 	struct bpf_timer timer;
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
+	bool timer_initd;
 };
 
 #define BFD_SINGLE_HOP_PORT	3784
