@@ -351,7 +351,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	u64 interval_us;
 	u16 tot_len;
 	bool final;
-	u32 id;
+	u32 discr;
 	int final_rc = TC_ACT_SHOT;
 	int ret;
 
@@ -363,12 +363,12 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 
 	final = bbdd_bfd_pkt_bits(bfd) & BBDD_BFD_PKT_BIT_FINAL;
 
-	id = bpf_ntohl(bfd->my_disc);
-	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &id);
+	discr = bpf_ntohl(bfd->my_disc);
+	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
 	if (config == NULL)
 		goto tx_no_session;
 
-	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &id);
+	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &discr);
 	if (data == NULL)
 		goto tx_no_session;
 
@@ -379,7 +379,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	}
 
 	if (!skb->hash)
-		bpf_set_hash(skb, id);
+		bpf_set_hash(skb, discr);
 
 	/* FIB lookup */
 	params = config->fib_lookup;
