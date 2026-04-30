@@ -37,11 +37,6 @@
 #include "bbdd-prog.skel.h"
 #pragma GCC diagnostic pop
 
-struct bbdd_bpf_attachment {
-	struct bpf_tc_hook hook;
-	struct bpf_tc_opts opts;
-};
-
 /* Interface between bbdd_bpf_rb_recv() and bbdd_bpf_rb_handle(). */
 struct bbdd_bpf_rb_context {
 	struct bbdd_bpf *bpf;
@@ -67,8 +62,6 @@ struct bbdd_bpf {
 	struct bbdd_bpf_session *sdir;
 
 	struct bbdd_prog *skel;
-	struct bbdd_bpf_attachment *rx;
-	struct bbdd_bpf_attachment *tx;
 	struct bbdd_bpf_rb_context *rb_ctx;
 
 	struct bbdd_bpf_sockets sockets;
@@ -1379,32 +1372,46 @@ static void bbdd_bpf_rb_fini(struct bbdd_bpf_rb_context *rb_ctx)
 	free(rb_ctx);
 }
 
-static struct bbdd_bpf_attachment *
-bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
-		enum bpf_tc_attach_point attach_point,
-		char **error)
+static int bbdd_bpf_hook_create(int ifindex, char **error)
+{
+	struct bpf_tc_hook hook = {
+		.sz = sizeof(struct bpf_tc_hook),
+		.ifindex = ifindex,
+		/* libbpf insists on this field even if we then use the hook to
+		 * attach both ingress and egress programs. */
+		.attach_point = BPF_TC_INGRESS,
+	};
+	int err;
+
+	err = bpf_tc_hook_create(&hook);
+	if (err != 0)
+		bbdd_util_fmterr(error, "bpf_tc_hook_create: %s",
+				 strerror(-err));
+	return err;
+}
+
+static void bbdd_bpf_hook_destroy(int ifindex)
+{
+	struct bpf_tc_hook hook = {
+		.sz = sizeof(struct bpf_tc_hook),
+		.ifindex = ifindex,
+		.attach_point = BPF_TC_INGRESS,
+	};
+
+	bpf_tc_hook_destroy(&hook);
+}
+
+static int bbdd_bpf_attach(struct bpf_program *prog, int ifindex,
+			   enum bpf_tc_attach_point attach_point,
+			   char **error)
 {
 	struct bpf_tc_hook hook = {
 		.sz = sizeof(hook),
-		.ifindex = (int)ifindex,
+		.ifindex = ifindex,
 		.attach_point = attach_point,
 	};
-	struct bbdd_bpf_attachment *attachment;
 	struct bpf_tc_opts opts;
 	int err;
-
-	attachment = malloc(sizeof(*attachment));
-	if (!attachment) {
-		bbdd_util_fmterr(error, "bbdd_bpf_attach: %m");
-		return NULL;
-	}
-
-	err = bpf_tc_hook_create(&hook);
-	if (err) {
-		bbdd_util_fmterr(error, "bpf_tc_hook_create(ifindex=%u): %s",
-				 ifindex, strerror(-err));
-		goto free;
-	}
 
 	opts = (struct bpf_tc_opts) {
 		.sz = sizeof(opts),
@@ -1414,29 +1421,27 @@ bbdd_bpf_attach(struct bpf_program *prog, uint32_t ifindex,
 	};
 
 	err = bpf_tc_attach(&hook, &opts);
-	if (err) {
+	if (err != 0)
 		bbdd_util_fmterr(error, "bpf_tc_attach(ifindex=%u): %s",
 				 ifindex, strerror(-err));
-		goto hook_destroy;
-	}
-
-	*attachment = (struct bbdd_bpf_attachment) {
-		.hook = hook,
-		.opts = opts,
-	};
-	return attachment;
-
-hook_destroy:
-	bpf_tc_hook_destroy(&hook);
-free:
-	free(attachment);
-	return NULL;
+	return err;
 }
 
-static void bbdd_bpf_detach(struct bbdd_bpf_attachment *attachment)
+static void bbdd_bpf_detach(struct bpf_program *prog, int ifindex,
+			    enum bpf_tc_attach_point attach_point)
 {
-	bpf_tc_detach(&attachment->hook, &attachment->opts);
-	free(attachment);
+	struct bpf_tc_hook hook = {
+		.sz = sizeof(hook),
+		.ifindex = ifindex,
+		.attach_point = attach_point,
+	};
+	struct bpf_tc_opts opts = {
+		.sz = sizeof(opts),
+		.prog_fd = bpf_program__fd(prog),
+		.handle = 1,
+		.priority = 1,
+	};
+	bpf_tc_detach(&hook, &opts);
 }
 
 static int
@@ -1684,19 +1689,27 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 
 	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)conf->veth_tx_ifindex;
 
+	err = bbdd_bpf_hook_create(conf->veth_rx_ifindex, error);
+	if (err != 0)
+		goto free_rb_ctx;
+
+	err = bbdd_bpf_hook_create(conf->veth_tx_ifindex, error);
+	if (err != 0)
+		goto destroy_rx_hook;
+
 	/* Attach programs as the last step when everything else is
 	 * prepared. */
 
-	bpf->rx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx,
-				  conf->veth_rx_ifindex,
-				  BPF_TC_INGRESS, error);
-	if (bpf->rx == NULL)
-		goto free_rb_ctx;
+	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx,
+			      conf->veth_rx_ifindex, BPF_TC_INGRESS,
+			      error);
+	if (err != 0)
+		goto destroy_tx_hook;
 
-	bpf->tx = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx,
-				  conf->veth_tx_ifindex,
-				  BPF_TC_EGRESS, error);
-	if (bpf->tx == NULL)
+	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx,
+			      conf->veth_tx_ifindex, BPF_TC_EGRESS,
+			      error);
+	if (err != 0)
 		goto detach_rx;
 
 	err = bbdd_bpf_sockets_open(&bpf->sockets, error);
@@ -1718,9 +1731,15 @@ sockets_detach:
 sockets_close:
 	bbdd_bpf_sockets_close(&bpf->sockets);
 detach_tx:
-	bbdd_bpf_detach(bpf->tx);
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
+			conf->veth_tx_ifindex, BPF_TC_EGRESS);
 detach_rx:
-	bbdd_bpf_detach(bpf->rx);
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
+			conf->veth_rx_ifindex, BPF_TC_INGRESS);
+destroy_tx_hook:
+	bbdd_bpf_hook_destroy(conf->veth_tx_ifindex);
+destroy_rx_hook:
+	bbdd_bpf_hook_destroy(conf->veth_rx_ifindex);
 free_rb_ctx:
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 destroy_prog:
@@ -1735,8 +1754,15 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 	bbdd_bpf_sk_lookup_detach(bpf);
 	bbdd_bpf_sockets_detach(bpf);
 	bbdd_bpf_sockets_close(&bpf->sockets);
-	bbdd_bpf_detach(bpf->tx);
-	bbdd_bpf_detach(bpf->rx);
+
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
+			bpf->conf.veth_tx_ifindex, BPF_TC_EGRESS);
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
+			bpf->conf.veth_rx_ifindex, BPF_TC_INGRESS);
+
+	bbdd_bpf_hook_destroy(bpf->conf.veth_tx_ifindex);
+	bbdd_bpf_hook_destroy(bpf->conf.veth_rx_ifindex);
+
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
 	free(bpf);
