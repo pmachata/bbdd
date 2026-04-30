@@ -1018,9 +1018,12 @@ bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet)
 		if (err != 0)					\
 			goto err;				\
 		f = NULL;					\
+		bits &= ~BBDD_BFD_PKT_BIT_ ## NAME;		\
 	} while (0);
 
 	BBDD_BFD_PKT_BITS(APPEND);
+	if (bits != 0)
+		fprintf(stderr, "unformatted bits: %#x\n", bits);
 	return obj;
 
 #undef APPEND
