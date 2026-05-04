@@ -2619,16 +2619,16 @@ bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id)
 	if (topics_arr == NULL)
 		goto put_params;
 
-#define X(NAME)								\
+#define ADD_ENABLED_TOPIC(NAME, ALL)					\
 	if (topics.enabled[BBDD_MON_TOPIC_ ## NAME]) {			\
 		struct json_object *s = json_object_new_string(#NAME);	\
-		if (s == NULL || json_object_array_add(topics_arr, s)) {	\
+		if (s == NULL || json_object_array_add(topics_arr, s)) { \
 			json_object_put(s);				\
 			goto put_topics;				\
 		}							\
 	}
-	BBDD_MON_TOPICS(X)
-#undef X
+	BBDD_MON_TOPICS(ADD_ENABLED_TOPIC)
+#undef ADD_ENABLED_TOPIC
 
 	if (bbdd_jrpc_append_obj(params_obj, "topics", &topics_arr))
 		goto put_topics;
@@ -2737,13 +2737,13 @@ int bbdd_c_monitor(int argc, char **argv)
 		} else {
 			bool found = false;
 
-#define MATCH(NAME)							\
+#define MATCH_TOPIC(NAME, ALL)						\
 			if (strcmp(*argv, #NAME) == 0) {		\
 				topics.enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
 				found = true;				\
 			}
-			BBDD_MON_TOPICS(MATCH)
-#undef MATCH
+			BBDD_MON_TOPICS(MATCH_TOPIC)
+#undef MATCH_TOPIC
 
 			if (!found) {
 				fprintf(stderr, "What is \"%s\"?\n", *argv);
@@ -2754,10 +2754,19 @@ int bbdd_c_monitor(int argc, char **argv)
 		NEXT_ARG_FWD();
 	}
 
+#define TOPIC_ON_BY_DEFAULT(NAME, ALL)			\
+			[BBDD_MON_TOPIC_ ## NAME] = (ALL),
+
 	if (!have_topics || have_all) {
+		bool on_by_default[] = {
+			BBDD_MON_TOPICS(TOPIC_ON_BY_DEFAULT)
+		};
 		for (int i = 0; i < bbdd_mon_ntopics; i++)
-			topics.enabled[i] = true;
+			if (on_by_default[i])
+				topics.enabled[i] = true;
 	}
+
+#undef TOPIC_ON_BY_DEFAULT
 
 	return bbdd_c_monitor_jrpc(topics);
 }

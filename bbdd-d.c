@@ -2428,13 +2428,13 @@ static void bbdd_d_handle_monitor_subscribe(struct bbdd_d *d,
 		elm = json_object_array_get_idx(topics_arr, i);
 		const char *name = json_object_get_string(elm);
 
-#define MATCH(NAME)							\
+#define MATCH_TOPIC(NAME, ALL)						\
 		if (strcmp(name, #NAME) == 0) {				\
 			topics.enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
 			continue;					\
 		}
-		BBDD_MON_TOPICS(MATCH)
-#undef MATCH
+		BBDD_MON_TOPICS(MATCH_TOPIC)
+#undef MATCH_TOPIC
 
 		bbdd_util_fmterr(&error, "Unknown topic `%s'", name);
 		return bbdd_d_respond_invalid_params(peer, id, &error);

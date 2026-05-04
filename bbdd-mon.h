@@ -11,21 +11,21 @@ struct bbdd_sock;
 struct bbdd_mon;
 
 #define BBDD_MON_TOPICS(X)	\
-	X(ringbuf)		\
-	X(session)		\
+	X(ringbuf, true)	\
+	X(session, true)	\
 	/**/
 
-#define ENUM(NAME) BBDD_MON_TOPIC_ ## NAME,
+#define BBDD_MON_ENUM(NAME, ALL) BBDD_MON_TOPIC_ ## NAME,
 enum bbdd_mon_topic {
-	BBDD_MON_TOPICS(ENUM)
+	BBDD_MON_TOPICS(BBDD_MON_ENUM)
 };
-#undef ENUM
+#undef BBDD_MON_ENUM
 
-#define PLUS1(NAME) +1
+#define BBDD_MON_PLUS1(NAME, ALL) +1
 enum {
-	bbdd_mon_ntopics = BBDD_MON_TOPICS(PLUS1)
+	bbdd_mon_ntopics = BBDD_MON_TOPICS(BBDD_MON_PLUS1)
 };
-#undef PLUS1
+#undef BBDD_MON_PLUS1
 
 struct bbdd_mon_topics {
 	bool enabled[bbdd_mon_ntopics];
