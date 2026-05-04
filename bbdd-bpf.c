@@ -578,6 +578,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return rc;
 
 	bfd_flags = bsess->poll_pending ? BBDD_BFD_PKT_BIT_POLL : 0;
+	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
+			    dsess->local.discr, bsess->gen_id);
 	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
 					 bpf->conf.veth_tx_ifindex,
 					 bfd_flags, error);

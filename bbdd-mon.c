@@ -115,3 +115,45 @@ void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 	assert((int)topic != -1);
 	__bbdd_mon_send(mon, msg, topic);
 }
+
+__attribute__((format(printf, 2, 3)))
+void bbdd_mon_send_debug(struct bbdd_mon *mon, const char *fmt, ...)
+{
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_debug;
+	struct json_object *params;
+	struct json_object *obj;
+	va_list ap;
+	char *msg;
+	int rc;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
+
+	va_start(ap, fmt);
+	rc = bbdd_util_vfmterr(&msg, fmt, ap);
+	va_end(ap);
+
+	if (rc < 0)
+		return;
+
+	obj = bbdd_jrpc_new_notif("debug");
+	if (obj == NULL)
+		goto free_msg;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_obj;
+
+	if (bbdd_jrpc_append_str(params, "msg", msg) ||
+	    bbdd_jrpc_append_obj(obj, "params", &params))
+		goto put_params;
+
+	__bbdd_mon_send(mon, obj, topic);
+
+put_params:
+	json_object_put(params);
+put_obj:
+	json_object_put(obj);
+free_msg:
+	free(msg);
+}
