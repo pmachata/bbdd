@@ -1150,11 +1150,15 @@ void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 				  struct bbdd_bpf *bpf,
 				  struct bbdd_mon *mon)
 {
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
 	struct json_object *sess_obj;
 	struct json_object *params;
 	struct json_object *msg;
 	char *error = NULL;
 	int rc = -1;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
 
 	msg = bbdd_jrpc_new_notif("session:change");
 	if (msg == NULL)
@@ -1179,7 +1183,7 @@ no_session:
 	if (bbdd_jrpc_append_obj(msg, "params", &params))
 		goto put_params;
 
-	bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_session);
+	bbdd_mon_send(mon, msg, topic);
 	rc = 0;
 
 put_params:

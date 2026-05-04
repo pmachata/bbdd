@@ -1269,8 +1269,12 @@ static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
 				 struct bbdd_mon *mon,
 				 const struct bbdd_bpf_rb_elem_head *head)
 {
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_ringbuf;
 	struct json_object *msg;
 	char *error;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
 
 	msg = bbdd_bpf_rb_format_jrpc(head, &error);
 	if (msg == NULL) {
@@ -1279,7 +1283,7 @@ static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
 			goto err;
 	}
 
-	bbdd_mon_send(mon, msg, BBDD_MON_TOPIC_ringbuf);
+	bbdd_mon_send(mon, msg, topic);
 	json_object_put(msg);
 	return;
 

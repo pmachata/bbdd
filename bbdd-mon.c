@@ -21,6 +21,7 @@ struct bbdd_mon_cli {
 
 struct bbdd_mon {
 	struct bbdd_mon_cli *head;	/* DList of clients. */
+	unsigned int active[bbdd_mon_ntopics];
 };
 
 struct bbdd_mon *bbdd_mon_init(void)
@@ -65,7 +66,27 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	};
 
 	DL_APPEND(mon->head, cli);
+
+	for (int i = 0; i < bbdd_mon_ntopics; i++)
+		if (topics.enabled[i])
+			mon->active[i]++;
+
 	return 0;
+}
+
+static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
+{
+	for (int i = 0; i < bbdd_mon_ntopics; i++)
+		if (cli->topics.enabled[i])
+			mon->active[i]--;
+
+	DL_DELETE(mon->head, cli);
+	free(cli);
+}
+
+bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic)
+{
+	return mon->active[topic] > 0;
 }
 
 void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
@@ -78,10 +99,8 @@ void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		if (!((int)topic == -1 || cli->topics.enabled[topic]))
 			continue;
 
-		if (bbdd_util_jrpc_send(&cli->sock, msg) != 0) {
-			DL_DELETE(mon->head, cli);
-			free(cli);
-		}
+		if (bbdd_util_jrpc_send(&cli->sock, msg) != 0)
+			bbdd_mon_unsubscribe(mon, cli);
 	}
 }
 
