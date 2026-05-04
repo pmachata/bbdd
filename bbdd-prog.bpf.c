@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0+
-#include "vmlinux.h"
+#pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wmissing-declarations"
+# include "vmlinux.h"
+#pragma GCC diagnostic pop
+
 #include <bpf/bpf_endian.h>
 #include <bpf/bpf_helpers.h>
 #include "bbdd-prog.h"
