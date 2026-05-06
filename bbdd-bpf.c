@@ -330,7 +330,8 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 }
 
 static int
-bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
+bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
+		      struct bbdd_bpf_session *bsess,
 		      const struct bbdd_bfd_pkt *packet,
 		      struct bbdd_d_session_data *remote_data,
 		      bool *poll, bool *final)
@@ -376,8 +377,11 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 		return -1;
 	}
 
-	if (remote_discr != 0)
+	if (remote_discr != 0 && remote_data->discr != remote_discr) {
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: remote discr %u",
+				    bsess->discr, remote_discr);
 		remote_data->discr = remote_discr;
+	}
 	remote_data->timing.min_rx_us = ntohl(packet->required_rx);
 	remote_data->timing.min_tx_us = ntohl(packet->desired_tx);
 	remote_data->timing.detect_mult = packet->detection_multiplier;
@@ -693,6 +697,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		goto del_session;
 
 	if (rearm_timer > bsess->timer_armed) {
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
+				    dsess->local.discr);
 		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
 						 bpf->conf.veth_rx_ifindex,
 						 0, error);
@@ -945,7 +951,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	old_local = dsess->local;
 	old_remote = dsess->remote;
 
-	err = bbdd_bpf_parse_packet(bsess, packet, &dsess->remote,
+	err = bbdd_bpf_parse_packet(bpf, bsess, packet, &dsess->remote,
 				    &poll_recvd, &final_recvd);
 	if (err)
 		return;
@@ -1010,6 +1016,8 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (poll_recvd) {
 		char *error;
 
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting final packet",
+				    dsess->local.discr);
 		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
 						  bpf->conf.veth_tx_ifindex,
 						  BBDD_BFD_PKT_BIT_FINAL,
