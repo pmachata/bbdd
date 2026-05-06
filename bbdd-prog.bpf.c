@@ -680,7 +680,6 @@ int bbdd_recv(struct __sk_buff *skb)
 	BUMP(data->stats.rx_packets);
 	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
 
-	/* Rearm timer. */
 	bbdd_recv_rearm_timer(discr, config, data);
 	return TC_ACT_SHOT;
 }

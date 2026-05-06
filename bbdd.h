@@ -192,8 +192,6 @@ struct bbdd_d_session {
 	uint32_t vrf_table;
 
 	struct bbdd_d_session_data local;
-
-	/* Remote session data. */
 	struct bbdd_d_session_data remote;
 };
 
