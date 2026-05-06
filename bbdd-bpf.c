@@ -70,15 +70,61 @@ struct bbdd_bpf {
 	struct bbdd_prog_global_diag_stats diag_stats;
 };
 
+enum bbdd_bpf_session_state {
+	BBDD_BPF_SESSION_STATE_STABLE,
+	BBDD_BPF_SESSION_STATE_AWAIT_FINAL,
+	BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL,
+};
+
 /* Per-session data. */
 struct bbdd_bpf_session {
 	uint32_t discr;
 	uint32_t gen_id;
 	int sock_fd;
 
-	uint32_t last_detect_time_us; /* Mirror of previously configured struct
-				       * bbdd_prog_session_config.detect_time_us. */
-	bool poll_pending;
+	/* Certain configuration changes prompt a poll sequence. These changes
+	 * only become effective when the poll sequence is closed by arrival of
+	 * a final packet. The issue is that a final packet doesn't otherwise
+	 * designate which poll packet it responds to. If we allowed changing
+	 * the session configuration at any time, we wouldn't know which
+	 * settings are safe to apply.
+	 *
+	 * We therefore have the following objects in play:
+	 *
+	 * - USER: bbdd_d_session.local configuration: What the user wants.
+	 *
+	 * - EFF: bbdd_bpf_session effective configuration: What we use to
+         *   configure transmit and receive timers.
+	 *
+	 * - POLL: bbdd_bpf_session poll configuration: The configuration change
+         *   that prompted the poll sequence.
+	 *
+	 * - MARK: A marker that more changes are enqueued.
+	 *
+	 * The update process is as follows:
+	 *
+	 * 1) As USER config changes in a way that requires a poll sequence:
+	 *    - If there is no POLL config yet:
+	 *      - Apply POLL = USER.
+	 *      - Start sending Poll packets
+	 *    - Otherwise set MARK.
+	 *
+	 * 2) As Final packet arrives:
+	 *    - Apply EFF = POLL and update data path.
+	 *    - Stop sending Poll packets.
+	 *    - Set expected packet to Final.
+	 *    - Keep POLL
+	 *
+	 * 3) As the first non-Final packet arrives, we know the poll sequence
+	 *    is terminated: the remote end has seen our configuration and all
+	 *    our poll packets. The poll sequence channel is free again. Then:
+	 *    - Remove POLL
+	 *    - If there is MARK, fetch new USER config and goto 1.
+	 */
+	enum bbdd_bpf_session_state bstate;
+	struct bbdd_d_session_data_timing eff_timing;
+	struct bbdd_d_session_data_timing poll_timing;
+	const struct bbdd_d_session_data_timing *qd_timing;
 
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
@@ -176,6 +222,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error)
 {
+	struct bbdd_d_session_data_timing *timing;
 	struct bbdd_bfd_pkt bfd;
 	union {
 		struct sockaddr    sa;
@@ -193,11 +240,24 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	 */
 	ttl = 255;
 
-	bfd = bbdd_bpf_make_packet(dsess->local.discr,
-				   &dsess->local.timing,
+	/* If the timing is such that a system receiving a Poll Sequence wishes
+	 * to change the parameters, the new parameter values MAY be carried in
+	 * packets with the Final (F) bit set, even if the Poll Sequence has not
+	 * yet been sent. */
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		timing = &bsess->eff_timing;
+		break;
+        case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		timing = &bsess->poll_timing;
+		break;
+	}
+
+	assert(timing->detect_mult != 0);
+	bfd = bbdd_bpf_make_packet(dsess->local.discr, timing,
 				   &dsess->local.state,
-				   dsess->remote.discr,
-				   bfd_flags);
+				   dsess->remote.discr, bfd_flags);
 
 	dst_sa.sll.sll_family  = AF_PACKET;
 	dst_sa.sll.sll_ifindex = (int)tx_ifindex;
@@ -328,6 +388,42 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 	return 0;
 }
 
+static uint8_t bbdd_bpf_get_rx_expect_bfd_flags(enum bbdd_bpf_session_state bstate)
+{
+	switch (bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		return 0;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+		return 0;
+
+	/* When we are waiting for non-Final packet, set expected packet
+	 * to final and catch mismatches. */
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		return BBDD_BFD_PKT_BIT_FINAL;
+	}
+
+	assert(!"bbdd_bpf_get_rx_expect_bfd_flags");
+	__builtin_unreachable();
+}
+
+static uint8_t bbdd_bpf_get_inject_bfd_flags(enum bbdd_bpf_session_state bstate)
+{
+	switch (bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		return 0;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+		return BBDD_BFD_PKT_BIT_POLL;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		return 0;
+	}
+
+	assert(!"bbdd_bpf_get_inject_bfd_flags");
+	__builtin_unreachable();
+}
+
 static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					const struct bbdd_d_session *dsess,
 					struct bbdd_bpf_session *bsess,
@@ -339,10 +435,14 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					uint32_t detect_time_us,
 					char **error)
 {
+	bool admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
+
+	uint8_t bfd_flags = bbdd_bpf_get_rx_expect_bfd_flags(bsess->bstate);
 	const struct bbdd_sockaddr *src = &dsess->src;
 	const struct bbdd_sockaddr *dst = &dsess->dst;
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
 	uint32_t discr = dsess->local.discr;
+
 	struct bbdd_prog_session_config config = {
 		.fib_lookup = {
 			.family = (uint8_t) af,
@@ -358,14 +458,14 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.max_interval_us = max_interval_us,
 		.detect_time_us = detect_time_us,
 		.gen_id = bsess->gen_id,
-		.admin_down = (dsess->local.state.state ==
-			       BBDD_BFD_PKT_STATE_ADMINDOWN),
+		.admin_down = admdown,
 		.ttl = dsess->ttl,
 		.rx_expect = bbdd_bpf_make_packet(dsess->remote.discr,
 						  &dsess->remote.timing,
 						  &dsess->remote.state,
-						  dsess->local.discr, 0),
+						  dsess->local.discr, bfd_flags),
 	};
+
 	int err;
 
 	if (af != dst->sa.sa_family) {
@@ -480,8 +580,9 @@ enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
-				     bool add, bool set_poll, char **error)
+				     bool add, char **error)
 {
+	const struct bbdd_d_session_data_timing *eff_timing = &bsess->eff_timing;
 	uint32_t min_interval_us;
 	uint32_t max_interval_us;
 	uint32_t detect_time_us;
@@ -511,8 +612,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		/* system MUST NOT transmit BFD Control packets at an
 		 * interval less than the larger of bfd.RemoteMinRxInterval
 		 * and bfd.DesiredMinTxInterval, less applied jitter. */
-		interval_us = MAX(dsess->local.min_tx_us,
-				  dsess->remote.min_rx_us);
+		interval_us = MAX(eff_timing->min_tx_us,
+				  dsess->remote.timing.min_rx_us);
 
 	/* In Asynchronous mode, the Detection Time calculated in the local
 	 * system is equal to the value of Detect Mult received from the remote
@@ -521,25 +622,12 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * received Desired Min TX Interval).
 	 */
 	assert(dsess->remote.timing.detect_mult != 0);
-	detect_time_us = MAX(dsess->local.timing.min_rx_us,
+	detect_time_us = MAX(eff_timing->min_rx_us,
 			     dsess->remote.timing.min_tx_us);
 	if (detect_time_us > UINT32_MAX / dsess->remote.timing.detect_mult)
 		detect_time_us = UINT32_MAX;
 	else
 		detect_time_us *= dsess->remote.timing.detect_mult;
-
-	/* In theory, we could get several reconfiguration requests before we
-	 * get the final packet. So we set bsess->poll_pending and refer to
-	 * that. The flag is cleared as final packet arrives. Unfortunately
-	 * there's no way to differentiate which version the remote end is
-	 * final'ing, but oh well. */
-	if (set_poll) {
-		bsess->poll_pending = true;
-		bsess->last_detect_time_us = detect_time_us;
-	} else if (bsess->poll_pending) {
-		detect_time_us = bsess->last_detect_time_us;
-		assert(detect_time_us != 0);
-	}
 
 	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9.
 	 * For downish sessions, just take the slow rate verbatim. */
@@ -547,7 +635,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		min_interval_us = max_interval_us = interval_us;
 	} else {
 		min_interval_us = interval_us * 75 / 100;
-		if (dsess->local.timing.detect_mult == 1)
+		if (eff_timing->detect_mult == 1)
 			max_interval_us = interval_us * 90 / 100;
 		else
 			max_interval_us = interval_us;
@@ -584,9 +672,10 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		return rc;
 
-	bfd_flags = bsess->poll_pending ? BBDD_BFD_PKT_BIT_POLL : 0;
 	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
 			    dsess->local.discr, bsess->gen_id);
+
+	bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);
 	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
 					 bpf->conf.veth_tx_ifindex,
 					 bfd_flags, error);
@@ -726,21 +815,59 @@ bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
 	return nmatch;
 }
 
-static void
-bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
-			       struct bbdd_d_session *dsess,
-			       struct bbdd_bpf_session *bsess)
+static void bbdd_bpf_session_call_update(struct bbdd_bpf *bpf,
+					 struct bbdd_d_session *dsess,
+					 struct bbdd_bpf_session *bsess)
 {
 	char *error;
 	int err;
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, false,
-					&error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
 	if (err != 0)
 		bbdd_util_printerr(&error, "session %u state change: Failed to update session",
 				   dsess->local.discr);
+}
 
+static void bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
+					   struct bbdd_d_session *dsess,
+					   struct bbdd_bpf_session *bsess)
+{
+	bbdd_bpf_session_call_update(bpf, dsess, bsess);
 	bbdd_d_session_state_changed(dsess, bpf, bpf->rb_ctx->mon);
+}
+
+static void bbdd_bpf_handle_packet_got_final(struct bbdd_bpf *bpf,
+					     struct bbdd_d_session *dsess,
+					     struct bbdd_bpf_session *bsess)
+{
+	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: await non-final",
+			    dsess->local.discr);
+	bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL;
+	bbdd_bpf_session_call_update(bpf, dsess, bsess);
+}
+
+static void bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
+						 struct bbdd_d_session *dsess,
+						 struct bbdd_bpf_session *bsess)
+{
+	/* The non-final packet concludes the poll sequence and we can check if
+	 * there's another state to poll. */
+
+	bsess->eff_timing = bsess->poll_timing;
+
+	if (bsess->qd_timing == NULL) {
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: stable",
+				    dsess->local.discr);
+		bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
+	} else {
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: queued timing, await final",
+				    dsess->local.discr);
+		bsess->poll_timing = *bsess->qd_timing;
+		bsess->qd_timing = NULL;
+		bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
+	}
+
+	bbdd_bpf_session_call_update(bpf, dsess, bsess);
 }
 
 static void
@@ -754,9 +881,8 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	struct bbdd_d_session_data old_remote;
 	struct bbdd_bpf_session *bsess;
 	struct bbdd_d_session *dsess;
-	char *error;
-	bool poll;
-	bool final;
+	bool final_recvd;
+	bool poll_recvd;
 	int err;
 
 	/* Errors here are problematic, but not worth killing the daemon
@@ -801,7 +927,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	old_remote = dsess->remote;
 
 	err = bbdd_bpf_parse_packet(bsess, packet, &dsess->remote,
-				    &poll, &final);
+				    &poll_recvd, &final_recvd);
 	if (err)
 		return;
 
@@ -858,14 +984,13 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		}
 	}
 
-	if (memcmp(&old_local, &dsess->local, sizeof(old_local)) == 0 &&
-	    memcmp(&old_remote, &dsess->remote, sizeof(old_remote)) == 0)
-		goto poll_respond;
+	if (memcmp(&old_local, &dsess->local, sizeof(old_local)) != 0 ||
+	    memcmp(&old_remote, &dsess->remote, sizeof(old_remote)) != 0)
+		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 
-	bbdd_bpf_session_state_changed(bpf, dsess, bsess);
+	if (poll_recvd) {
+		char *error;
 
-poll_respond:
-	if (poll) {
 		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
 						  bpf->conf.veth_tx_ifindex,
 						  BBDD_BFD_PKT_BIT_FINAL,
@@ -874,16 +999,19 @@ poll_respond:
 			bbdd_util_printerr(&error, "Failed to respond to a poll packet");
 	}
 
-	if (final && bsess->poll_pending) {
-		bsess->poll_pending = false;
-		bsess->last_detect_time_us = 0;
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		break;
 
-		err = __bbdd_bpf_session_update(bpf, dsess, bsess,
-						false, false, &error);
-		if (err != 0)
-			bbdd_util_printerr(&error,
-					   "session %u: Failed to apply timers after poll-final",
-					   dsess->local.discr);
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+		if (final_recvd)
+			bbdd_bpf_handle_packet_got_final(bpf, dsess, bsess);
+		break;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		if (!final_recvd)
+			bbdd_bpf_handle_packet_got_non_final(bpf, dsess, bsess);
+		break;
 	}
 }
 
@@ -1939,12 +2067,9 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 	struct bbdd_bpf_session *bsess;
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
-	if (bsess == NULL)
-		return 0;
-
-	if (json_object_object_add(state_obj, "poll_pending",
-				   json_object_new_boolean(bsess->poll_pending)) != 0) {
-		bbdd_util_fmterr(error, "%m");
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
 		return -1;
 	}
 
@@ -2050,9 +2175,13 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		.discr = dsess->local.discr,
 		.gen_id = 0,
 		.sock_fd = sock_fd,
+
+		.bstate = BBDD_BPF_SESSION_STATE_STABLE,
+		.eff_timing = dsess->local.timing,
+		.qd_timing = NULL,
 	};
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, false, error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, error);
 	if (err != 0)
 		goto close_sock;
 
@@ -2070,8 +2199,11 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_d_session *dsess,
 			    char **error)
 {
+	struct bbdd_d_session_data_timing *timing;
 	uint32_t discr = dsess->local.discr;
 	struct bbdd_bpf_session *bsess;
+	bool need_poll = false;
+	bool apply_imm = true;
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
@@ -2080,7 +2212,63 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, true, error);
+	/* Below, we want to compare w/ the last poll sequence, if any. */
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		timing = &bsess->eff_timing;
+		break;
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		timing = &bsess->poll_timing;
+		break;
+	}
+
+	/* If either DesiredMinTxInterval is changed or RequiredMinRxInterval is
+	 * changed, a Poll Sequence MUST be initiated. */
+	if (dsess->local.timing.min_tx_us != timing->min_tx_us ||
+	    dsess->local.timing.min_rx_us != timing->min_rx_us)
+		need_poll = true;
+
+	/* If bfd.DesiredMinTxInterval is increased and bfd.SessionState is Up,
+	 * the actual transmission interval used MUST NOT change until the Poll
+	 * Sequence has terminated. */
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
+	    dsess->local.timing.min_tx_us > timing->min_tx_us)
+		apply_imm = false;
+
+	/* If bfd.RequiredMinRxInterval is reduced and bfd.SessionState is Up,
+	 * the previous value of bfd.RequiredMinRxInterval MUST be used when
+	 * calculating the Detection Time for the remote system until the Poll
+	 * Sequence has terminated. */
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
+	    dsess->local.timing.min_rx_us < timing->min_rx_us)
+		apply_imm = false;
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		if (apply_imm)
+			bsess->eff_timing = dsess->local.timing;
+		if (need_poll) {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, await final",
+					    dsess->local.discr);
+			bsess->poll_timing = dsess->local.timing;
+			bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
+		}
+		break;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		/* We are already polling, just set the mark and don't touch any
+		 * configuration. */
+		if (need_poll) {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, queue timing",
+					    dsess->local.discr);
+			bsess->qd_timing = &dsess->local.timing;
+		}
+		break;
+	}
+
+	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, error);
 }
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
