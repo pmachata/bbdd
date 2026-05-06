@@ -600,23 +600,16 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
 	uint8_t bfd_flags;
-	bool downish;
 	bool admdown;
 	bool down;
 	int rc;
 
 	bsess->gen_id++;
 
-	// xxx the RFC requires only Down to be treated specially, but it's
-	// odd to me that an admin down session would need to flood packet
-	// full speed. For now treat both the same, but this needs
-	// attention to resolve for good.
-	downish = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN ||
-		  dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
 	down = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN;
 	admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
 
-	if (downish)
+	if (down)
 		/* If the session goes Down, the transmission of Echo
 		 * packets (if any) ceases, and the transmission of Control
 		 * packets goes back to the slow rate. */
@@ -643,8 +636,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		detect_time_us *= dsess->remote.timing.detect_mult;
 
 	/* Jitter is x0.75..x0.1, but if detect_mult=1, it's x0.75..x0.9.
-	 * For downish sessions, just take the slow rate verbatim. */
-	if (downish) {
+	 * For down sessions, just take the slow rate verbatim. */
+	if (down) {
 		min_interval_us = max_interval_us = interval_us;
 	} else {
 		min_interval_us = interval_us * 75 / 100;
