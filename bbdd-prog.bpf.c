@@ -383,8 +383,22 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
+	/* FQ sometimes blocks packets that arrive later, but should be scheduled
+	 * earlier, before packets that are already in the queue. This tends to
+	 * happen e.g. during initial session handshake, where session
+	 * transitions from slow start to rapid rate. Since the rapid packet is
+	 * stuck behind the slow-start one, the remote session times out and the
+	 * whole hand shake needs to start again.
+	 *
+	 * When the hash changes as gen_id gets bumped, the issue is avoided,
+	 * because the two packets are considered different flows, and put to
+	 * different queues.
+	 *
+	 * Mix up the (generally small, compared to discr) gen_id with Knuth
+	 * constant to avalanche its bits around before combining with discr.
+	 */
 	if (!skb->hash)
-		bpf_set_hash(skb, discr);
+		bpf_set_hash(skb, discr ^ (config->gen_id * 2654435761U));
 
 	/* FIB lookup */
 	params = config->fib_lookup;
