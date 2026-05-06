@@ -104,19 +104,21 @@ static int bbdd_bpf_print(enum libbpf_print_level level,
 }
 
 static struct bbdd_bfd_pkt
-bbdd_bpf_make_packet(const struct bbdd_d_session_data *state,
+bbdd_bpf_make_packet(uint32_t my_disc,
+		     const struct bbdd_d_session_data_timing *timing,
+		     const struct bbdd_d_session_state_end *state,
 		     uint32_t your_disc, uint8_t flags)
 {
 	enum { v1 = 1 };
 	return (struct bbdd_bfd_pkt) {
-		.version_diag = (v1 << 5) | (uint8_t) state->state.diag,
-		.state_bits = (uint8_t) (state->state.state << 6 | flags),
-		.detection_multiplier = state->detect_mult,
+		.version_diag = (v1 << 5) | (uint8_t) state->diag,
+		.state_bits = (uint8_t) (state->state << 6 | flags),
+		.detection_multiplier = timing->detect_mult,
 		.length = sizeof(struct bbdd_bfd_pkt),
-		.my_disc = htonl(state->discr),
+		.my_disc = htonl(my_disc),
 		.your_disc = htonl(your_disc),
-		.desired_tx = htonl(state->min_tx_us),
-		.required_rx = htonl(state->min_rx_us),
+		.desired_tx = htonl(timing->min_tx_us),
+		.required_rx = htonl(timing->min_rx_us),
 		.required_echo_rx = 0,
 	};
 }
@@ -191,8 +193,10 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	 */
 	ttl = 255;
 
-	assert(dsess->local.detect_mult != 0);
-	bfd = bbdd_bpf_make_packet(&dsess->local, dsess->remote.discr,
+	bfd = bbdd_bpf_make_packet(dsess->local.discr,
+				   &dsess->local.timing,
+				   &dsess->local.state,
+				   dsess->remote.discr,
 				   bfd_flags);
 
 	dst_sa.sll.sll_family  = AF_PACKET;
@@ -266,7 +270,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 static int
 bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 		      const struct bbdd_bfd_pkt *packet,
-		      struct bbdd_d_session_data *data,
+		      struct bbdd_d_session_data *remote_data,
 		      bool *poll, bool *final)
 {
 	uint8_t bits = bbdd_bfd_pkt_bits(packet);
@@ -311,12 +315,12 @@ bbdd_bpf_parse_packet(struct bbdd_bpf_session *bsess,
 	}
 
 	if (remote_discr != 0)
-		data->discr = remote_discr;
-	data->min_rx_us = ntohl(packet->required_rx);
-	data->min_tx_us = ntohl(packet->desired_tx);
-	data->detect_mult = packet->detection_multiplier;
-	data->state.state = state;
-	data->state.diag = bbdd_bfd_pkt_diag(packet);
+		remote_data->discr = remote_discr;
+	remote_data->timing.min_rx_us = ntohl(packet->required_rx);
+	remote_data->timing.min_tx_us = ntohl(packet->desired_tx);
+	remote_data->timing.detect_mult = packet->detection_multiplier;
+	remote_data->state.state = state;
+	remote_data->state.diag = bbdd_bfd_pkt_diag(packet);
 
 	*poll = bits & BBDD_BFD_PKT_BIT_POLL;
 	*final = bits & BBDD_BFD_PKT_BIT_FINAL;
@@ -357,7 +361,9 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.admin_down = (dsess->local.state.state ==
 			       BBDD_BFD_PKT_STATE_ADMINDOWN),
 		.ttl = dsess->ttl,
-		.rx_expect = bbdd_bpf_make_packet(&dsess->remote,
+		.rx_expect = bbdd_bpf_make_packet(dsess->remote.discr,
+						  &dsess->remote.timing,
+						  &dsess->remote.state,
 						  dsess->local.discr, 0),
 	};
 	int err;
@@ -514,12 +520,13 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * system (the greater of bfd.RequiredMinRxInterval and the last
 	 * received Desired Min TX Interval).
 	 */
-	assert(dsess->remote.detect_mult != 0);
-	detect_time_us = MAX(dsess->local.min_rx_us, dsess->remote.min_tx_us);
-	if (detect_time_us > UINT32_MAX / dsess->remote.detect_mult)
+	assert(dsess->remote.timing.detect_mult != 0);
+	detect_time_us = MAX(dsess->local.timing.min_rx_us,
+			     dsess->remote.timing.min_tx_us);
+	if (detect_time_us > UINT32_MAX / dsess->remote.timing.detect_mult)
 		detect_time_us = UINT32_MAX;
 	else
-		detect_time_us *= dsess->remote.detect_mult;
+		detect_time_us *= dsess->remote.timing.detect_mult;
 
 	/* In theory, we could get several reconfiguration requests before we
 	 * get the final packet. So we set bsess->poll_pending and refer to
@@ -540,7 +547,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		min_interval_us = max_interval_us = interval_us;
 	} else {
 		min_interval_us = interval_us * 75 / 100;
-		if (dsess->local.detect_mult == 1)
+		if (dsess->local.timing.detect_mult == 1)
 			max_interval_us = interval_us * 90 / 100;
 		else
 			max_interval_us = interval_us;

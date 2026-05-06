@@ -471,21 +471,20 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 		return rc;
 	}
 
-#define __DISSECT(NAME, CB) do {					\
-		if (seen[pol_ ## NAME]) {				\
-			if (CB(values[pol_ ## NAME], &data->NAME, error) < 0) \
+#define __DISSECT(PNAME, DNAME, CB) do {				\
+		if (seen[pol_ ## PNAME]) {				\
+			if (CB(values[pol_ ## PNAME], &data->DNAME,	\
+			       error) < 0)				\
 				return -1;				\
 		}							\
 	} while (0)
-#define DISSECT_U32(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint32)
-#define DISSECT_U8(NAME) __DISSECT(NAME, bbdd_jrpc_get_uint8)
+#define DISSECT_U32(PNAME, DNAME) __DISSECT(PNAME, DNAME, bbdd_jrpc_get_uint32)
 
-	DISSECT_U32(discr);
-	DISSECT_U8(detect_mult);
-	DISSECT_U32(min_tx_us);
-	DISSECT_U32(min_rx_us);
+	DISSECT_U32(discr, discr);
+	__DISSECT(detect_mult, timing.detect_mult, bbdd_jrpc_get_uint8);
+	DISSECT_U32(min_tx_us, timing.min_tx_us);
+	DISSECT_U32(min_rx_us, timing.min_rx_us);
 
-#undef DISSECT_U8
 #undef DISSECT_U32
 #undef __DISSECT
 
@@ -733,9 +732,9 @@ static void
 bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 {
 	printf("discr %u ", data->discr);
-	printf("detect-mult %u ", data->detect_mult);
-	bbdd_c_show_time_us("min-tx", data->min_tx_us);
-	bbdd_c_show_time_us("min-rx", data->min_rx_us);
+	printf("detect-mult %u ", data->timing.detect_mult);
+	bbdd_c_show_time_us("min-tx", data->timing.min_tx_us);
+	bbdd_c_show_time_us("min-rx", data->timing.min_rx_us);
 	bbdd_c_session_show_state_end(&data->state);
 }
 

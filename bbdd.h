@@ -165,11 +165,15 @@ struct bbdd_d_session_state_end {
 	enum bbdd_bfd_pkt_diag diag;
 };
 
-struct bbdd_d_session_data {
-	uint32_t discr;
+struct bbdd_d_session_data_timing {
 	uint8_t detect_mult;
 	uint32_t min_tx_us;
 	uint32_t min_rx_us;
+};
+
+struct bbdd_d_session_data {
+	uint32_t discr;
+	struct bbdd_d_session_data_timing timing;
 	struct bbdd_d_session_state_end state;
 };
 

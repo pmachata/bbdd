@@ -780,9 +780,9 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	ASSIGN_NON0(ttl, ttl);
 	ASSIGN_NON0(netif.ifindex, ifindex);
 
-	ASSIGN_NON0(min_tx_us, local.min_tx_us);
-	ASSIGN_NON0(min_rx_us, local.min_rx_us);
-	ASSIGN_NON0(detect_mult, local.detect_mult);
+	ASSIGN_NON0(min_tx_us, local.timing.min_tx_us);
+	ASSIGN_NON0(min_rx_us, local.timing.min_rx_us);
+	ASSIGN_NON0(detect_mult, local.timing.detect_mult);
 
 #undef ASSIGN_NON0
 #undef ASSIGN
@@ -948,11 +948,11 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	if (bbdd_jrpc_append_int(entry_obj, "discr",
 				 remote->discr) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "detect_mult",
-				 remote->detect_mult) != 0 ||
+				 remote->timing.detect_mult) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_tx_us",
-				 remote->min_tx_us) != 0 ||
+				 remote->timing.min_tx_us) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_rx_us",
-				 remote->min_rx_us) != 0)
+				 remote->timing.min_rx_us) != 0)
 		goto put_entry_obj;
 
 	return entry_obj;
@@ -1250,9 +1250,9 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	} while (0)
 
 	ASSIGN(local.discr, discr);
-	ASSIGN(local.detect_mult, detect_mult);
-	ASSIGN(local.min_tx_us, min_tx_us);
-	ASSIGN(local.min_rx_us, min_rx_us);
+	ASSIGN(local.timing.detect_mult, detect_mult);
+	ASSIGN(local.timing.min_tx_us, min_tx_us);
+	ASSIGN(local.timing.min_rx_us, min_rx_us);
 	ASSIGN(hold_time, hold_time);
 	ASSIGN(ttl, ttl);
 	ASSIGN(vrf_table, vrf.table);
@@ -1449,11 +1449,11 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	} while (0)
 
 	FIELD(local.discr, discr);
-	FIELD(local.min_tx_us, min_tx_us);
-	FIELD(local.min_rx_us, min_rx_us);
+	FIELD(local.timing.detect_mult, detect_mult);
+	FIELD(local.timing.min_tx_us, min_tx_us);
+	FIELD(local.timing.min_rx_us, min_rx_us);
 	FIELD(hold_time, hold_time);
 	FIELD(ttl, ttl);
-	FIELD(local.detect_mult, detect_mult);
 	FIELD(ifindex, netif.ifindex);
 	FIELD(vrf_ifindex, vrf.netif.ifindex);
 	FIELD(vrf_table, vrf.table);
@@ -1534,16 +1534,14 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
 	/* Arbitrary defaults. */
-	dsess->local.detect_mult = 1;
-	dsess->local.min_rx_us = bbdd_prog_slow_interval_us;
-	dsess->local.min_tx_us = bbdd_prog_slow_interval_us;
+	dsess->local.timing.detect_mult = 1;
+	dsess->local.timing.min_rx_us = bbdd_prog_slow_interval_us;
+	dsess->local.timing.min_tx_us = bbdd_prog_slow_interval_us;
 
 	dsess->remote.discr = 0;
 	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
-	dsess->remote.detect_mult = 1;
-	dsess->remote.min_rx_us = bbdd_prog_slow_interval_us;
-	dsess->remote.min_tx_us = bbdd_prog_slow_interval_us;
+	dsess->remote.timing = dsess->local.timing;
 
 	rc = bbdd_d_session_apply_c(dsess, csess, d->nl, NULL, error);
 	if (rc != 0)
