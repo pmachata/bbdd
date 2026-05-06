@@ -17,6 +17,7 @@
 
 #define TC_ACT_OK		0
 #define TC_ACT_SHOT		2
+#define TC_ACT_STOLEN		5
 #define TC_ACT_REDIRECT		7
 
 #define CLOCK_MONOTONIC			1
@@ -500,8 +501,10 @@ static void bbdd_recv_rearm_timer(__u32 discr,
 	u64 detect_time_ns;
 	int ret;
 
-	if (!data->timer_initd) {
+	if (!config->rearm_timer)
+		return;
 
+	if (!data->timer_initd) {
 		ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
 				     CLOCK_MONOTONIC);
 		if (ret && ret != -EBUSY) {
@@ -529,6 +532,38 @@ static void bbdd_recv_rearm_timer(__u32 discr,
 	// that the timer should be rearmed. Imagine going from 4s timeout to
 	// say 1ms timeout. We would miss thousands of timeout events before the
 	// timer fires and gives us an opportunity to rearm.
+}
+
+SEC("tc")
+int bbdd_xmit_veth_rx_xmit(struct __sk_buff *skb)
+{
+	u8 bfd_buf[sizeof(struct bbdd_bfd_pkt)] = {};
+	struct bbdd_prog_session_config *config;
+	struct bbdd_prog_session_data *data;
+	struct bbdd_bfd_pkt *bfd;
+	u16 tot_len;
+	u32 discr;
+
+	/* SKB is an Ethernet packet. */
+
+	bfd = bbdd_tx_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len);
+	if (bfd == NULL)
+		goto out;
+
+	discr = bpf_ntohl(bfd->my_disc);
+	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
+	if (config == NULL)
+		goto out;
+
+	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &discr);
+	if (data == NULL)
+		goto out;
+
+	bbdd_recv_rearm_timer(discr, config, data);
+	return TC_ACT_STOLEN;
+
+out:
+	return TC_ACT_SHOT;
 }
 
 static bool bbdd_recv_parse_ipv4(struct __sk_buff *skb,

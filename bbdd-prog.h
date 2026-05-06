@@ -12,6 +12,7 @@ struct bbdd_prog_session_config {
 	__u32 detect_time_us;
 	__u32 gen_id;
 	bool admin_down;
+	bool rearm_timer;
 	__u8 ttl;
 	struct bbdd_bfd_pkt rx_expect;
 };

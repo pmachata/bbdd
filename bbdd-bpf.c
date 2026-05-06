@@ -126,6 +126,8 @@ struct bbdd_bpf_session {
 	struct bbdd_d_session_data_timing poll_timing;
 	const struct bbdd_d_session_data_timing *qd_timing;
 
+	bool timer_armed;
+
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
 
@@ -433,6 +435,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					uint32_t min_interval_us,
 					uint32_t max_interval_us,
 					uint32_t detect_time_us,
+					bool rearm_timer,
 					char **error)
 {
 	bool admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
@@ -459,6 +462,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.detect_time_us = detect_time_us,
 		.gen_id = bsess->gen_id,
 		.admin_down = admdown,
+		.rearm_timer = rearm_timer,
 		.ttl = dsess->ttl,
 		.rx_expect = bbdd_bpf_make_packet(dsess->remote.discr,
 						  &dsess->remote.timing,
@@ -512,6 +516,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				     uint32_t min_interval_us,
 				     uint32_t max_interval_us,
 				     uint32_t detect_time_us,
+				     bool rearm_timer,
 				     char **error)
 {
 	struct bbdd_prog_session_data data = {};
@@ -521,7 +526,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, ifindex,
 					   tbid, fib_flags, min_interval_us,
 					   max_interval_us, detect_time_us,
-					   error);
+					   rearm_timer, error);
 	if (err)
 		return err;
 
@@ -592,6 +597,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t fwd_ifindex;
 	uint8_t bfd_flags;
 	bool downish;
+	bool admdown;
+	bool down;
 	int rc;
 
 	bsess->gen_id++;
@@ -602,6 +609,8 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	// attention to resolve for good.
 	downish = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN ||
 		  dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
+	down = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN;
+	admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
 
 	if (downish)
 		/* If the session goes Down, the transmission of Echo
@@ -655,20 +664,21 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		fwd_ifindex = bpf->conf.veth_tx_ifindex;
 	}
 
+	bool rearm_timer = !(down || admdown);
 	if (add)
 		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
 					       tbid, fib_flags,
 					       min_interval_us,
 					       max_interval_us,
 					       detect_time_us,
-					       error);
+					       rearm_timer, error);
 	else
 		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
 						  tbid, fib_flags,
 						  min_interval_us,
 						  max_interval_us,
 						  detect_time_us,
-						  error);
+						  rearm_timer, error);
 	if (rc != 0)
 		return rc;
 
@@ -681,6 +691,15 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 					 bfd_flags, error);
 	if (rc != 0)
 		goto del_session;
+
+	if (rearm_timer > bsess->timer_armed) {
+		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
+						 bpf->conf.veth_rx_ifindex,
+						 0, error);
+		if (rc != 0)
+			goto del_session;
+	}
+	bsess->timer_armed = rearm_timer;
 
 	return 0;
 
@@ -1850,11 +1869,17 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 	if (err != 0)
 		goto destroy_tx_hook;
 
+	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
+			      conf->veth_rx_ifindex, BPF_TC_EGRESS,
+			      error);
+	if (err != 0)
+		goto detach_rx;
+
 	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx,
 			      conf->veth_tx_ifindex, BPF_TC_EGRESS,
 			      error);
 	if (err != 0)
-		goto detach_rx;
+		goto detach_rx_xmit;
 
 	err = bbdd_bpf_sockets_open(&bpf->sockets, error);
 	if (err != 0)
@@ -1877,6 +1902,9 @@ sockets_close:
 detach_tx:
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
 			conf->veth_tx_ifindex, BPF_TC_EGRESS);
+detach_rx_xmit:
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
+			conf->veth_rx_ifindex, BPF_TC_EGRESS);
 detach_rx:
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
 			conf->veth_rx_ifindex, BPF_TC_INGRESS);
@@ -1901,6 +1929,8 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
 			bpf->conf.veth_tx_ifindex, BPF_TC_EGRESS);
+	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
+			bpf->conf.veth_rx_ifindex, BPF_TC_EGRESS);
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
 			bpf->conf.veth_rx_ifindex, BPF_TC_INGRESS);
 
