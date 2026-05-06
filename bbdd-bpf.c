@@ -2061,10 +2061,38 @@ err:
 	return NULL;
 }
 
+static const char *bbdd_bpf_session_state_str(enum bbdd_bpf_session_state bstate)
+{
+	switch (bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:         return "stable";
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:    return "await_final";
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL: return "await_non_final";
+	}
+	return "unknown";
+}
+
+static struct json_object *
+bbdd_bpf_timing_json(const struct bbdd_d_session_data_timing *timing)
+{
+	struct json_object *obj = json_object_new_object();
+
+	if (obj == NULL)
+		return NULL;
+	if (bbdd_jrpc_append_int(obj, "detect_mult", timing->detect_mult) != 0 ||
+	    bbdd_jrpc_append_int(obj, "min_tx_us", timing->min_tx_us) != 0 ||
+	    bbdd_jrpc_append_int(obj, "min_rx_us", timing->min_rx_us) != 0) {
+		json_object_put(obj);
+		return NULL;
+	}
+	return obj;
+}
+
 int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 				struct json_object *state_obj, char **error)
 {
 	struct bbdd_bpf_session *bsess;
+	struct json_object *timing_obj;
+	struct json_object *bpf_obj;
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
@@ -2073,7 +2101,49 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 		return -1;
 	}
 
+	bpf_obj = json_object_new_object();
+	if (bpf_obj == NULL)
+		goto put_bpf_obj;
+
+	if (bbdd_jrpc_append_str(bpf_obj, "bstate",
+				 bbdd_bpf_session_state_str(bsess->bstate)) != 0)
+		goto put_bpf_obj;
+
+	timing_obj = bbdd_bpf_timing_json(&bsess->eff_timing);
+	if (timing_obj == NULL)
+		goto put_bpf_obj;
+
+	if (bbdd_jrpc_append_obj(bpf_obj, "eff_timing", &timing_obj) != 0)
+		goto put_timing_obj;
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		break;
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		timing_obj = bbdd_bpf_timing_json(&bsess->poll_timing);
+		if (timing_obj == NULL)
+			goto put_bpf_obj;
+		if (bbdd_jrpc_append_obj(bpf_obj, "poll_timing",
+					 &timing_obj) != 0)
+			goto put_timing_obj;
+		if (bsess->qd_timing != NULL &&
+		    bbdd_jrpc_append_bool(bpf_obj, "qd_timing", true) != 0)
+			goto put_bpf_obj;
+		break;
+	}
+
+	if (bbdd_jrpc_append_obj(state_obj, "bpf", &bpf_obj) != 0)
+		goto put_bpf_obj;
+
 	return 0;
+
+put_timing_obj:
+	json_object_put(timing_obj);
+put_bpf_obj:
+	json_object_put(bpf_obj);
+	bbdd_util_fmterr(error, "%m");
+	return -1;
 }
 
 int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,

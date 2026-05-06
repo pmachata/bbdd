@@ -26,8 +26,10 @@ struct bbdd_c_session_state {
 	struct bbdd_d_session_data remote;
 
 	/* Optional fields added by bbdd-bpf. */
-	bool poll_pending_seen;
-	bool poll_pending;
+	const char *bstate;
+	struct bbdd_d_session_data_timing eff_timing;	bool eff_timing_seen;
+	struct bbdd_d_session_data_timing poll_timing;	bool poll_timing_seen;
+	bool qd_timing;					bool qd_timing_seen;
 };
 
 #define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
@@ -515,6 +517,89 @@ bbdd_c_jrpc_dissect_session_state_local(struct json_object *obj,
 	return 0;
 }
 
+static int
+bbdd_c_jrpc_dissect_timing(struct json_object *obj,
+			   struct bbdd_d_session_data_timing *timing,
+			   char **error)
+{
+	enum {
+		pol_detect_mult,
+		pol_min_tx_us,
+		pol_min_rx_us,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_detect_mult] = { .key = "detect_mult", .type = json_type_int,
+				      .required = true },
+		[pol_min_tx_us]   = { .key = "min_tx_us",   .type = json_type_int,
+				      .required = true },
+		[pol_min_rx_us]   = { .key = "min_rx_us",   .type = json_type_int,
+				      .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	if (bbdd_jrpc_get_uint8(values[pol_detect_mult], &timing->detect_mult, error) < 0 ||
+	    bbdd_jrpc_get_uint32(values[pol_min_tx_us], &timing->min_tx_us, error) < 0 ||
+	    bbdd_jrpc_get_uint32(values[pol_min_rx_us], &timing->min_rx_us, error) < 0)
+		return -1;
+	return 0;
+}
+
+static int
+bbdd_c_jrpc_dissect_session_state_bpf(struct json_object *obj,
+				      struct bbdd_c_session_state *state,
+				      char **error)
+{
+	enum {
+		pol_bstate,
+		pol_eff_timing,
+		pol_poll_timing,
+		pol_qd_timing,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_bstate]     = { .key = "bstate",     .type = json_type_string },
+		[pol_eff_timing] = { .key = "eff_timing", .type = json_type_object },
+		[pol_poll_timing] = { .key = "poll_timing", .type = json_type_object },
+		[pol_qd_timing]  = { .key = "qd_timing",  .type = json_type_boolean },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
+	if (rc != 0)
+		return rc;
+
+	if (seen[pol_bstate])
+		state->bstate = json_object_get_string(values[pol_bstate]);
+	if (seen[pol_eff_timing]) {
+		state->eff_timing_seen = true;
+		rc = bbdd_c_jrpc_dissect_timing(values[pol_eff_timing],
+						&state->eff_timing, error);
+		if (rc != 0)
+			return rc;
+	}
+	if (seen[pol_poll_timing]) {
+		state->poll_timing_seen = true;
+		rc = bbdd_c_jrpc_dissect_timing(values[pol_poll_timing],
+						&state->poll_timing, error);
+		if (rc != 0)
+			return rc;
+	}
+	if (seen[pol_qd_timing]) {
+		state->qd_timing_seen = true;
+		state->qd_timing = json_object_get_boolean(values[pol_qd_timing]);
+	}
+
+	return 0;
+}
 
 static int
 bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
@@ -524,16 +609,14 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	enum {
 		pol_local,
 		pol_remote,
-		pol_poll_pending,
+		pol_bpf,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_local] = { .key = "local", .type = json_type_object,
-				.required = true},
-		[pol_remote] = { .key = "remote", .type = json_type_object,
-				 .required = true},
-		[pol_poll_pending] = { .key = "poll_pending",
-				       .type = json_type_boolean,
-				       .required = false},
+		[pol_local]      = { .key = "local",      .type = json_type_object,
+				     .required = true },
+		[pol_remote]     = { .key = "remote",     .type = json_type_object,
+				     .required = true },
+		[pol_bpf]        = { .key = "bpf",        .type = json_type_object },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
@@ -554,10 +637,11 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	if (seen[pol_poll_pending]) {
-		state->poll_pending_seen = true;
-		state->poll_pending =
-			json_object_get_boolean(values[pol_poll_pending]);
+	if (seen[pol_bpf]) {
+		rc = bbdd_c_jrpc_dissect_session_state_bpf(values[pol_bpf],
+							   state, error);
+		if (rc != 0)
+			return rc;
 	}
 
 	return 0;
@@ -825,13 +909,33 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	if (!seen)
 		printf("(session without data)");
 
-	printf(": local ");
+	printf("| local ");
 	bbdd_c_session_show_state_end(&state->local);
-	printf("remote ");
+	printf("| remote ");
 	bbdd_c_session_show_data(&state->remote);
 
-	if (state->poll_pending_seen && state->poll_pending)
-		printf("poll-pending ");
+	if (bbdd_env.verbosity > 0 &&
+	    (state->bstate != NULL || state->eff_timing_seen ||
+	     state->poll_timing_seen || state->qd_timing_seen)) {
+		printf("| bpf ");
+		if (state->bstate != NULL)
+			printf("state %s ", state->bstate);
+		if (state->eff_timing_seen) {
+			printf("eff-timing detect-mult %u ",
+			       state->eff_timing.detect_mult);
+			bbdd_c_show_time_us("min-tx",
+					    state->eff_timing.min_tx_us);
+			bbdd_c_show_time_us("min-rx",
+					    state->eff_timing.min_rx_us);
+		}
+		if (state->poll_timing_seen) {
+			printf("poll-timing detect-mult %u ", state->poll_timing.detect_mult);
+			bbdd_c_show_time_us("min-tx", state->poll_timing.min_tx_us);
+			bbdd_c_show_time_us("min-rx", state->poll_timing.min_rx_us);
+		}
+		if (state->qd_timing_seen)
+			printf("qd-timing %s ", state->qd_timing ? "yes" : "no");
+	}
 }
 
 static int bbdd_c_session_show_jrpc_result(struct json_object *response,
