@@ -25,6 +25,11 @@ int bbdd_util_fmterr(char **strp, const char *fmt, ...);
 __attribute__((format(printf, 2, 3)))
 int bbdd_util_wraperr(char **strp, const char *fmt, ...);
 
+/* Formats the given message. Then when *error is non-NULL, it appends a
+ * ": $error" afterwards. Puts the resulting pointer back to *error. */
+__attribute__((format(printf, 2, 3)))
+int bbdd_util_appenderr(char **error, const char *fmt, ...);
+
 /* Prints the given message. Then when *error is non-NULL, it appends a
  * ": $error" afterwards. Puts the resulting pointer back to *error. */
 __attribute__((format(printf, 2, 3)))
@@ -34,5 +39,7 @@ void bbdd_util_printerr(char **error, const char *fmt, ...);
  * *error. */
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_verberr(char **error, const char *fmt, ...);
+
+int bbdd_util_pickerr(int rc1, char **error1, int rc2, char **error2);
 
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);

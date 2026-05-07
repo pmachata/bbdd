@@ -743,7 +743,7 @@ bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 
 static void
 bbdd_bpf_rb_handle_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
-			    struct bbdd_nl *nl)
+			    struct bbdd_nl *nl, struct bbdd_mon *mon)
 {
 	struct bbdd_sockaddr addr = {};
 	char *error;
@@ -761,7 +761,7 @@ bbdd_bpf_rb_handle_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
 	return;
 
 error:
-	bbdd_util_printerr(&error, "no neighbor");
+	bbdd_mon_senderr(mon, &error, "no neighbor");
 }
 
 /* Return number of found sessions, or < 0 on error. The last matched session,
@@ -843,8 +843,8 @@ static void bbdd_bpf_session_call_update(struct bbdd_bpf *bpf,
 
 	err = __bbdd_bpf_session_update(bpf, dsess, bsess, &error);
 	if (err != 0)
-		bbdd_util_printerr(&error, "session %u state change: Failed to update session",
-				   dsess->local.discr);
+		bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "session %u state change: Failed to update session",
+				 dsess->local.discr);
 }
 
 static void bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
@@ -1028,7 +1028,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 						  BBDD_BFD_PKT_BIT_FINAL,
 						  &error);
 		if (err != 0)
-			bbdd_util_printerr(&error, "Failed to respond to a poll packet");
+			bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "Failed to respond to a poll packet");
 	}
 
 	switch (bsess->bstate) {
@@ -1098,7 +1098,7 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 				      elem->skb_len, elem->ttl);
 
 error:
-	bbdd_util_printerr(&error, "`your_discr' of 0");
+	bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "`your_discr' of 0");
 }
 
 static void
@@ -1438,8 +1438,7 @@ bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head, char **error)
 	return NULL;
 }
 
-static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
-				 struct bbdd_mon *mon,
+static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf, struct bbdd_mon *mon,
 				 const struct bbdd_bpf_rb_elem_head *head)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_ringbuf;
@@ -1451,18 +1450,12 @@ static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf,
 
 	msg = bbdd_bpf_rb_format_jrpc(head, &error);
 	if (msg == NULL) {
-		msg = bbdd_jrpc_new_error_int_error(NULL, error);
-		if (msg == NULL)
-			goto err;
+		bbdd_mon_senderr(mon, &error, "Failed to format monitor message");
+		return;
 	}
 
 	bbdd_mon_send(mon, msg, topic);
 	json_object_put(msg);
-	return;
-
-err:
-	++bpf->diag_stats.monitor_error;
-	bbdd_util_printerr(&error, "Failed to send monitor message");
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
@@ -1474,7 +1467,7 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGH:
-		bbdd_bpf_rb_handle_no_neigh(data, rb_ctx->nl);
+		bbdd_bpf_rb_handle_no_neigh(data, rb_ctx->nl, rb_ctx->mon);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
 		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir,

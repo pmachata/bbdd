@@ -2336,7 +2336,7 @@ bbdd_c_monitor_print_packet(const struct bbdd_c_monitor_packet *packet)
 }
 
 static enum bbdd_c_monitor_print_rc
-bbdd_c_monitor_handle_debug(struct json_object *params, char **error)
+bbdd_c_monitor_handle_message(struct json_object *params, char **error)
 {
 	enum {
 		pol_msg,
@@ -2655,7 +2655,9 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		return;
 
 	if (strcmp(method, "debug") == 0)
-		rc = bbdd_c_monitor_handle_debug(params, &error);
+		rc = bbdd_c_monitor_handle_message(params, &error);
+	else if (strcmp(method, "error") == 0)
+		rc = bbdd_c_monitor_handle_message(params, &error);
 	else if (strcmp(method, "ringbuf:rx-discr-0") == 0)
 		rc = bbdd_c_monitor_handle_ringbuf_rx_discr_0(params, &error);
 	else if (strcmp(method, "ringbuf:rx-unx-pkt") == 0)

@@ -1195,8 +1195,8 @@ put_msg:
 	json_object_put(msg);
 
 	if (rc != 0)
-		bbdd_util_printerr(&error, "session %u: failed to format notification",
-				   dsess->local.discr);
+		bbdd_mon_senderr(mon, &error, "session %u: failed to format notification",
+				 dsess->local.discr);
 }
 
 static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
@@ -1535,8 +1535,8 @@ static int bbdd_d_hold_timer_cb(struct bbdd_poll_ctx *pctx, short,
 
 	rc = bbdd_bpf_session_activate(hold->bpf, dsess, &error);
 	if (rc != 0) {
-		bbdd_util_printerr(&error, "session %u: failed to activate",
-				   dsess->local.discr);
+		bbdd_mon_senderr(hold->mon, &error, "session %u: failed to activate",
+				 dsess->local.discr);
 		goto out;
 	}
 
@@ -2040,18 +2040,18 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 					     discrs, ndiscrs);
 }
 
-static void
+static int
 bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
-				   const struct bfddp_session_cumulus *fsess)
+				   const struct bfddp_session_cumulus *fsess,
+				   char **error)
 {
 	struct bbdd_d_session *dsess;
 	struct bbdd_c_session csess;
 	uint32_t discr;
 	bool changed;
-	char *error;
 	int rc;
 
-	rc = bbdd_bfdd_session_to_c(fsess, &csess, &error);
+	rc = bbdd_bfdd_session_to_c(fsess, &csess, error);
 	if (rc != 0)
 		goto interr;
 
@@ -2062,57 +2062,58 @@ bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	 * mechanism to report back to bfdd what value we assigned. So best to
 	 * just expect the value to be given. */
 	if (!csess.discr_seen) {
-		bbdd_util_fmterr(&error, "missing local discriminator");
+		bbdd_util_fmterr(error, "missing local discriminator");
+		rc = -EINVAL;
 		goto invalid;
 	}
 	discr = csess.discr;
 
 	if (csess.netif.ifindex_seen || csess.netif.name_seen) {
-		rc = bbdd_d_session_validate_netif(&csess.netif, &error);
+		rc = bbdd_d_session_validate_netif(&csess.netif, error);
 		if (rc != 0)
 			goto invalid;
 	}
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		rc = bbdd_d_session_add(d, &csess, &error);
+		rc = bbdd_d_session_add(d, &csess, error);
 		if (rc != 0)
 			goto no_session;
-		return;
+		return 0;
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &changed, &error);
+	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &changed, error);
 	if (rc != 0)
 		goto interr;
 
 	if (dsess->hold != NULL)
-		return;
+		return 0;
 
-	rc = bbdd_bpf_session_update(d->bpf, dsess, &error);
+	rc = bbdd_bpf_session_update(d->bpf, dsess, error);
 	if (rc != 0)
 		goto interr;
 
 	if (changed)
 		bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
-	return;
+	return 0;
 
 invalid:
 	++d->diag_stats.dp_invalid_message;
-	goto message;
+	return rc;
+
 interr:
 	++d->diag_stats.dp_internal_error;
-	goto message;
+	return rc;
+
 no_session:
 	++d->diag_stats.dp_no_session;
-	goto message;
-
-message:
-	bbdd_util_verberr(&error, "bfdd: DP_ADD_SESSION");
+	return rc;
 }
 
-static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
-					   const struct bfddp_message *msg)
+static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
+					  const struct bfddp_message *msg,
+					  char **error)
 {
 	uint16_t length = ntohs(msg->header.length);
 	enum {
@@ -2130,70 +2131,70 @@ static void bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 		session_cumulus = (struct bfddp_session_cumulus) {
 			.session = msg->data.session,
 		};
-		return bbdd_d_bfdd_handle_add_session_vrf(d, &session_cumulus);
+		return bbdd_d_bfdd_handle_add_session_vrf(d, &session_cumulus,
+							  error);
 
 	case cml_len:
 		ptr = &msg->data.session_cumulus;
-		return bbdd_d_bfdd_handle_add_session_vrf(d, ptr);
+		return bbdd_d_bfdd_handle_add_session_vrf(d, ptr, error);
 	}
 
 	++d->diag_stats.dp_invalid_message_length;
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: DP_ADD_SESSION: Invalid length: got %u, expected %u or %u\n",
-			length, std_len, cml_len);
+	bbdd_util_fmterr(error, "DP_ADD_SESSION: Invalid length: got %u, expected %u or %u",
+			 length, std_len, cml_len);
+	return -1;
 }
 
-static void
+static int
 bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
-				  const struct bfddp_message *msg)
+				  const struct bfddp_message *msg,
+				  char **error)
 {
 	uint16_t length = ntohs(msg->header.length);
 	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.session);
 	uint32_t discr;
-	char *error;
 	int rc;
 
 	if (length != exp_len) {
 		++d->diag_stats.dp_invalid_message_length;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: DP_DELETE_SESSION: Invalid length: got %u, expected %u\n",
-				length, exp_len);
-		return;
+		bbdd_util_fmterr(error, "DP_DELETE_SESSION: Invalid length: got %u, expected %u",
+				 length, exp_len);
+		return -1;
 	}
 
 	discr = ntohl(msg->data.session.lid);
-	rc = bbdd_d_handle_session_del_one(d, discr, &error);
+	rc = bbdd_d_handle_session_del_one(d, discr, error);
 	if (rc != 0) {
 		++d->diag_stats.dp_no_session;
-		bbdd_util_verberr(&error, "bfdd: DP_DELETE_SESSION");
+		bbdd_util_appenderr(error, "DP_DELETE_SESSION");
 	}
+	return rc;
 }
 
-static void
+static int
 bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
-				    const struct bfddp_message *msg)
+				    const struct bfddp_message *msg,
+				    char **error1)
 {
 	uint16_t length = ntohs(msg->header.length);
 	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.counters_req);
 	uint32_t discr;
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_d_session *dsess;
-	char *error;
-	int rc;
+	char *error2;
+	int rc1, rc2;
 
 	if (length != exp_len) {
 		++d->diag_stats.dp_invalid_message_length;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: DP_REQUEST_SESSION_COUNTERS: Invalid length: got %u, expected %u\n",
-				length, exp_len);
-		return;
+		bbdd_util_fmterr(error1, "DP_REQUEST_SESSION_COUNTERS: Invalid length: got %u, expected %u",
+				 length, exp_len);
+		return -EINVAL;
 	}
 
 	discr = ntohl(msg->data.counters_req.lid);
 
-	/* We don't necessarily want to detach from the socket on errors in
-	 * these queries. Instead, form o nonsense response, but do respond, so
-	 * that the sender doesn't stay hanging. */
+	/* On errors, form a nonsense response, but do respond, so that the
+	 * sender doesn't stay hanging. */
 	stats = (struct bbdd_prog_session_data_stats) {
 		.rx_bytes = UINT64_MAX / 2,
 		.rx_packets = UINT64_MAX / 2,
@@ -2204,26 +2205,28 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
 		++d->diag_stats.dp_no_session;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: DP_REQUEST_SESSION_COUNTERS: no session for discr %u\n",
-				discr);
+		bbdd_util_fmterr(error1, "DP_REQUEST_SESSION_COUNTERS: no session for discr %u",
+				 discr);
+		rc1 = -ENOENT;
 		goto reply;
 	}
 
-	rc = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, &error);
-	if (rc != 0) {
+	rc1 = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, error1);
+	if (rc1 != 0) {
 		++d->diag_stats.dp_internal_error;
-		bbdd_util_verberr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+		bbdd_util_appenderr(error1, "DP_REQUEST_SESSION_COUNTERS");
 		goto reply;
 	}
 
 reply:
-	rc = bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
-				      &error);
-	if (rc != 0) {
+	rc2 = bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
+				      &error2);
+	if (rc2 != 0) {
 		++d->diag_stats.dp_buffer_error;
-		bbdd_util_verberr(&error, "bfdd: DP_REQUEST_SESSION_COUNTERS");
+		bbdd_util_appenderr(&error2, "reply DP_REQUEST_SESSION_COUNTERS");
 	}
+
+	return bbdd_util_pickerr(rc1, error1, rc2, &error2);
 }
 
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
@@ -2231,13 +2234,14 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 				     struct bfddp_message *msg)
 {
 	enum bfddp_message_type bmt;
+	char *error;
+	int rc;
 
 	if (msg->header.version != 1) {
 		++d->diag_stats.dp_wrong_version_number;
-		if (bbdd_env.verbosity > 0)
-			fprintf(stderr, "bfdd: Wrong message version number %d\n",
-				msg->header.version);
-		return;
+		bbdd_util_fmterr(&error, "bfdd: Wrong message version number %d",
+				 msg->header.version);
+		goto senderr;
 	}
 
 	/* This is called from bbdd-bfdd for individual error messages. When we
@@ -2247,13 +2251,16 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	bmt = ntohs(msg->header.type);
 	switch (bmt) {
 	case DP_ADD_SESSION:
-		return bbdd_d_bfdd_handle_add_session(d, msg);
+		rc = bbdd_d_bfdd_handle_add_session(d, msg, &error);
+		break;
 
 	case DP_DELETE_SESSION:
-		return bbdd_d_bfdd_handle_delete_session(d, msg);
+		rc = bbdd_d_bfdd_handle_delete_session(d, msg, &error);
+		break;
 
 	case DP_REQUEST_SESSION_COUNTERS:
-		return bbdd_d_bfdd_handle_session_counters(d, msg);
+		rc = bbdd_d_bfdd_handle_session_counters(d, msg, &error);
+		break;
 
 	/* We don't generate ECHO_REQUEST's, therefore we don't expect to see
 	 * ECHO_REPLY's. And frr doesn't generate ECHO_REQUEST's either. So
@@ -2265,12 +2272,17 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	case BFD_STATE_CHANGE:
 	/* Whatever this is. */
 	default:
+		++d->diag_stats.dp_invalid_message_type;
+		bbdd_util_fmterr(&error, "bfdd: Invalid message type %d", bmt);
+		rc = -1;
 		break;
 	}
 
-	++d->diag_stats.dp_invalid_message_type;
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Invalid message type %d\n", bmt);
+	if (rc == 0)
+		return;
+
+senderr:
+	bbdd_mon_senderr(d->mon, &error, "bfdd");
 }
 
 static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,

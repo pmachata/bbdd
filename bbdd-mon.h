@@ -13,7 +13,8 @@ struct bbdd_mon;
 #define BBDD_MON_TOPICS(X)	\
 	X(ringbuf, true)	\
 	X(session, true)	\
-	X(debug, false)		\
+	X(error,   true)	\
+	X(debug,   false)	\
 	/**/
 
 #define BBDD_MON_ENUM(NAME, ALL) BBDD_MON_TOPIC_ ## NAME,
@@ -45,3 +46,6 @@ void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 
 __attribute__((format(printf, 2, 3)))
 void bbdd_mon_send_debug(struct bbdd_mon *mon, const char *fmt, ...);
+
+__attribute__((format(printf, 3, 4)))
+void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...);

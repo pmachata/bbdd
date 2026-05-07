@@ -116,29 +116,18 @@ void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 	__bbdd_mon_send(mon, msg, topic);
 }
 
-__attribute__((format(printf, 2, 3)))
-void bbdd_mon_send_debug(struct bbdd_mon *mon, const char *fmt, ...)
+static void bbdd_mon_send_msg(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
+			      const char *method, const char *msg)
 {
-	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_debug;
 	struct json_object *params;
 	struct json_object *obj;
-	va_list ap;
-	char *msg;
-	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	va_start(ap, fmt);
-	rc = bbdd_util_vfmterr(&msg, fmt, ap);
-	va_end(ap);
-
-	if (rc < 0)
-		return;
-
-	obj = bbdd_jrpc_new_notif("debug");
+	obj = bbdd_jrpc_new_notif(method);
 	if (obj == NULL)
-		goto free_msg;
+		return;
 
 	params = json_object_new_object();
 	if (params == NULL)
@@ -154,6 +143,64 @@ put_params:
 	json_object_put(params);
 put_obj:
 	json_object_put(obj);
-free_msg:
+}
+
+static void bbdd_mon_send_vfmt(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
+			       const char *method, const char *fmt, va_list ap)
+{
+	char *msg;
+	int rc;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
+
+	rc = bbdd_util_vfmterr(&msg, fmt, ap);
+	if (rc < 0)
+		return;
+
+	bbdd_mon_send_msg(mon, topic, method, msg);
 	free(msg);
+}
+
+__attribute__((format(printf, 2, 3)))
+void bbdd_mon_send_debug(struct bbdd_mon *mon, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	bbdd_mon_send_vfmt(mon, BBDD_MON_TOPIC_debug, "debug", fmt, ap);
+	va_end(ap);
+}
+
+__attribute__((format(printf, 3, 4)))
+void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
+{
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_error;
+	const char *method = "error";
+	const char *errmsg;
+	char *str = NULL;
+	va_list ap;
+	int rc;
+
+	errmsg = *error ?: "(unknown error)";
+
+	va_start(ap, fmt);
+	rc = bbdd_util_vfmterr(&str, fmt, ap);
+	va_end(ap);
+
+	if (rc < 0) {
+		bbdd_mon_send_msg(mon, topic, method, errmsg);
+		goto out;
+	}
+
+	if (*error != NULL)
+		/* str is unchanged if the formatting fails. */
+		bbdd_util_wraperr(&str, "%s: %s", str, *error);
+
+	bbdd_mon_send_msg(mon, topic, method, str);
+
+out:
+	free(str);
+	free(*error);
+	*error = NULL;
 }
