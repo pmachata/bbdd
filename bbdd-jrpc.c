@@ -83,7 +83,7 @@ struct json_object *bbdd_jrpc_new_request(int id, const char *method)
 {
 	struct json_object *request;
 	struct json_object *id_obj;
-	int rc;
+	int rc = 0;
 
 	id_obj = json_object_new_int(id);
 	if (id_obj == NULL) {
@@ -109,7 +109,7 @@ put_request:
 	json_object_put(request);
 put_id:
 	json_object_put(id_obj);
-	return request;
+	return rc == 0 ? request : NULL;
 }
 
 struct json_object *bbdd_jrpc_new_notif(const char *method)
