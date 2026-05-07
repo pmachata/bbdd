@@ -478,7 +478,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		pol_min_tx_us,
 		pol_min_rx_us,
 
-		pol_hold_time,
+		pol_hold_time_us,
 		pol_ttl,
 		pol_detect_mult,
 
@@ -500,7 +500,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_min_tx_us] = { .key = "min_tx_us", .type = json_type_int },
 		[pol_min_rx_us] = { .key = "min_rx_us", .type = json_type_int },
 
-		[pol_hold_time] = { .key = "hold_time", .type = json_type_int },
+		[pol_hold_time_us] = { .key = "hold_time_us",
+				       .type = json_type_int },
 		[pol_ttl] = { .key = "ttl", .type = json_type_int },
 		[pol_detect_mult] = { .key = "detect_mult",
 				      .type = json_type_int },
@@ -586,7 +587,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	DISSECT(discr, discr, bbdd_jrpc_get_uint32_non0);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
-	DISSECT_U32(hold_time);
+	DISSECT_U32(hold_time_us);
 	DISSECT_U8(ttl);
 	DISSECT_U8(detect_mult);
 	DISSECT(netif_index, netif.ifindex, bbdd_jrpc_get_uint32_non0);
@@ -776,7 +777,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	} while (0)
 
 	ASSIGN(discr, local.discr);
-	ASSIGN_NON0(hold_time, hold_time);
+	ASSIGN_NON0(hold_time_us, hold_time_us);
 	ASSIGN_NON0(ttl, ttl);
 	ASSIGN_NON0(netif.ifindex, ifindex);
 
@@ -1253,7 +1254,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(local.timing.detect_mult, detect_mult);
 	ASSIGN(local.timing.min_tx_us, min_tx_us);
 	ASSIGN(local.timing.min_rx_us, min_rx_us);
-	ASSIGN(hold_time, hold_time);
+	ASSIGN(hold_time_us, hold_time_us);
 	ASSIGN(ttl, ttl);
 	ASSIGN(vrf_table, vrf.table);
 
@@ -1452,7 +1453,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	FIELD(local.timing.detect_mult, detect_mult);
 	FIELD(local.timing.min_tx_us, min_tx_us);
 	FIELD(local.timing.min_rx_us, min_rx_us);
-	FIELD(hold_time, hold_time);
+	FIELD(hold_time_us, hold_time_us);
 	FIELD(ttl, ttl);
 	FIELD(ifindex, netif.ifindex);
 	FIELD(vrf_ifindex, vrf.netif.ifindex);

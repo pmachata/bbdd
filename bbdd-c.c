@@ -880,8 +880,8 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		bbdd_c_show_time_us("min-rx", sess->min_rx_us);
 		seen = true;
 	}
-	if (sess->hold_time_seen) {
-		printf("hold_time %u ", sess->hold_time);
+	if (sess->hold_time_us_seen) {
+		bbdd_c_show_time_us("hold-time", sess->hold_time_us);
 		seen = true;
 	}
 	if (sess->ttl_seen) {
@@ -1688,8 +1688,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	     bbdd_jrpc_append_int(params_obj, "min_tx_us", sess->min_tx_us)) ||
 	    (sess->min_rx_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_rx_us", sess->min_rx_us)) ||
-	    (sess->hold_time_seen &&
-	     bbdd_jrpc_append_int(params_obj, "hold_time", sess->hold_time)) ||
+	    (sess->hold_time_us_seen &&
+	     bbdd_jrpc_append_int(params_obj, "hold_time_us",
+				  sess->hold_time_us)) ||
 	    (sess->ttl_seen &&
 	     bbdd_jrpc_append_int(params_obj, "ttl", sess->ttl)) ||
 	    (sess->detect_mult_seen &&
@@ -1893,9 +1894,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-rx",
 						  &sess->min_rx_us,
 						  &sess->min_rx_us_seen)) ||
-		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "hold-time",
-					      &sess->hold_time,
-					      &sess->hold_time_seen)) ||
+		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "hold-time",
+						  &sess->hold_time_us,
+						  &sess->hold_time_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "ttl",
 					     &sess->ttl,
 					     &sess->ttl_seen)) ||

@@ -117,7 +117,7 @@ struct bbdd_c_session {
 	uint32_t discr;			int discr_seen;
 	uint32_t min_tx_us;		int min_tx_us_seen;
 	uint32_t min_rx_us;		int min_rx_us_seen;
-	uint32_t hold_time;		int hold_time_seen;
+	uint32_t hold_time_us;		int hold_time_us_seen;
 	uint8_t ttl;			int ttl_seen;
 	uint8_t detect_mult;		int detect_mult_seen;
 	struct bbdd_c_session_addr src;
@@ -183,7 +183,7 @@ struct bbdd_d_session {
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
 
-	uint32_t hold_time;
+	uint32_t hold_time_us;
 	uint8_t ttl;
 	uint32_t ifindex;
 	uint32_t vrf_ifindex;
