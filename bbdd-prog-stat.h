@@ -13,6 +13,8 @@
 	FIELD(ring_buffer_error)		\
 	FIELD(sk_lookup_no_socket)		\
 	FIELD(sk_lookup_assign_error)		\
+	FIELD(ra_not_bfd) /* ra=re-arm*/	\
+	FIELD(ra_no_session)			\
 	/**/
 
 #define BBDD_PROG_SESSION_DIAG_STATS(FIELD)	\
@@ -38,8 +40,8 @@
 	FIELD(rx_detection_multiplier_0)	\
 	FIELD(rx_my_discr_0)			\
 	FIELD(rx_your_discr_0_not_down)		\
-	FIELD(rx_fail_timer)			\
 	FIELD(rx_timeout)			\
+	FIELD(ra_fail_timer)			\
 	/**/
 
 #define BBDD_PROG_SESSION_STATS(FIELD)		\

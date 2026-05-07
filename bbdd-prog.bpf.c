@@ -522,13 +522,13 @@ static void bbdd_recv_rearm_timer(__u32 discr,
 		ret = bpf_timer_init(&data->timer, &bbdd_prog_session_data_hash,
 				     CLOCK_MONOTONIC);
 		if (ret && ret != -EBUSY) {
-			BUMP(data->diag_stats.rx_fail_timer);
+			BUMP(data->diag_stats.ra_fail_timer);
 			return;
 		}
 
 		ret = bpf_timer_set_callback(&data->timer, bfd_session_expired);
 		if (ret) {
-			BUMP(data->diag_stats.rx_fail_timer);
+			BUMP(data->diag_stats.ra_fail_timer);
 			return;
 		}
 
@@ -538,7 +538,7 @@ static void bbdd_recv_rearm_timer(__u32 discr,
 	detect_time_ns = config->detect_time_us * (u64)NS_PER_US;
 	ret = bpf_timer_start(&data->timer, detect_time_ns, 0);
 	if (ret) {
-		BUMP(data->diag_stats.rx_fail_timer);
+		BUMP(data->diag_stats.ra_fail_timer);
 		return;
 	}
 
@@ -561,22 +561,26 @@ int bbdd_xmit_veth_rx_xmit(struct __sk_buff *skb)
 	/* SKB is an Ethernet packet. */
 
 	bfd = bbdd_tx_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len);
-	if (bfd == NULL)
-		goto out;
+	if (bfd == NULL) {
+		BUMP(bbdd_prog_global_diag_stats.ra_not_bfd);
+		goto shot;
+	}
 
 	discr = bpf_ntohl(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
 	if (config == NULL)
-		goto out;
+		goto ra_no_session;
 
 	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &discr);
 	if (data == NULL)
-		goto out;
+		goto ra_no_session;
 
 	bbdd_recv_rearm_timer(discr, config, data);
 	return TC_ACT_STOLEN;
 
-out:
+ra_no_session:
+	BUMP(bbdd_prog_global_diag_stats.ra_no_session);
+shot:
 	return TC_ACT_SHOT;
 }
 
