@@ -71,6 +71,7 @@ struct bbdd_bpf {
 };
 
 enum bbdd_bpf_session_state {
+	BBDD_BPF_SESSION_STATE_ON_HOLD,
 	BBDD_BPF_SESSION_STATE_STABLE,
 	BBDD_BPF_SESSION_STATE_AWAIT_FINAL,
 	BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL,
@@ -219,6 +220,16 @@ static uint16_t bbdd_bpf_udp6_cksum(const struct ip6_hdr *ip6,
 	return bbdd_bpf_cksum_fold(sum);
 }
 
+static __attribute__((noreturn)) void
+__invalid_on_hold_abort(struct bbdd_bpf_session *bsess, const char *func)
+{
+	fprintf(stderr, "%s: Invalid processing of an on-hold session %u\n",
+		func, bsess != NULL ? bsess->discr : 0);
+	abort();
+}
+
+#define invalid_on_hold_abort(BSESS) __invalid_on_hold_abort((BSESS), __func__)
+
 static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       struct bbdd_bpf_session *bsess,
 				       uint32_t tx_ifindex,
@@ -247,6 +258,8 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	 * packets with the Final (F) bit set, even if the Poll Sequence has not
 	 * yet been sent. */
 	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
 	case BBDD_BPF_SESSION_STATE_STABLE:
 		timing = &bsess->eff_timing;
 		break;
@@ -397,9 +410,12 @@ bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
 static uint8_t bbdd_bpf_get_rx_expect_bfd_flags(enum bbdd_bpf_session_state bstate)
 {
 	switch (bstate) {
-	case BBDD_BPF_SESSION_STATE_STABLE:
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		/* We need this for initial popluation of BPF hash tables, which
+		 * happens for on-hold sessions as well. */
 		return 0;
 
+	case BBDD_BPF_SESSION_STATE_STABLE:
 	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
 		return 0;
 
@@ -416,6 +432,10 @@ static uint8_t bbdd_bpf_get_rx_expect_bfd_flags(enum bbdd_bpf_session_state bsta
 static uint8_t bbdd_bpf_get_inject_bfd_flags(enum bbdd_bpf_session_state bstate)
 {
 	switch (bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		/* We should inject no packets for on-hold sessions. */
+		invalid_on_hold_abort(NULL);
+
 	case BBDD_BPF_SESSION_STATE_STABLE:
 		return 0;
 
@@ -514,23 +534,16 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
-				     uint32_t ifindex,
-				     uint32_t tbid,
-				     uint32_t fib_flags,
-				     uint32_t min_interval_us,
-				     uint32_t max_interval_us,
-				     uint32_t detect_time_us,
-				     bool rearm_timer,
 				     char **error)
 {
 	struct bbdd_prog_session_data data = {};
 	uint32_t discr = dsess->local.discr;
 	int err;
 
-	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, ifindex,
-					   tbid, fib_flags, min_interval_us,
-					   max_interval_us, detect_time_us,
-					   rearm_timer, error);
+	/* All sessions start on hold. Just create a shell of future config for
+	 * update as the session stops being on hold. */
+	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, 0, 0, 0, 0, 0, 0,
+					   false, error);
 	if (err)
 		return err;
 
@@ -589,7 +602,7 @@ enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
-				     bool add, char **error)
+				     char **error)
 {
 	const struct bbdd_d_session_data_timing *eff_timing = &bsess->eff_timing;
 	uint32_t min_interval_us;
@@ -603,6 +616,13 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	bool admdown;
 	bool down;
 	int rc;
+
+	/* There's no reliable way to roll back everything, and e.g. rolling
+	 * back the mark is pointless. Unless everything lines up just right,
+	 * the session is broken. Even if the standard allowed to do something
+	 * like add a new session with new id and then remove the old one, when
+	 * the removal fails, we've got two sessions and it's broken. So we just
+	 * treat errors by basically shrugging and bailing out early. */
 
 	bsess->gen_id++;
 
@@ -662,20 +682,12 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	}
 
 	bool rearm_timer = !(down || admdown);
-	if (add)
-		rc = bbdd_bpf_session_conf_add(bpf, dsess, bsess, fwd_ifindex,
-					       tbid, fib_flags,
-					       min_interval_us,
-					       max_interval_us,
-					       detect_time_us,
-					       rearm_timer, error);
-	else
-		rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
-						  tbid, fib_flags,
-						  min_interval_us,
-						  max_interval_us,
-						  detect_time_us,
-						  rearm_timer, error);
+	rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
+					  tbid, fib_flags,
+					  min_interval_us,
+					  max_interval_us,
+					  detect_time_us,
+					  rearm_timer, error);
 	if (rc != 0)
 		return rc;
 
@@ -687,7 +699,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 					 bpf->conf.veth_tx_ifindex,
 					 bfd_flags, error);
 	if (rc != 0)
-		goto del_session;
+		return rc;
 
 	if (rearm_timer > bsess->timer_armed) {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
@@ -696,22 +708,11 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 						 bpf->conf.veth_rx_ifindex,
 						 0, error);
 		if (rc != 0)
-			goto del_session;
+			return rc;
 	}
 	bsess->timer_armed = rearm_timer;
 
 	return 0;
-
-	/* There's no reliable way to roll back everything, and e.g. rolling
-	 * back the mark is pointless. Unless everything lines up just right,
-	 * the session is broken. Even if the standard allowed to do something
-	 * like add a new session with new id and then remove the old one, when
-	 * the removal fails, we've got two sessions and it's broken. The only
-	 * thing that we clean up is the session add. */
-del_session:
-	if (add)
-		bbdd_bpf_session_conf_delete(bpf, dsess->local.discr);
-	return rc;
 }
 
 static int
@@ -840,7 +841,7 @@ static void bbdd_bpf_session_call_update(struct bbdd_bpf *bpf,
 	char *error;
 	int err;
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, false, &error);
+	err = __bbdd_bpf_session_update(bpf, dsess, bsess, &error);
 	if (err != 0)
 		bbdd_util_printerr(&error, "session %u state change: Failed to update session",
 				   dsess->local.discr);
@@ -913,6 +914,17 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		 * event, but before we got to process it, the session gets
 		 * deleted. So don't even print anything. */
 		return;
+	}
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		/* We could see a packet that happens to carry discriminator of
+		 * this session, or happens to resolve to it for discr == 0. */
+		return;
+	case BBDD_BPF_SESSION_STATE_STABLE:
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		break;
 	}
 
 	++bsess->stats.rx_packets;
@@ -1020,6 +1032,10 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	}
 
 	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		/* This should have been bounced above. */
+		invalid_on_hold_abort(bsess);
+
 	case BBDD_BPF_SESSION_STATE_STABLE:
 		break;
 
@@ -2095,9 +2111,10 @@ err:
 static const char *bbdd_bpf_session_state_str(enum bbdd_bpf_session_state bstate)
 {
 	switch (bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:        return "on-hold";
 	case BBDD_BPF_SESSION_STATE_STABLE:         return "stable";
-	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:    return "await_final";
-	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL: return "await_non_final";
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:    return "await-final";
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL: return "await-non-final";
 	}
 	return "unknown";
 }
@@ -2140,16 +2157,21 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 				 bbdd_bpf_session_state_str(bsess->bstate)) != 0)
 		goto put_bpf_obj;
 
-	timing_obj = bbdd_bpf_timing_json(&bsess->eff_timing);
-	if (timing_obj == NULL)
-		goto put_bpf_obj;
-
-	if (bbdd_jrpc_append_obj(bpf_obj, "eff_timing", &timing_obj) != 0)
-		goto put_timing_obj;
-
 	switch (bsess->bstate) {
-	case BBDD_BPF_SESSION_STATE_STABLE:
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
 		break;
+
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		timing_obj = bbdd_bpf_timing_json(&bsess->eff_timing);
+		if (timing_obj == NULL)
+			goto put_bpf_obj;
+
+		if (bbdd_jrpc_append_obj(bpf_obj, "eff_timing",
+					 &timing_obj) != 0)
+			goto put_timing_obj;
+
+		/* Fall through. */
+
 	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
 	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
 		timing_obj = bbdd_bpf_timing_json(&bsess->poll_timing);
@@ -2277,12 +2299,11 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		.gen_id = 0,
 		.sock_fd = sock_fd,
 
-		.bstate = BBDD_BPF_SESSION_STATE_STABLE,
-		.eff_timing = dsess->local.timing,
+		.bstate = BBDD_BPF_SESSION_STATE_ON_HOLD,
 		.qd_timing = NULL,
 	};
 
-	err = __bbdd_bpf_session_update(bpf, dsess, bsess, true, error);
+	err = bbdd_bpf_session_conf_add(bpf, dsess, bsess, error);
 	if (err != 0)
 		goto close_sock;
 
@@ -2294,6 +2315,27 @@ close_sock:
 free_bsess:
 	free(bsess);
 	return -1;
+}
+
+int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
+			      const struct bbdd_d_session *dsess,
+			      char **error)
+{
+	uint32_t discr = dsess->local.discr;
+	struct bbdd_bpf_session *bsess;
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
+	if (bsess == NULL) {
+		bbdd_util_fmterr(error, "No BPF session found for discr %u",
+				 discr);
+		return -1;
+	}
+
+	assert(bsess->bstate == BBDD_BPF_SESSION_STATE_ON_HOLD);
+	bsess->eff_timing = dsess->local.timing;
+	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
+
+	return __bbdd_bpf_session_update(bpf, dsess, bsess, error);
 }
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
@@ -2313,8 +2355,12 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	/* Below, we want to compare w/ the last poll sequence, if any. */
 	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
+
+	/* Below, we want to compare w/ the configuration being polled
+	 * currently, or, if none, the effective configuration. */
 	case BBDD_BPF_SESSION_STATE_STABLE:
 		timing = &bsess->eff_timing;
 		break;
@@ -2346,6 +2392,9 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		apply_imm = false;
 
 	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
+
 	case BBDD_BPF_SESSION_STATE_STABLE:
 		if (apply_imm)
 			bsess->eff_timing = dsess->local.timing;
@@ -2369,7 +2418,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		break;
 	}
 
-	return __bbdd_bpf_session_update(bpf, dsess, bsess, false, error);
+	return __bbdd_bpf_session_update(bpf, dsess, bsess, error);
 }
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,

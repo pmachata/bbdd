@@ -56,6 +56,10 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 			 const struct bbdd_d_session *dsess,
 			 char **error);
 
+int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
+			      const struct bbdd_d_session *dsess,
+			      char **error);
+
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_d_session *dsess,
 			    char **error);
