@@ -2858,52 +2858,60 @@ close_cli:
 	return err;
 }
 
+static void bbdd_c_monitor_enable_all(struct bbdd_mon_topics *topics)
+{
+#define TOPIC_ON_BY_DEFAULT(NAME, ALL)			\
+			[BBDD_MON_TOPIC_ ## NAME] = (ALL),
+
+	bool on_by_default[] = {
+		BBDD_MON_TOPICS(TOPIC_ON_BY_DEFAULT)
+	};
+	for (int i = 0; i < bbdd_mon_ntopics; i++)
+		if (on_by_default[i])
+			topics->enabled[i] = true;
+
+#undef TOPIC_ON_BY_DEFAULT
+}
+
+static bool bbdd_c_monitor_enable_topic(struct bbdd_mon_topics *topics,
+					const char *topic)
+{
+#define MATCH_TOPIC(NAME, ALL)						\
+	if (strcmp(topic, #NAME) == 0) {				\
+		topics->enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
+		return true;						\
+	}
+
+	BBDD_MON_TOPICS(MATCH_TOPIC);
+	return false;
+
+#undef MATCH_TOPIC
+}
+
 int bbdd_c_monitor(int argc, char **argv)
 {
 	struct bbdd_mon_topics topics = {};
 	bool have_topics = false;
-	bool have_all = false;
 
 	while (argc > 0) {
 		if (strcmp(*argv, "help") == 0) {
 			bbdd_c_monitor_help();
 			return 0;
 		} else if (strcmp(*argv, "all") == 0) {
-			have_all = true;
 			have_topics = true;
+			bbdd_c_monitor_enable_all(&topics);
 		} else {
-			bool found = false;
-
-#define MATCH_TOPIC(NAME, ALL)						\
-			if (strcmp(*argv, #NAME) == 0) {		\
-				topics.enabled[BBDD_MON_TOPIC_ ## NAME] = true;	\
-				found = true;				\
-			}
-			BBDD_MON_TOPICS(MATCH_TOPIC)
-#undef MATCH_TOPIC
-
-			if (!found) {
+			have_topics = true;
+			if (!bbdd_c_monitor_enable_topic(&topics, *argv)) {
 				fprintf(stderr, "What is \"%s\"?\n", *argv);
 				return -1;
 			}
-			have_topics = true;
 		}
 		NEXT_ARG_FWD();
 	}
 
-#define TOPIC_ON_BY_DEFAULT(NAME, ALL)			\
-			[BBDD_MON_TOPIC_ ## NAME] = (ALL),
-
-	if (!have_topics || have_all) {
-		bool on_by_default[] = {
-			BBDD_MON_TOPICS(TOPIC_ON_BY_DEFAULT)
-		};
-		for (int i = 0; i < bbdd_mon_ntopics; i++)
-			if (on_by_default[i])
-				topics.enabled[i] = true;
-	}
-
-#undef TOPIC_ON_BY_DEFAULT
+	if (!have_topics)
+		bbdd_c_monitor_enable_all(&topics);
 
 	return bbdd_c_monitor_jrpc(topics);
 }

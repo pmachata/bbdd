@@ -11,12 +11,25 @@
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
+enum bbdd_mon_cli_kind {
+	BBDD_MON_CLI_KIND_SOCK,
+	BBDD_MON_CLI_KIND_CB,
+};
+
 struct bbdd_mon_cli {
 	struct bbdd_mon_cli *prev;
 	struct bbdd_mon_cli *next;
 
 	struct bbdd_mon_topics topics;
-	struct bbdd_sock sock;
+
+	enum bbdd_mon_cli_kind kind;
+	union {
+		struct bbdd_sock sock;
+		struct {
+			void (*cb)(struct json_object *, void *);
+			void *data;
+		};
+	};
 };
 
 struct bbdd_mon {
@@ -49,20 +62,20 @@ void bbdd_mon_fini(struct bbdd_mon *mon)
 	free(mon);
 }
 
-int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
-		       struct bbdd_mon_topics topics, char **error)
+static struct bbdd_mon_cli *
+bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
+		      char **error)
 {
 	struct bbdd_mon_cli *cli;
 
 	cli = malloc(sizeof(*cli));
 	if (cli == NULL) {
 		bbdd_util_fmterr(error, "%m");
-		return -1;
+		return NULL;
 	}
 
 	*cli = (struct bbdd_mon_cli) {
 		.topics = topics,
-		.sock = *sock,
 	};
 
 	DL_APPEND(mon->head, cli);
@@ -71,6 +84,36 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		if (topics.enabled[i])
 			mon->active[i]++;
 
+	return cli;
+}
+
+int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
+		       struct bbdd_mon_topics topics, char **error)
+{
+	struct bbdd_mon_cli *cli;
+
+	cli = bbdd_mon_alloc_client(mon, topics, error);
+	if (cli == NULL)
+		return -1;
+
+	cli->kind = BBDD_MON_CLI_KIND_SOCK;
+	cli->sock = *sock;
+	return 0;
+}
+
+int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
+			  void (*cb)(struct json_object *, void *), void *data,
+			  struct bbdd_mon_topics topics, char **error)
+{
+	struct bbdd_mon_cli *cli;
+
+	cli = bbdd_mon_alloc_client(mon, topics, error);
+	if (cli == NULL)
+		return -1;
+
+	cli->kind = BBDD_MON_CLI_KIND_CB;
+	cli->cb = cb;
+	cli->data = data;
 	return 0;
 }
 
@@ -89,8 +132,8 @@ bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic)
 	return bbdd_env.mon_eager || mon->active[topic] > 0;
 }
 
-void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
-		     enum bbdd_mon_topic topic)
+static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+			    enum bbdd_mon_topic topic)
 {
 	struct bbdd_mon_cli *cli;
 	struct bbdd_mon_cli *tmp;
@@ -99,8 +142,16 @@ void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		if (!((int)topic == -1 || cli->topics.enabled[topic]))
 			continue;
 
-		if (bbdd_util_jrpc_send(&cli->sock, msg) != 0)
-			bbdd_mon_unsubscribe(mon, cli);
+		switch (cli->kind) {
+		case BBDD_MON_CLI_KIND_SOCK:
+			if (bbdd_util_jrpc_send(&cli->sock, msg) != 0)
+				bbdd_mon_unsubscribe(mon, cli);
+			break;
+
+		case BBDD_MON_CLI_KIND_CB:
+			cli->cb(msg, cli->data);
+			break;
+		}
 	}
 }
 
