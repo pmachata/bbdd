@@ -78,6 +78,7 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 }
 
 struct bbdd_d {
+	struct bbdd_poll_ctx *pctx;
 	struct bbdd_bfdd *bfdd;
 	struct bbdd_bpf *bpf;
 	struct bbdd_mon *mon;
@@ -2224,7 +2225,6 @@ static void bbdd_d_bfdd_connect_free_cb(void *data)
 }
 
 static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
-				    struct bbdd_poll_ctx *pctx,
 				    struct bbdd_sock *peer,
 				    struct json_object *id,
 				    const char *path,
@@ -2262,7 +2262,7 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 		.sock_free_cb = NULL,
 	};
 
-	d->bfdd = bbdd_bfdd_open(path, pctx, &cbs, error);
+	d->bfdd = bbdd_bfdd_open(path, d->pctx, &cbs, error);
 	if (d->bfdd == NULL) {
 		rc = -ENOMEM;
 		goto cctx_free;
@@ -2276,7 +2276,6 @@ cctx_free:
 }
 
 static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
-				       struct bbdd_poll_ctx *pctx,
 				       struct bbdd_sock *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id)
@@ -2322,7 +2321,7 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 	if (port != NULL)
 		return __bbdd_d_respond_invalid_params(peer, id, "`unix' address schema doesn't support ports");
 
-	rc = bbdd_d_bfdd_connect_unix(d, pctx, peer, id, addr, &error);
+	rc = bbdd_d_bfdd_connect_unix(d, peer, id, addr, &error);
 	if (rc < 0)
 		return bbdd_d_respond_interr(peer, id, &error);
 
@@ -2446,15 +2445,14 @@ static void bbdd_d_handle_monitor_subscribe(struct bbdd_d *d,
 	bbdd_d_respond_empty(peer, id);
 }
 
-static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
-				 struct bbdd_d *d,
+static void bbdd_d_handle_method(struct bbdd_d *d,
 				 struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
 				 struct json_object *id)
 {
 	if (strcmp(method, "stop") == 0)
-		bbdd_d_handle_stop(pctx, peer, params_obj, id);
+		bbdd_d_handle_stop(d->pctx, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "global-stats-diag") == 0)
@@ -2472,7 +2470,7 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_d_handle_session_stats(d, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-connect") == 0)
-		bbdd_d_handle_bfdd_connect(d, pctx, peer, params_obj, id);
+		bbdd_d_handle_bfdd_connect(d, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-connected") == 0)
 		bbdd_d_handle_bfdd_connected(d, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
@@ -2483,7 +2481,7 @@ static void bbdd_d_handle_method(struct bbdd_poll_ctx *pctx,
 		__bbdd_d_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx, struct bbdd_d *d)
+static void bbdd_d_ctl_activity(struct bbdd_d *d)
 {
 	struct json_object *request_obj;
 	struct json_object *params;
@@ -2514,7 +2512,7 @@ static void bbdd_d_ctl_activity(struct bbdd_poll_ctx *pctx, struct bbdd_d *d)
 		goto put_req_obj;
 	}
 
-	bbdd_d_handle_method(pctx, d, &peer, method, params, id);
+	bbdd_d_handle_method(d, &peer, method, params, id);
 
 put_req_obj:
 	json_object_put(request_obj);
@@ -2527,7 +2525,7 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 {
 	struct bbdd_d *d = arg;
 
-	bbdd_d_ctl_activity(pctx, d);
+	bbdd_d_ctl_activity(d);
 	return 0;
 }
 
@@ -2766,7 +2764,6 @@ static void bbdd_d_mon_send_monitor_end(struct bbdd_mon *mon)
 static int bbdd_d_do_start(void)
 {
 	struct bbdd_d d = {};
-	struct bbdd_poll_ctx *pctx;
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
@@ -2784,8 +2781,8 @@ static int bbdd_d_do_start(void)
 		goto closelog;
 	}
 
-	pctx = bbdd_poll_init();
-	if (pctx == NULL)
+	d.pctx = bbdd_poll_init();
+	if (d.pctx == NULL)
 		goto nl_destroy;
 
 	d.sdir = bbdd_sess_dir_create();
@@ -2814,7 +2811,7 @@ static int bbdd_d_do_start(void)
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
 
-	d.bpf = bbdd_bpf_create(pctx, d.nl, &bpf_conf, d.sdir, d.mon, &error);
+	d.bpf = bbdd_bpf_create(d.pctx, d.nl, &bpf_conf, d.sdir, d.mon, &error);
 	if (d.bpf == NULL) {
 		bbdd_util_printerr(&error,  "Failed to initialize BPF");
 		goto fini_veth;
@@ -2824,20 +2821,20 @@ static int bbdd_d_do_start(void)
 	if (err != 0)
 		goto bpf_destroy;
 
-	err = bbdd_poll_set_fd(pctx, d.ctl.fd, POLLIN,
+	err = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
 			       bbdd_d_ctl_recv, &d, &error);
 	if (err != 0) {
 		bbdd_util_printerr(&error, "Failed to register socket for events");
 		goto sock_close_d;
 	}
 
-	err = bbdd_poll_set_signals(pctx, &error);
+	err = bbdd_poll_set_signals(d.pctx, &error);
 	if (err != 0) {
 		bbdd_util_printerr(&error, "Failed to set up signal handling");
 		goto sock_close_d;
 	}
 
-	err = bbdd_poll_loop(pctx, &error);
+	err = bbdd_poll_loop(d.pctx, &error);
 	if (err != 0)
 		bbdd_util_printerr(&error, NULL);
 
@@ -2846,7 +2843,7 @@ static int bbdd_d_do_start(void)
 	if (d.bfdd != NULL)
 		bbdd_bfdd_close(d.bfdd);
 
-	bbdd_poll_unset_signals(pctx);
+	bbdd_poll_unset_signals(d.pctx);
 sock_close_d:
 	bbdd_sock_close_d(&d.ctl);
 bpf_destroy:
@@ -2858,7 +2855,7 @@ mon_fini:
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(d.sdir);
 poll_fini:
-	bbdd_poll_fini(pctx);
+	bbdd_poll_fini(d.pctx);
 nl_destroy:
 	bbdd_nl_destroy(d.nl);
 closelog:
