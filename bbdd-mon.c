@@ -86,7 +86,7 @@ static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
 
 bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic)
 {
-	return mon->active[topic] > 0;
+	return bbdd_env.mon_eager || mon->active[topic] > 0;
 }
 
 void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,

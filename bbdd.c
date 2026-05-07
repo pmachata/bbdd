@@ -69,6 +69,7 @@ int main(int argc, char **argv)
 	enum {
 		opt_sockaddr = 257,
 		opt_json,
+		opt_debug,
 	};
 	static const struct option long_options[] = {
 		{ "help",	no_argument,	   NULL, 'h' },
@@ -78,6 +79,7 @@ int main(int argc, char **argv)
 		{ "verbose",	no_argument,	   NULL, 'v' },
 		{ "version",	no_argument,	   NULL, 'V' },
 		{ "sockdir",	required_argument, NULL, opt_sockaddr },
+		{ "debug",	required_argument, NULL, opt_debug },
 		{ NULL, 0, NULL, 0 }
 	};
 	int opt;
@@ -110,6 +112,15 @@ int main(int argc, char **argv)
 			break;
 		case 't':
 			bbdd_env.timestamp = true;
+			break;
+		case opt_debug:
+			if (strcmp(optarg, "mon-eager") == 0) {
+				bbdd_env.mon_eager = true;
+			} else {
+				fprintf(stderr, "Unknown --debug value: %s\n",
+					optarg);
+				return EXIT_FAILURE;
+			}
 			break;
 		default:
 			fprintf(stderr, "Unknown option.\n");

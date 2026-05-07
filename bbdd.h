@@ -23,6 +23,7 @@ extern struct bbdd_env {
 	bool show_json;
 	bool numeric;
 	bool timestamp;
+	bool mon_eager;
 } bbdd_env;
 
 /* bbdd-bpf.c */
