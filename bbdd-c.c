@@ -2888,21 +2888,18 @@ static bool bbdd_c_monitor_enable_topic(struct bbdd_mon_topics *topics,
 #undef MATCH_TOPIC
 }
 
-int bbdd_c_monitor(int argc, char **argv)
+int bbdd_c_monitor_parse_topics(int argc, char **argv,
+				struct bbdd_mon_topics *topics)
 {
-	struct bbdd_mon_topics topics = {};
 	bool have_topics = false;
 
 	while (argc > 0) {
-		if (strcmp(*argv, "help") == 0) {
-			bbdd_c_monitor_help();
-			return 0;
-		} else if (strcmp(*argv, "all") == 0) {
+		if (strcmp(*argv, "all") == 0) {
 			have_topics = true;
-			bbdd_c_monitor_enable_all(&topics);
+			bbdd_c_monitor_enable_all(topics);
 		} else {
 			have_topics = true;
-			if (!bbdd_c_monitor_enable_topic(&topics, *argv)) {
+			if (!bbdd_c_monitor_enable_topic(topics, *argv)) {
 				fprintf(stderr, "What is \"%s\"?\n", *argv);
 				return -1;
 			}
@@ -2911,7 +2908,38 @@ int bbdd_c_monitor(int argc, char **argv)
 	}
 
 	if (!have_topics)
-		bbdd_c_monitor_enable_all(&topics);
+		bbdd_c_monitor_enable_all(topics);
+
+	return 0;
+}
+
+void bbdd_c_monitor_dispatch(struct json_object *msg, void *)
+{
+	struct json_object *params;
+	const char *method;
+	char *error;
+	int err;
+
+	err = bbdd_jrpc_dissect_notif(msg, &method, &params, &error);
+	if (err) {
+		bbdd_util_printerr(&error, "Failed to dissect monitor event");
+		return;
+	}
+
+	bbdd_c_monitor_handle_notif(method, params);
+}
+
+int bbdd_c_monitor(int argc, char **argv)
+{
+	struct bbdd_mon_topics topics = {};
+
+	if (argc > 0 && strcmp(*argv, "help") == 0) {
+		bbdd_c_monitor_help();
+		return 0;
+	}
+
+	if (bbdd_c_monitor_parse_topics(argc, argv, &topics) < 0)
+		return -1;
 
 	return bbdd_c_monitor_jrpc(topics);
 }

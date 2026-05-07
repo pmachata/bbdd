@@ -2882,7 +2882,7 @@ static void bbdd_d_mon_send_monitor_end(struct bbdd_mon *mon)
 	json_object_put(notif);
 }
 
-static int bbdd_d_do_start(void)
+static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 {
 	struct bbdd_d d = {};
 	uint32_t veth_rx_ifindex;
@@ -2916,6 +2916,13 @@ static int bbdd_d_do_start(void)
 	if (d.mon == NULL) {
 		fprintf(stderr, "Failed to create monitoring message bus: %m\n");
 		goto sess_dir_destroy;
+	}
+
+	err = bbdd_mon_subscribe_cb(d.mon, bbdd_c_monitor_dispatch, NULL,
+				    topics, &error);
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to subscribe to monitor");
+		goto mon_fini;
 	}
 
 	err = bbdd_d_start_init_veth(d.nl,
@@ -2986,9 +2993,21 @@ closelog:
 
 int bbdd_d_start(int argc, char **argv)
 {
+	struct bbdd_mon_topics topics = {};
+
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
-		fprintf(stderr, "Usage: bbdd start\n");
+		fprintf(stderr, "Usage: bbdd start [monitor [topics...]]\n");
 		return 0;
+	}
+
+	if (argc > 0 && strcmp(*argv, "monitor") == 0) {
+		int rc;
+
+		NEXT_ARG_FWD();
+		rc = bbdd_c_monitor_parse_topics(argc, argv, &topics);
+		if (rc != 0)
+			return rc;
+		return bbdd_d_do_start(topics);
 	}
 
 	if (argc > 0) {
@@ -2996,5 +3015,6 @@ int bbdd_d_start(int argc, char **argv)
 		return -1;
 	}
 
-	return bbdd_d_do_start();
+	topics.enabled[BBDD_MON_TOPIC_error] = true;
+	return bbdd_d_do_start(topics);
 }

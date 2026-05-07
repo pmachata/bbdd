@@ -33,6 +33,7 @@ struct bbdd_bpf;
 /* bbdd-mon.c */
 
 struct bbdd_mon;
+struct bbdd_mon_topics;
 
 /* bbdd-c.c */
 
@@ -42,6 +43,9 @@ int bbdd_c_session(int argc, char **argv);
 int bbdd_c_global(int argc, char **argv);
 int bbdd_c_bfdd(int argc, char **argv);
 int bbdd_c_monitor(int argc, char **argv);
+int bbdd_c_monitor_parse_topics(int argc, char **argv,
+				struct bbdd_mon_topics *topics);
+void bbdd_c_monitor_dispatch(struct json_object *msg, void *data);
 
 #define BBDD_C_SESSION_FLAGS(X)		\
 	X(MULTIHOP, multihop)		\
