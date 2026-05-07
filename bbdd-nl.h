@@ -22,6 +22,9 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error);
 int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		      uint32_t ifindex, uint32_t parent,
 		      uint16_t handle, const char *kind, char **error);
+int bbdd_nl_add_qdisc_fq(struct bbdd_nl *nl,
+			 uint32_t ifindex, uint32_t parent, uint32_t handle,
+			 char **error);
 
 uint32_t bbdd_nl_tc_h_root(void);
 

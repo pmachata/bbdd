@@ -2808,8 +2808,7 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 		parent = ((uint32_t) bbdd_d_veth_tx_mq_handle << 16) |
 			(uint32_t)(cpu + 1);
 
-		err = bbdd_nl_add_qdisc(nl, ifindex, parent,
-					0, "fq", error);
+		err = bbdd_nl_add_qdisc_fq(nl, ifindex, parent, 0, error);
 		if (err)
 			return err;
 

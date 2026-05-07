@@ -326,9 +326,11 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 	return 0;
 }
 
-int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
-		      uint32_t ifindex, uint32_t parent,
-		      uint16_t handle, const char *kind, char **error)
+static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
+			       uint32_t ifindex, uint32_t parent,
+			       uint16_t handle, const char *kind,
+			       void (*fill_ats_cb)(struct nlmsghdr *nlh),
+			       char **error)
 {
 	struct nlmsghdr *nlh;
 	struct tcmsg *tc;
@@ -348,6 +350,9 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 
 	mnl_attr_put_strz(nlh, TCA_KIND, kind);
 
+	if (fill_ats_cb != NULL)
+		fill_ats_cb(nlh);
+
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
 		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
@@ -365,6 +370,30 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 	}
 
 	return 0;
+}
+
+int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
+		      uint32_t ifindex, uint32_t parent, uint16_t handle,
+		      const char *kind, char **error)
+{
+	return __bbdd_nl_add_qdisc(nl, ifindex, parent, handle, kind, NULL,
+				   error);
+}
+
+static void bbdd_nl_add_qdisc_fq_fill_ats(struct nlmsghdr *nlh)
+{
+	struct nlattr *opts = mnl_attr_nest_start(nlh, TCA_OPTIONS);
+
+	mnl_attr_put_u32(nlh, TCA_FQ_ORPHAN_MASK, 0xffffffff);
+	mnl_attr_nest_end(nlh, opts);
+}
+
+int bbdd_nl_add_qdisc_fq(struct bbdd_nl *nl,
+			 uint32_t ifindex, uint32_t parent, uint32_t handle,
+			 char **error)
+{
+	return __bbdd_nl_add_qdisc(nl, ifindex, parent, handle, "fq",
+				   bbdd_nl_add_qdisc_fq_fill_ats, error);
 }
 
 uint32_t bbdd_nl_tc_h_root(void)
