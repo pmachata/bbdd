@@ -12,6 +12,8 @@
 #include <json-c/linkhash.h>
 
 #include "bbdd.h"
+#include "bbdd-bfdd.h"
+#include "bbdd-br.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
@@ -31,8 +33,6 @@ struct bbdd_c_session_state {
 	struct bbdd_d_session_data_timing poll_timing;	bool poll_timing_seen;
 	bool qd_timing;					bool qd_timing_seen;
 };
-
-#define BBDD_D_DEFAULT_DPLANEADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
 static bool bbdd_c_validate_id(struct json_object *id_obj, int expect_id)
 {
@@ -2008,7 +2008,7 @@ static void bbdd_c_bfdd_connect_help(void)
 	fprintf(stderr, "%s",
 		"Usage: bbdd bfdd connect [TYPE:ADDRESS[:PORT]]\n"
 		"TYPE ::= {ipv4 | ipv6 | unix}\n"
-		"Default connect address is `" BBDD_D_DEFAULT_DPLANEADDR "'.\n"
+		"Default connect address is `" BBDD_BFDD_DEFAULT_ADDR "'.\n"
 		"\n"
 	);
 }
@@ -2024,7 +2024,7 @@ static int bbdd_c_bfdd_connect(int argc, char **argv)
 	int rc;
 
 	if (!argc) {
-		arg = BBDD_D_DEFAULT_DPLANEADDR;
+		arg = BBDD_BFDD_DEFAULT_ADDR;
 	} else if (strcmp(*argv, "help") == 0) {
 		bbdd_c_bfdd_connect_help();
 		return 0;
@@ -2140,7 +2140,7 @@ put_request:
 static void bbdd_c_bfdd_help(void)
 {
 	fprintf(stderr,
-		"Usage: bbdd bfdd { connect | connected | disconnect | help }\n"
+		"Usage: bbdd bfdd { bridge | connect | connected | disconnect | help }\n"
 		"\n"
 	);
 }
@@ -2150,6 +2150,18 @@ int bbdd_c_bfdd(int argc, char **argv)
 	if (!argc || strcmp(*argv, "help") == 0) {
 		bbdd_c_bfdd_help();
 		return 0;
+	} else if (strcmp(*argv, "bridge") == 0) {
+		NEXT_ARG_FWD();
+		if (!argc || strcmp(*argv, "help") == 0) {
+			fprintf(stderr,
+				"Usage: bbdd bfdd bridge { start | help }\n\n");
+			return 0;
+		} else if (strcmp(*argv, "start") == 0) {
+			NEXT_ARG_FWD();
+			return bbdd_br_start(argc, argv);
+		}
+		fprintf(stderr, "What is \"%s\"?\n", *argv);
+		return -1;
 	} else if (strcmp(*argv, "connect") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd_connect(argc, argv);

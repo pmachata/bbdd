@@ -14,12 +14,14 @@ struct bbdd_prog_session_data_stats;
 /* bbdd-poll.c */
 struct bbdd_poll_ctx;
 
-/* bbdd-bfdd.c */
-struct bbdd_bfdd;
-
 /* bfddp_packet.h */
 struct bfddp_message;
 struct bfddp_session_cumulus;
+
+/* bbdd-bfdd.c */
+struct bbdd_bfdd;
+
+#define BBDD_BFDD_DEFAULT_ADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
 struct bbdd_bfdd_cbs {
 	void *conn_cb_data;

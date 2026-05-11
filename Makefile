@@ -29,6 +29,7 @@ bbdd-OBJECTS :=					\
 	$(OUTPUT)/bbdd.o			\
 	$(OUTPUT)/bbdd-bfdd.o			\
 	$(OUTPUT)/bbdd-bpf.o			\
+	$(OUTPUT)/bbdd-br.o			\
 	$(OUTPUT)/bbdd-c.o			\
 	$(OUTPUT)/bbdd-d.o			\
 	$(OUTPUT)/bbdd-jrpc.o			\
