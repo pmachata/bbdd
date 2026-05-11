@@ -2040,20 +2040,14 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 					     discrs, ndiscrs);
 }
 
-static int
-bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
-				   const struct bfddp_session_cumulus *fsess,
-				   char **error)
+static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
+					      struct bbdd_c_session *csess,
+					      char **error)
 {
 	struct bbdd_d_session *dsess;
-	struct bbdd_c_session csess;
 	uint32_t discr;
 	bool changed;
 	int rc;
-
-	rc = bbdd_bfdd_session_to_c(fsess, &csess, error);
-	if (rc != 0)
-		goto interr;
 
 	/* We wouldn't mind getting a zero discr and allocating ourselves, but
 	 * it's not clear how it should work. We are getting a message that a
@@ -2061,29 +2055,29 @@ bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	 * and has a discriminator assigned. Even if it didn't, there's no
 	 * mechanism to report back to bfdd what value we assigned. So best to
 	 * just expect the value to be given. */
-	if (!csess.discr_seen) {
+	if (!csess->discr_seen) {
 		bbdd_util_fmterr(error, "missing local discriminator");
 		rc = -EINVAL;
 		goto invalid;
 	}
-	discr = csess.discr;
+	discr = csess->discr;
 
-	if (csess.netif.ifindex_seen || csess.netif.name_seen) {
-		rc = bbdd_d_session_validate_netif(&csess.netif, error);
+	if (csess->netif.ifindex_seen || csess->netif.name_seen) {
+		rc = bbdd_d_session_validate_netif(&csess->netif, error);
 		if (rc != 0)
 			goto invalid;
 	}
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		rc = bbdd_d_session_add(d, &csess, error);
+		rc = bbdd_d_session_add(d, csess, error);
 		if (rc != 0)
 			goto no_session;
 		return 0;
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, &csess, d->nl, &changed, error);
+	rc = bbdd_d_session_apply_c(dsess, csess, d->nl, &changed, error);
 	if (rc != 0)
 		goto interr;
 
@@ -2115,34 +2109,16 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 					  const struct bfddp_message *msg,
 					  char **error)
 {
-	uint16_t length = ntohs(msg->header.length);
-	enum {
-		std_len = (sizeof(msg->header) +
-			   sizeof(msg->data.session)),
-		cml_len = (sizeof(msg->header) +
-			   sizeof(msg->data.session_cumulus)),
-	};
+	struct bbdd_c_session csess;
+	int rc;
 
-	switch (length) {
-		struct bfddp_session_cumulus session_cumulus;
-		const struct bfddp_session_cumulus *ptr;
+	rc = bbdd_bfdd_session_msg_to_c(msg, &csess, error);
+	if (rc == -EMSGSIZE)
+		++d->diag_stats.dp_invalid_message_length;
+	if (rc != 0)
+		return -1;
 
-	case std_len:
-		session_cumulus = (struct bfddp_session_cumulus) {
-			.session = msg->data.session,
-		};
-		return bbdd_d_bfdd_handle_add_session_vrf(d, &session_cumulus,
-							  error);
-
-	case cml_len:
-		ptr = &msg->data.session_cumulus;
-		return bbdd_d_bfdd_handle_add_session_vrf(d, ptr, error);
-	}
-
-	++d->diag_stats.dp_invalid_message_length;
-	bbdd_util_fmterr(error, "DP_ADD_SESSION: Invalid length: got %u, expected %u or %u",
-			 length, std_len, cml_len);
-	return -1;
+	return bbdd_d_bfdd_handle_add_session_vrf(d, &csess, error);
 }
 
 static int

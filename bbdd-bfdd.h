@@ -44,6 +44,6 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 			     char **error);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
-int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *fsess,
-			   struct bbdd_c_session *csess,
-			   char **error);
+int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
+			       struct bbdd_c_session *csess,
+			       char **error);

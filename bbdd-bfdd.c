@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 #include "bbdd-bfdd.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdbool.h>
@@ -304,9 +305,9 @@ static int bbdd_bfdd_session_to_c_addr(struct bbdd_c_session_addr *to,
 	return 0;
 }
 
-int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
-			   struct bbdd_c_session *csess,
-			   char **error)
+static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
+				  struct bbdd_c_session *csess,
+				  char **error)
 {
 	const struct bfddp_session *fsess = &cmsess->session;
 	uint32_t flags = ntohl(fsess->flags);
@@ -416,4 +417,39 @@ int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	}
 
 	return 0;
+}
+
+int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
+			       struct bbdd_c_session *csess,
+			       char **error)
+{
+	enum {
+		std_len = (sizeof(msg->header) +
+			   sizeof(msg->data.session)),
+		cml_len = (sizeof(msg->header) +
+			   sizeof(msg->data.session_cumulus)),
+	};
+	uint16_t length = ntohs(msg->header.length);
+	enum bfddp_message_type bmt;
+
+	bmt = ntohs(msg->header.type);
+	assert(bmt == DP_ADD_SESSION);
+
+	switch (length) {
+		struct bfddp_session_cumulus session_cumulus;
+
+	case std_len:
+		session_cumulus = (struct bfddp_session_cumulus) {
+			.session = msg->data.session,
+		};
+		return bbdd_bfdd_session_to_c(&session_cumulus, csess, error);
+
+	case cml_len:
+		return bbdd_bfdd_session_to_c(&msg->data.session_cumulus,
+					      csess, error);
+	}
+
+	bbdd_util_fmterr(error, "DP_ADD_SESSION: Invalid length: got %u, expected %u or %u",
+			 length, std_len, cml_len);
+	return -EMSGSIZE;
 }
