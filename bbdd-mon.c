@@ -173,6 +173,8 @@ static void bbdd_mon_send_msg(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 	struct json_object *params;
 	struct json_object *obj;
 
+	assert((int)topic != -1);
+
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
@@ -254,4 +256,16 @@ out:
 	free(str);
 	free(*error);
 	*error = NULL;
+}
+
+void bbdd_mon_send_monitor_end(struct bbdd_mon *mon)
+{
+	struct json_object *notif;
+
+	notif = bbdd_jrpc_new_notif("monitor-end");
+	if (notif == NULL)
+		return;
+
+	__bbdd_mon_send(mon, notif, (enum bbdd_mon_topic) -1);
+	json_object_put(notif);
 }
