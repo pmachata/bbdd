@@ -20,15 +20,11 @@ struct bbdd_mon;
 
 #define BBDD_MON_ENUM(NAME, ALL) BBDD_MON_TOPIC_ ## NAME,
 enum bbdd_mon_topic {
+	BBDD_MON_TOPIC_monitor,
 	BBDD_MON_TOPICS(BBDD_MON_ENUM)
+	bbdd_mon_ntopics
 };
 #undef BBDD_MON_ENUM
-
-#define BBDD_MON_PLUS1(NAME, ALL) +1
-enum {
-	bbdd_mon_ntopics = BBDD_MON_TOPICS(BBDD_MON_PLUS1)
-};
-#undef BBDD_MON_PLUS1
 
 struct bbdd_mon_topics {
 	bool enabled[bbdd_mon_ntopics];

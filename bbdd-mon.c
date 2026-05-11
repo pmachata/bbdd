@@ -92,6 +92,7 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 {
 	struct bbdd_mon_cli *cli;
 
+	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL)
 		return -1;
@@ -107,6 +108,7 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 {
 	struct bbdd_mon_cli *cli;
 
+	topics.enabled[BBDD_MON_TOPIC_monitor] = false;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL)
 		return -1;
@@ -139,7 +141,7 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 	struct bbdd_mon_cli *tmp;
 
 	DL_FOREACH_SAFE(mon->head, cli, tmp) {
-		if (!((int)topic == -1 || cli->topics.enabled[topic]))
+		if (!cli->topics.enabled[topic])
 			continue;
 
 		switch (cli->kind) {
@@ -155,15 +157,9 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 	}
 }
 
-void bbdd_mon_broadcast(struct bbdd_mon *mon, struct json_object *msg)
-{
-	__bbdd_mon_send(mon, msg, (enum bbdd_mon_topic) -1);
-}
-
 void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 		   enum bbdd_mon_topic topic)
 {
-	assert((int)topic != -1);
 	__bbdd_mon_send(mon, msg, topic);
 }
 
@@ -172,8 +168,6 @@ static void bbdd_mon_send_msg(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 {
 	struct json_object *params;
 	struct json_object *obj;
-
-	assert((int)topic != -1);
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
@@ -260,12 +254,13 @@ out:
 
 void bbdd_mon_send_monitor_end(struct bbdd_mon *mon)
 {
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_monitor;
 	struct json_object *notif;
 
 	notif = bbdd_jrpc_new_notif("monitor-end");
 	if (notif == NULL)
 		return;
 
-	__bbdd_mon_send(mon, notif, (enum bbdd_mon_topic) -1);
+	__bbdd_mon_send(mon, notif, topic);
 	json_object_put(notif);
 }
