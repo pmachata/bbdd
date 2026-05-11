@@ -42,4 +42,35 @@ void bbdd_util_verberr(char **error, const char *fmt, ...);
 
 int bbdd_util_pickerr(int rc1, char **error1, int rc2, char **error2);
 
+/* JRPC helpers. */
+
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
+
+void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj);
+
+void bbdd_util_jrpc_respond_inv_params(struct bbdd_sock *ctl,
+				       struct json_object *id,
+				       const char *msg);
+
+void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_sock *ctl,
+					   struct json_object *id,
+					   char **data);
+
+void bbdd_util_jrpc_respond_interr(struct bbdd_sock *peer,
+				   struct json_object *id,
+				   const char *msg);
+
+void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
+				  struct json_object *id,
+				  char **data);
+
+__attribute__((format(printf, 3, 4)))
+void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
+				  struct json_object *id,
+				  const char *fmt, ...);
+
+void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
+				   struct json_object *id);
+
+void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
+				  struct json_object *id);

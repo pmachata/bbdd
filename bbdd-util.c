@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "bbdd.h"
+#include "bbdd-jrpc.h"
 
 int bbdd_util_vfmterr(char **strp, const char *fmt, va_list ap)
 {
@@ -156,4 +157,90 @@ int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj)
 	if (rc < 0)
 		return -1;
 	return (size_t)rc == len ? 0 : -1;
+}
+
+void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj)
+{
+	if (obj != NULL) {
+		bbdd_util_jrpc_send(ctl, obj);
+		json_object_put(obj);
+	}
+}
+
+void bbdd_util_jrpc_respond_inv_params(struct bbdd_sock *ctl,
+				       struct json_object *id,
+				       const char *msg)
+{
+	bbdd_util_jrpc_respond(ctl, bbdd_jrpc_new_error_inv_params(id, msg));
+}
+
+void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_sock *ctl,
+					   struct json_object *id,
+					   char **data)
+{
+	bbdd_util_jrpc_respond_inv_params(ctl, id, *data);
+	free(*data);
+	*data = NULL;
+}
+
+void bbdd_util_jrpc_respond_interr(struct bbdd_sock *peer,
+				   struct json_object *id,
+				   const char *msg)
+{
+	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_int_error(id, msg));
+}
+
+void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
+				       struct json_object *id,
+				       char **data)
+{
+	bbdd_util_jrpc_respond_interr(peer, id, *data);
+	free(*data);
+	*data = NULL;
+}
+
+__attribute__((format(printf, 3, 4)))
+void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
+				       struct json_object *id,
+				       const char *fmt, ...)
+{
+	char *buf;
+	va_list ap;
+	int rc;
+
+	va_start(ap, fmt);
+	rc = vasprintf(&buf, fmt, ap);
+	va_end(ap);
+
+	if (rc >= 0)
+		return bbdd_util_jrpc_respond_interr_err(peer, id, &buf);
+	else
+		return bbdd_util_jrpc_respond_interr(peer, id, fmt);
+}
+
+void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
+				   struct json_object *id)
+{
+	bbdd_util_jrpc_respond_interr(peer, id, "Memory allocation issue");
+}
+
+void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
+				  struct json_object *id)
+{
+	struct json_object *obj;
+
+	obj = bbdd_jrpc_new_object(id);
+	if (obj == NULL)
+		return;
+
+	if (json_object_object_add(obj, "result", NULL))
+		goto put_obj;
+
+	bbdd_util_jrpc_send(peer, obj);
+	json_object_put(obj);
+	return;
+
+put_obj:
+	json_object_put(obj);
+	bbdd_util_jrpc_respond_memerr(peer, id);
 }
