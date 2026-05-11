@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <json-c/json_object.h>
 
 /* bfddp.h */
 struct bbdd_c_session;
@@ -47,3 +48,6 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,
 			       char **error);
+
+struct json_object *bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
+					     char **error);

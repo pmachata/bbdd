@@ -12,6 +12,7 @@ struct bbdd_mon;
 
 #define BBDD_MON_TOPICS(X)	\
 	X(ringbuf, true)	\
+	X(bfdd,    true)	\
 	X(session, true)	\
 	X(error,   true)	\
 	X(debug,   false)	\

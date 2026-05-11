@@ -2205,6 +2205,25 @@ reply:
 	return bbdd_util_pickerr(rc1, error1, rc2, &error2);
 }
 
+static void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon,
+				 const struct bfddp_message *msg)
+{
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_bfdd;
+	struct json_object *jmsg;
+	char *error;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
+
+	jmsg = bbdd_bfdd_msg_format_mon(msg, &error);
+	if (jmsg == NULL)
+		return bbdd_mon_senderr(mon, &error,
+					"Failed to format bfdd monitor message");
+
+	bbdd_mon_send(mon, jmsg, topic);
+	json_object_put(jmsg);
+}
+
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 				     struct bbdd_bfdd *bfdd,
 				     struct bfddp_message *msg)
@@ -2220,7 +2239,9 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		goto senderr;
 	}
 
-	/* This is called from bbdd-bfdd for individual error messages. When we
+	bbdd_d_bfdd_mon_send(d->mon, msg);
+
+	/* This is called from bbdd-bfdd for individual bfdd messages. When we
 	 * return error, the sockerr callback is called and causes the socket to
 	 * close, but does not shut the daemon down. */
 
