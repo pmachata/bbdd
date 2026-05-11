@@ -74,3 +74,11 @@ void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
 
 void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 				  struct json_object *id);
+
+void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
+			    void (*cb)(struct bbdd_sock *peer,
+				       const char *method,
+				       struct json_object *params_obj,
+				       struct json_object *id,
+				       void *data),
+			    void *data);

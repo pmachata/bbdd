@@ -20,7 +20,6 @@
 
 #include <bpf/libbpf.h>
 #include <json-c/json_object.h>
-#include <json-c/json_tokener.h>
 #include <json-c/json_util.h>
 #include <linux/if_ether.h>
 
@@ -2479,12 +2478,14 @@ static void bbdd_d_handle_unhandled(struct bbdd_sock *peer,
 	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static void bbdd_d_handle_method(struct bbdd_d *d,
-				 struct bbdd_sock *peer,
+static void bbdd_d_handle_method(struct bbdd_sock *peer,
 				 const char *method,
 				 struct json_object *params_obj,
-				 struct json_object *id)
+				 struct json_object *id,
+				 void *data)
 {
+	struct bbdd_d *d = data;
+
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(d->pctx, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
@@ -2515,51 +2516,12 @@ static void bbdd_d_handle_method(struct bbdd_d *d,
 		bbdd_d_handle_unhandled(peer, method, id);
 }
 
-static void bbdd_d_ctl_activity(struct bbdd_d *d)
-{
-	struct json_object *request_obj;
-	struct json_object *params;
-	struct bbdd_sock peer;
-	struct json_object *id;
-	char *request = NULL;
-	const char *method;
-	char *error;
-	int err;
-
-	err = bbdd_sock_recv(&d->ctl, &peer, &request);
-	if (err < 0)
-		return;
-
-	request_obj = json_tokener_parse(request);
-	if (request_obj == NULL) {
-		bbdd_util_jrpc_respond(&peer,
-				       bbdd_jrpc_new_error_inv_request(NULL));
-		goto free_req;
-	}
-
-	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
-					&error);
-	if (err) {
-		bbdd_util_jrpc_respond(&peer,
-				       bbdd_jrpc_new_error_inv_request(error));
-		free(error);
-		goto put_req_obj;
-	}
-
-	bbdd_d_handle_method(d, &peer, method, params, id);
-
-put_req_obj:
-	json_object_put(request_obj);
-free_req:
-	free(request);
-}
-
 static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 			   char **)
 {
 	struct bbdd_d *d = arg;
 
-	bbdd_d_ctl_activity(d);
+	bbdd_util_ctl_activity(&d->ctl, bbdd_d_handle_method, d);
 	return 0;
 }
 

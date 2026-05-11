@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <json-c/json_tokener.h>
+
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
 
@@ -243,4 +245,49 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 put_obj:
 	json_object_put(obj);
 	bbdd_util_jrpc_respond_memerr(peer, id);
+}
+
+void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
+			    void (*cb)(struct bbdd_sock *peer,
+				       const char *method,
+				       struct json_object *params_obj,
+				       struct json_object *id,
+				       void *data),
+			    void *data)
+{
+	struct json_object *request_obj;
+	struct json_object *params;
+	struct bbdd_sock peer;
+	struct json_object *id;
+	char *request = NULL;
+	const char *method;
+	char *error;
+	int err;
+
+	err = bbdd_sock_recv(ctl, &peer, &request);
+	if (err < 0)
+		return;
+
+	request_obj = json_tokener_parse(request);
+	if (request_obj == NULL) {
+		bbdd_util_jrpc_respond(&peer,
+				       bbdd_jrpc_new_error_inv_request(NULL));
+		goto free_req;
+	}
+
+	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
+					&error);
+	if (err) {
+		bbdd_util_jrpc_respond(&peer,
+				       bbdd_jrpc_new_error_inv_request(error));
+		free(error);
+		goto put_req_obj;
+	}
+
+	cb(&peer, method, params, id, data);
+
+put_req_obj:
+	json_object_put(request_obj);
+free_req:
+	free(request);
 }
