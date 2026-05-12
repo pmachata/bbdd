@@ -96,10 +96,10 @@ static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port,
 	return 0;
 }
 
-static int bbdd_sock_parse_addr_unix(const char *sockdir,
-				     const char *addr,
-				     struct bbdd_sockaddr *bsa,
-				     char **error)
+static int bbdd_sock_parse_addrstr_unix(const char *sockdir,
+					const char *addr,
+					struct bbdd_sockaddr *bsa,
+					char **error)
 {
 	const char *maybe_slash = "/";
 	int len;
@@ -292,9 +292,9 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 	return 0;
 }
 
-static int bbdd_sock_parse_addr_ipv4(const char *str_in,
-				     struct bbdd_sockaddr *bsa,
-				     char **error)
+static int bbdd_sock_parse_addrstr_ipv4(const char *str_in,
+					struct bbdd_sockaddr *bsa,
+					char **error)
 {
 	size_t maxlen = INET_ADDRSTRLEN + 6; /* + : + 5-digit port number. */
 	const char *addr;
@@ -317,9 +317,9 @@ static int bbdd_sock_parse_addr_ipv4(const char *str_in,
 	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr, error);
 }
 
-static int bbdd_sock_parse_addr_ipv6(const char *addr,
-				     struct bbdd_sockaddr *bsa,
-				     char **error)
+static int bbdd_sock_parse_addrstr_ipv6(const char *addr,
+					struct bbdd_sockaddr *bsa,
+					char **error)
 {
 	bsa->len = sizeof(bsa->sin6);
 	bsa->sin6.sin6_family = AF_INET6;
@@ -391,16 +391,16 @@ int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 	return bbdd_sock_unsupported_family(af, error);
 }
 
-int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
+int bbdd_sock_parse_addrstr(int af, const char *addr, struct bbdd_sockaddr *bsa,
 			    char **error)
 {
 	switch (af) {
 	case AF_UNIX:
-		return bbdd_sock_parse_addr_unix("", addr, bsa, error);
+		return bbdd_sock_parse_addrstr_unix("", addr, bsa, error);
 	case AF_INET:
-		return bbdd_sock_parse_addr_ipv4(addr, bsa, error);
+		return bbdd_sock_parse_addrstr_ipv4(addr, bsa, error);
 	case AF_INET6:
-		return bbdd_sock_parse_addr_ipv6(addr, bsa, error);
+		return bbdd_sock_parse_addrstr_ipv6(addr, bsa, error);
 	default:
 		return bbdd_sock_unsupported_family(af, error);
 	}
@@ -412,7 +412,7 @@ static int bbdd_ctl_sockaddr(const char *sockdir,
 	char *error;
 	int rc;
 
-	rc = bbdd_sock_parse_addr_unix(sockdir, "bbdd.ctl", ctl_bsa, &error);
+	rc = bbdd_sock_parse_addrstr_unix(sockdir, "bbdd.ctl", ctl_bsa, &error);
 	if (rc != 0)
 		bbdd_util_printerr(&error, "CTL");
 	return rc;
@@ -429,7 +429,7 @@ static int bbdd_cli_sockaddr(const char *sockdir,
 	if (rc < 0)
 		return rc;
 
-	rc = bbdd_sock_parse_addr_unix(sockdir, sockname, cli_bsa, &error);
+	rc = bbdd_sock_parse_addrstr_unix(sockdir, sockname, cli_bsa, &error);
 	if (rc != 0)
 		bbdd_util_printerr(&error, "CLI");
 	free(sockname);

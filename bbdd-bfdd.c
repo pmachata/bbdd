@@ -183,7 +183,7 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 	int rc;
 	int fd;
 
-	rc = bbdd_sock_parse_addr_af(AF_UNIX, path, &sa, error);
+	rc = bbdd_sock_parse_addrstr(AF_UNIX, path, &sa, error);
 	if (rc < 0)
 		return NULL;
 

@@ -1199,7 +1199,7 @@ static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
 
 	} else if (from->af != 0) {
 		*set = true;
-		return bbdd_sock_parse_addr_af(from->af, from->str, to, error);
+		return bbdd_sock_parse_addrstr(from->af, from->str, to, error);
 
 	} else {
 		*set = false;
