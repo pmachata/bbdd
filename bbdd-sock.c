@@ -20,8 +20,6 @@
 
 #include "bbdd-util.h"
 
-#define BBDD_BFDDP_DEFAULT_PORT 50700
-
 static int bbdd_sock_parse_range(const char *str, long long *ret,
 				 long long min, long long max,
 				 const char *what,
