@@ -364,9 +364,11 @@ const char *bbdd_sock_af_to_str(int af)
 	return NULL;
 }
 
-int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
-			       const char **ret_addr, const char **ret_port,
-			       char **error)
+static int __bbdd_sock_split_addr_proto(char *arg, int *ret_af,
+					const char **ret_proto,
+					const char **ret_addr,
+					const char **ret_port,
+					char **error)
 {
 	char *colon;
 	char *rest;
@@ -385,6 +387,7 @@ int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 	af = bbdd_sock_af_from_str(arg, error);
 	if (af < 0)
 		return af;
+	*ret_af = af;
 
 	switch (af) {
 	case AF_UNIX:
@@ -398,6 +401,16 @@ int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 	}
 
 	return bbdd_sock_unsupported_family(af, error);
+}
+
+int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
+			       const char **ret_addr, const char **ret_port,
+			       char **error)
+{
+	int af;
+
+	return __bbdd_sock_split_addr_proto(arg, &af, ret_proto, ret_addr,
+					    ret_port, error);
 }
 
 int bbdd_sock_parse_addrstr(int af, const char *addr, struct bbdd_sockaddr *bsa,
