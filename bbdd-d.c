@@ -2807,7 +2807,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		goto fini_veth;
 	}
 
-	err = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir);
+	err = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
 	if (err != 0)
 		goto bpf_destroy;
 

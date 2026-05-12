@@ -60,12 +60,12 @@ const char *bbdd_sock_af_to_str(int af);
 int bbdd_sock_parse_addrstr(int af, const char *arg, struct bbdd_sockaddr *sa,
 			    char **error);
 
-int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir);
+int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error);
 void bbdd_sock_close_d(struct bbdd_sock *ctl);
 
 int bbdd_sock_open_c(struct bbdd_sock *cli,
 		     struct bbdd_sock *peer,
-		     const char *sockdir);
+		     const char *sockdir, char **error);
 void bbdd_sock_close_c(struct bbdd_sock *cli);
 
 int bbdd_sock_open_raw(sa_family_t family,

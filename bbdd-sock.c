@@ -407,37 +407,32 @@ int bbdd_sock_parse_addrstr(int af, const char *addr, struct bbdd_sockaddr *bsa,
 }
 
 static int bbdd_ctl_sockaddr(const char *sockdir,
-			     struct bbdd_sockaddr *ctl_bsa)
+			     struct bbdd_sockaddr *ctl_bsa, char **error)
 {
-	char *error;
-	int rc;
-
-	rc = bbdd_sock_parse_addrstr_unix(sockdir, "bbdd.ctl", ctl_bsa, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "CTL");
-	return rc;
+	return bbdd_sock_parse_addrstr_unix(sockdir, "bbdd.ctl", ctl_bsa,
+					    error);
 }
 
 static int bbdd_cli_sockaddr(const char *sockdir,
-			     struct bbdd_sockaddr *cli_bsa)
+			     struct bbdd_sockaddr *cli_bsa, char **error)
 {
 	char *sockname;
-	char *error;
 	int rc;
 
 	rc = asprintf(&sockname, "bbdd.cli.%d", getpid());
-	if (rc < 0)
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "%m");
 		return rc;
+	}
 
-	rc = bbdd_sock_parse_addrstr_unix(sockdir, sockname, cli_bsa, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "CLI");
+	rc = bbdd_sock_parse_addrstr_unix(sockdir, sockname, cli_bsa, error);
 	free(sockname);
 	return rc;
 }
 
 static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
-				    int type, struct bbdd_sock *sock)
+				    int type, struct bbdd_sock *sock,
+				    char **error)
 {
 	int fd;
 
@@ -448,7 +443,7 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 
 	fd = socket(bsa->sa.sa_family, type, 0);
 	if (fd < 0) {
-		fprintf(stderr, "Failed to open socket: %m\n");
+		bbdd_util_fmterr(error, "Failed to open socket: %m");
 		return -1;
 	}
 
@@ -467,21 +462,20 @@ static void bbdd_sock_close(struct bbdd_sock *sock)
 }
 
 static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
-			     struct bbdd_sock *sock)
+			     struct bbdd_sock *sock, char **error)
 {
 	int rc;
 
 	if (bsa->sa.sa_family != AF_UNIX)
 		return -1;
 
-	rc = bbdd_sock_open_sa_nobind(bsa, type, sock);
+	rc = bbdd_sock_open_sa_nobind(bsa, type, sock, error);
 	if (rc != 0)
 		return rc;
 
 	rc = bind(sock->fd, &bsa->sa, bsa->len);
 	if (rc < 0) {
-		fprintf(stderr, "Failed to bind socket `%s': %m\n",
-			bsa->sun.sun_path);
+		bbdd_util_fmterr(error, "Failed to bind socket: %m");
 		goto close_sock;
 	}
 
@@ -492,16 +486,16 @@ close_sock:
 	return rc;
 }
 
-int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir)
+int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error)
 {
 	struct bbdd_sockaddr bsa;
 	int rc;
 
-	rc = bbdd_ctl_sockaddr(sockdir, &bsa);
+	rc = bbdd_ctl_sockaddr(sockdir, &bsa, error);
 	if (rc != 0)
 		return rc;
 
-	return bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl);
+	return bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl, error);
 }
 
 void bbdd_sock_close_d(struct bbdd_sock *ctl)
@@ -511,21 +505,22 @@ void bbdd_sock_close_d(struct bbdd_sock *ctl)
 
 int bbdd_sock_open_c(struct bbdd_sock *cli,
 		     struct bbdd_sock *peer,
-		     const char *sockdir)
+		     const char *sockdir,
+		     char **error)
 {
 	struct bbdd_sockaddr ctl_bsa;
 	struct bbdd_sockaddr cli_bsa;
 	int rc;
 
-	rc = bbdd_ctl_sockaddr(sockdir, &ctl_bsa);
+	rc = bbdd_ctl_sockaddr(sockdir, &ctl_bsa, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_cli_sockaddr(sockdir, &cli_bsa);
+	rc = bbdd_cli_sockaddr(sockdir, &cli_bsa, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_sock_open_sa(&cli_bsa, SOCK_DGRAM, cli);
+	rc = bbdd_sock_open_sa(&cli_bsa, SOCK_DGRAM, cli, error);
 	if (rc != 0)
 		return rc;
 
@@ -535,8 +530,8 @@ int bbdd_sock_open_c(struct bbdd_sock *cli,
 	};
 	rc = connect(peer->fd, &peer->sa.sa, peer->sa.len);
 	if (rc != 0) {
-		fprintf(stderr, "Failed to connect to socket `%s': %m\n",
-			peer->sa.sun.sun_path);
+		bbdd_util_fmterr(error, "Failed to connect to socket `%s': %m",
+				 peer->sa.sun.sun_path);
 		goto close_cli;
 	}
 

@@ -159,11 +159,12 @@ static struct json_object *bbdd_c_send_request(struct json_object *request)
 	struct json_object *response_obj = NULL;
 	struct bbdd_sock peer;
 	struct bbdd_sock cli;
+	char *error;
 	int err;
 
-	err = bbdd_sock_open_c(&cli, &peer, bbdd_env.sockdir);
+	err = bbdd_sock_open_c(&cli, &peer, bbdd_env.sockdir, &error);
 	if (err < 0) {
-		fprintf(stderr, "Failed to open a socket: %m\n");
+		bbdd_util_printerr(&error, "Failed to open a socket");
 		return NULL;
 	}
 
@@ -2808,9 +2809,9 @@ static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
 	char *error;
 	int err;
 
-	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir);
+	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir, &error);
 	if (err < 0) {
-		fprintf(stderr, "Failed to open socket: %m\n");
+		bbdd_util_fmterr(&error, "Failed to open socket");
 		return -1;
 	}
 
