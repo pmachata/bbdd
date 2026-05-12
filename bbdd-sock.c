@@ -468,7 +468,7 @@ static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 {
 	int rc;
 
-	if (bsa->sa.sa_family != AF_LOCAL)
+	if (bsa->sa.sa_family != AF_UNIX)
 		return -1;
 
 	unlink(bsa->sun.sun_path);
