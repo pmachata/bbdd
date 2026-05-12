@@ -290,21 +290,32 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 	return 0;
 }
 
+/* strdupa(), but bound the size reasonably. */
+#define bbdd_sock_strdupa(STR, ERROR)					\
+	({								\
+		/* something://[<INET6_ADDRSTRLEN>]:<5-digit-PORT> */	\
+		size_t len = INET6_ADDRSTRLEN + sizeof "something://[]:" + 5; \
+		const char *str = (STR);				\
+		char *ret = NULL;					\
+		if (strlen(str) > len)					\
+			bbdd_util_fmterr((ERROR), "IPv address too long"); \
+		else							\
+			ret = strdupa(str);				\
+		ret;							\
+	})
+
 static int bbdd_sock_parse_addrstr_ipv4(const char *str_in,
 					struct bbdd_sockaddr *bsa,
 					char **error)
 {
-	size_t maxlen = INET_ADDRSTRLEN + 6; /* + : + 5-digit port number. */
 	const char *addr;
 	char *copy;
 	int rc;
 
-	if (strlen(str_in) > maxlen) {
-		bbdd_util_fmterr(error, "IPv4 address+port too long");
-		return -EINVAL;
-	}
+	copy = bbdd_sock_strdupa(str_in, error);
+	if (copy == NULL)
+		return -1;
 
-	copy = strdupa(str_in);
 	rc = bbdd_sock_split_addr_ipv4(copy, false, &addr, NULL, error);
 	if (rc < 0)
 		return rc;
