@@ -141,6 +141,12 @@ int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 	return -1;
 }
 
+static int bbdd_sock_unsupported_family(int af, char **error)
+{
+	bbdd_util_fmterr(error, "Unsupported address family %d", af);
+	return -1;
+}
+
 const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 				  size_t *size, char **error)
 {
@@ -157,7 +163,7 @@ const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 		return &sa->sin6.sin6_addr;
 	case AF_UNIX:
 	default:
-		bbdd_util_fmterr(error, "Invalid address family `%d'", af);
+		bbdd_sock_unsupported_family(af, error);
 		return NULL;
 	}
 }
@@ -389,8 +395,7 @@ int bbdd_sock_split_addr_proto(char *arg, const char **ret_proto,
 						      error);
 	}
 
-	bbdd_util_fmterr(error, "unhandled address family `%d'", af);
-	return -1;
+	return bbdd_sock_unsupported_family(af, error);
 }
 
 int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
@@ -403,10 +408,9 @@ int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
 		return bbdd_sock_parse_addr_ipv4(addr, false, bsa, error);
 	case AF_INET6:
 		return bbdd_sock_parse_addr_ipv6(addr, bsa, error);
+	default:
+		return bbdd_sock_unsupported_family(af, error);
 	}
-
-	bbdd_util_fmterr(error, "Unsupported address family %d", af);
-	return -1;
 }
 
 static int bbdd_ctl_sockaddr(const char *sockdir,
