@@ -251,7 +251,8 @@ static int bbdd_sock_split_addr_ipv4(char *addr, bool allow_port,
 	}
 
 	*ret_addr = addr;
-	*ret_port = port;
+	if (ret_port != NULL)
+		*ret_port = port;
 	return 0;
 }
 
@@ -291,14 +292,12 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 	return 0;
 }
 
-static int bbdd_sock_parse_addr_ipv4(const char *str_in, bool allow_port,
+static int bbdd_sock_parse_addr_ipv4(const char *str_in,
 				     struct bbdd_sockaddr *bsa,
 				     char **error)
 {
-	uint16_t port_num = BBDD_BFDDP_DEFAULT_PORT;
 	size_t maxlen = INET_ADDRSTRLEN + 6; /* + : + 5-digit port number. */
 	const char *addr;
-	const char *port;
 	char *copy;
 	int rc;
 
@@ -308,19 +307,13 @@ static int bbdd_sock_parse_addr_ipv4(const char *str_in, bool allow_port,
 	}
 
 	copy = strdupa(str_in);
-	rc = bbdd_sock_split_addr_ipv4(copy, allow_port, &addr, &port, error);
+	rc = bbdd_sock_split_addr_ipv4(copy, false, &addr, NULL, error);
 	if (rc < 0)
 		return rc;
 
-	if (port != NULL) {
-		rc = bbdd_sock_parse_port(port, &port_num, error);
-		if (rc != 0)
-			return rc;
-	}
-
 	bsa->len = sizeof(bsa->sin);
 	bsa->sin.sin_family = AF_INET;
-	bsa->sin.sin_port = htons(port_num);
+	bsa->sin.sin_port = 0;
 	return bbdd_inet_pton(AF_INET, addr, &bsa->sin.sin_addr, error);
 }
 
@@ -405,7 +398,7 @@ int bbdd_sock_parse_addr_af(int af, const char *addr, struct bbdd_sockaddr *bsa,
 	case AF_UNIX:
 		return bbdd_sock_parse_addr_unix("", addr, bsa, error);
 	case AF_INET:
-		return bbdd_sock_parse_addr_ipv4(addr, false, bsa, error);
+		return bbdd_sock_parse_addr_ipv4(addr, bsa, error);
 	case AF_INET6:
 		return bbdd_sock_parse_addr_ipv6(addr, bsa, error);
 	default:
