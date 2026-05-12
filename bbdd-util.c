@@ -93,7 +93,8 @@ static void bbdd_util_vprinterr(char **error, const char *fmt, va_list ap)
 		vfprintf(stderr, fmt, ap);
 
 	if (*error) {
-		fprintf(stderr, ": %s\n", *error);
+		fprintf(stderr, "%s%s\n",
+			fmt != NULL ? ": " : "", *error);
 		free(*error);
 	}
 }
