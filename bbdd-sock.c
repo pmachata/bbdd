@@ -441,6 +441,9 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 {
 	int fd;
 
+	if (bsa->sa.sa_family == AF_UNIX)
+		unlink(bsa->sun.sun_path);
+
 	*sock = (struct bbdd_sock) { .fd = -1 };
 
 	fd = socket(bsa->sa.sa_family, type, 0);
@@ -470,8 +473,6 @@ static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 
 	if (bsa->sa.sa_family != AF_UNIX)
 		return -1;
-
-	unlink(bsa->sun.sun_path);
 
 	rc = bbdd_sock_open_sa_nobind(bsa, type, sock);
 	if (rc != 0)
