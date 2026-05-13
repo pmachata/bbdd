@@ -238,10 +238,20 @@ bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd)
 	return bfddp_is_connected(bfdd->bctx) == 0;
 }
 
-void bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
-			     const struct bfddp_message *msg)
+static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
+				   const struct bfddp_message *msg,
+				   char **error)
 {
-	bfddp_write_enqueue(bfdd->bctx, msg);
+	size_t written;
+
+	/* returns 0 on full buffer or the number of bytes buffered. */
+	written = bfddp_write_enqueue(bfdd->bctx, msg);
+	if (written == 0) {
+		bbdd_util_fmterr(error, "bfdd: Buffer full");
+		return -1;
+	}
+
+	return 0;
 }
 
 int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
@@ -250,7 +260,6 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 			     char **error)
 {
 	struct bfddp_message msg;
-	size_t written;
 
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
@@ -269,14 +278,8 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 		},
 	};
 
-	/* returns 0 on full buffer or the number of bytes buffered. */
-	written = bfddp_write_enqueue(bfdd->bctx, &msg);
-	if (written == 0) {
-		bbdd_util_fmterr(error, "bfdd: Buffer full");
-		return -1;
-	}
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 
-	return 0;
 }
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
