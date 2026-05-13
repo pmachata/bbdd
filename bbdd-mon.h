@@ -30,7 +30,7 @@ struct bbdd_mon_topics {
 	bool enabled[bbdd_mon_ntopics];
 };
 
-struct bbdd_mon *bbdd_mon_init(void);
+struct bbdd_mon *bbdd_mon_init(char **error);
 void bbdd_mon_fini(struct bbdd_mon *mon);
 
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,

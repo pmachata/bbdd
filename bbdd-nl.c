@@ -139,7 +139,7 @@ socket_close:
 	return NULL;
 }
 
-struct bbdd_nl *bbdd_nl_create(void)
+struct bbdd_nl *bbdd_nl_create(char **error)
 {
 	struct bbdd_nl *nl;
 	size_t bufsize;
@@ -148,19 +148,21 @@ struct bbdd_nl *bbdd_nl_create(void)
 	/* The macro MNL_SOCKET_BUFFER_SIZE involves sysconf() calls. */
 	sz = MNL_SOCKET_BUFFER_SIZE;
 	if (sz < 0) {
-		fprintf(stderr, "Failed to determine netlink socket buffer size: %m");
+		bbdd_util_fmterr(error, "Failed to determine netlink socket buffer size: %m");
 		return NULL;
 	}
 
 	bufsize = (unsigned long) sz;
 	nl = malloc(sizeof(*nl) + bufsize);
-	if (nl == NULL)
+	if (nl == NULL) {
+		bbdd_util_fmterr(error, "Failed to create netlink context: %m");
 		return NULL;
+	}
 
 	nl->bufsize = bufsize;
 	nl->sk = bbdd_nl_socket_open(NETLINK_ROUTE);
 	if (nl->sk == NULL) {
-		fprintf(stderr, "Failed to open netlink socket: %m");
+		bbdd_util_fmterr(error, "Failed to open netlink socket: %m");
 		goto free_nl;
 	}
 
@@ -243,9 +245,7 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
 				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_wraperr(error,
-				  "Failed to create veth pair `%s'<->`%s': %m, `%s'",
-				  name, peer_name, *error ?: "");
+		bbdd_util_fmterr(error, "Failed to get netlink response");
 		return -1;
 	}
 

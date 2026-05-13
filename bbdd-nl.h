@@ -7,7 +7,7 @@
 
 struct bbdd_nl;
 
-struct bbdd_nl *bbdd_nl_create(void);
+struct bbdd_nl *bbdd_nl_create(char **error);
 void bbdd_nl_destroy(struct bbdd_nl *nl);
 
 int bbdd_nl_add_veth(struct bbdd_nl *nl,

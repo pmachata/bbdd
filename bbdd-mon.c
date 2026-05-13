@@ -37,16 +37,17 @@ struct bbdd_mon {
 	unsigned int active[bbdd_mon_ntopics];
 };
 
-struct bbdd_mon *bbdd_mon_init(void)
+struct bbdd_mon *bbdd_mon_init(char **error)
 {
 	struct bbdd_mon *mon;
 
 	mon = malloc(sizeof(*mon));
-	if (mon == NULL)
+	if (mon == NULL) {
+		bbdd_util_fmterr(error, "Failed to create monitor server: %m");
 		return NULL;
+	}
 
 	*mon = (struct bbdd_mon) {};
-
 	return mon;
 }
 
@@ -94,8 +95,10 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 
 	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
-	if (cli == NULL)
+	if (cli == NULL) {
+		bbdd_util_appenderr(error, "Failed to subscribe to monitor");
 		return -1;
+	}
 
 	cli->kind = BBDD_MON_CLI_KIND_SOCK;
 	cli->sock = *sock;
@@ -110,8 +113,10 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 
 	topics.enabled[BBDD_MON_TOPIC_monitor] = false;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
-	if (cli == NULL)
+	if (cli == NULL) {
+		bbdd_util_appenderr(error, "Failed to subscribe to monitor");
 		return -1;
+	}
 
 	cli->kind = BBDD_MON_CLI_KIND_CB;
 	cli->cb = cb;

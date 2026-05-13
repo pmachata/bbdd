@@ -2810,64 +2810,64 @@ static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
 	int err;
 
 	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir, &error);
-	if (err < 0) {
-		bbdd_util_fmterr(&error, "Failed to open socket");
-		return -1;
-	}
+	if (err < 0)
+		goto err;
 
 	request = bbdd_c_monitor_build_request(topics, id);
 	if (request == NULL) {
+		bbdd_util_fmterr(&error, "Failed to build monitor request");
 		err = -1;
 		goto close_cli;
 	}
 
 	response = bbdd_c_send_request_on(request, &mctx.cli, &peer);
-	json_object_put(request);
 	if (response == NULL) {
+		bbdd_util_fmterr(&error, "Failed to send monitor request");
 		err = -1;
-		goto close_cli;
+		goto put_request;
 	}
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
 					    &result)) {
-		json_object_put(response);
+		bbdd_util_fmterr(&error, "Failed to parse monitor response");
 		err = -1;
-		goto close_cli;
+		goto put_response;
 	}
 
-	json_object_put(result);
-	json_object_put(response);
-
-	pctx = bbdd_poll_init();
+	pctx = bbdd_poll_init(&error);
 	if (pctx == NULL) {
-		fprintf(stderr, "Failed to initialize poll context: %m\n");
 		err = -1;
-		goto close_cli;
+		goto put_response;
 	}
 
 	err = bbdd_poll_set_signals(pctx, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to set up signal handling");
+	if (err != 0)
 		goto fini_pctx;
-	}
 
 	err = bbdd_poll_set_fd(pctx, mctx.cli.fd, POLLIN,
 			       bbdd_c_monitor_recv_cb, &mctx, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to register monitor socket");
+	if (err != 0)
 		goto unset_signals;
-	}
 
 	err = bbdd_poll_loop(pctx, &error);
-	if (err != 0)
-		bbdd_util_printerr(&error, "Monitor loop failed");
+	if (err)
+		goto unset_fd;
 
+unset_fd:
+	bbdd_poll_unset_fd(pctx, mctx.cli.fd);
 unset_signals:
 	bbdd_poll_unset_signals(pctx);
 fini_pctx:
 	bbdd_poll_fini(pctx);
+put_response:
+	json_object_put(response);
+put_request:
+	json_object_put(request);
 close_cli:
 	bbdd_sock_close_c(&mctx.cli);
+err:
+	if (err != 0)
+		bbdd_util_printerr(&error, "Monitor error");
 	return err;
 }
 

@@ -7,6 +7,7 @@
 #include <sys/random.h>
 
 #include "bbdd.h"
+#include "bbdd-util.h"
 
 /* "in uthash, your structure will never be moved or copied into another
  * location when you add it into a hash table." So it's OK to wrap the
@@ -21,16 +22,17 @@ struct bbdd_sess_dir {
 	struct bbdd_sess_dir_entry *sessions;
 };
 
-struct bbdd_sess_dir *bbdd_sess_dir_create(void)
+struct bbdd_sess_dir *bbdd_sess_dir_create(char **error)
 {
 	struct bbdd_sess_dir *sdir;
 
 	sdir = malloc(sizeof(*sdir));
-	if (!sdir)
+	if (!sdir) {
+		bbdd_util_fmterr(error, "Failed to create session directory: %m");
 		return NULL;
+	}
 
 	*sdir = (struct bbdd_sess_dir) {};
-
 	return sdir;
 }
 

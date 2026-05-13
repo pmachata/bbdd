@@ -8,7 +8,7 @@ struct bbdd_d_session;
 /* bbdd-sess.c */
 struct bbdd_sess_dir;
 
-struct bbdd_sess_dir *bbdd_sess_dir_create(void);
+struct bbdd_sess_dir *bbdd_sess_dir_create(char **error);
 void bbdd_sess_dir_destroy(struct bbdd_sess_dir *sdir);
 
 uint32_t bbdd_sess_get_unique_discr(struct bbdd_sess_dir *sdir);

@@ -74,21 +74,21 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	char *error;
 	int err = 0;
 
-	br.nl = bbdd_nl_create();
+	br.nl = bbdd_nl_create(&error);
 	if (br.nl == NULL) {
-		fprintf(stderr, "Failed to open netlink socket: %m\n");
+		err = -1;
 		goto out;
 	}
 
-	br.pctx = bbdd_poll_init();
-	if (br.pctx == NULL)
+	br.pctx = bbdd_poll_init(&error);
+	if (br.pctx == NULL) {
+		err = -1;
 		goto nl_destroy;
-
-	br.mon = bbdd_mon_init();
-	if (br.mon == NULL) {
-		fprintf(stderr, "Failed to create monitoring message bus: %m\n");
-		goto poll_fini;
 	}
+
+	br.mon = bbdd_mon_init(&error);
+	if (br.mon == NULL)
+		goto poll_fini;
 
 	err = bbdd_mon_subscribe_cb(br.mon, bbdd_c_monitor_dispatch, NULL,
 				    topics, &error);
@@ -97,7 +97,7 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 		goto mon_fini;
 	}
 
-	err = bbdd_sock_open_d(&br.ctl, bbdd_env.sockdir);
+	err = bbdd_sock_open_d(&br.ctl, bbdd_env.sockdir, &error);
 	if (err != 0)
 		goto mon_fini;
 

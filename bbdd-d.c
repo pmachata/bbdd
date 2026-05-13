@@ -2525,18 +2525,18 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 	return 0;
 }
 
-static int bbdd_d_raise_nofile(void)
+static int bbdd_d_raise_nofile(char **error)
 {
 	struct rlimit rlim;
 
 	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		fprintf(stderr, "Failed to get RLIMIT_NOFILE: %m\n");
+		bbdd_util_fmterr(error, "Failed to get RLIMIT_NOFILE: %m");
 		return -1;
 	}
 
 	rlim.rlim_cur = rlim.rlim_max;
 	if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		fprintf(stderr, "Failed to set RLIMIT_NOFILE: %m\n");
+		bbdd_util_fmterr(error, "Failed to set RLIMIT_NOFILE: %m");
 		return -1;
 	}
 
@@ -2725,7 +2725,7 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 			       bbdd_d_veth_tx_name, tx_ifindex,
 			       ncpus, error);
 	if (err)
-		return err;
+		goto err;
 
 	err = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name, *rx_ifindex,
 					ncpus, error);
@@ -2741,6 +2741,9 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 
 fini_veth:
 	bbdd_d_start_fini_veth(nl);
+err:
+	bbdd_util_appenderr(error, "Failed to create veth pair `%s'<->`%s'",
+			    bbdd_d_veth_rx_name, bbdd_d_veth_tx_name);
 	return err;
 }
 
@@ -2750,51 +2753,42 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
+	bool failed = true;
 	char *error;
 	int err;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
-	if (bbdd_d_raise_nofile() < 0)
+	if (bbdd_d_raise_nofile(&error) < 0)
 		goto closelog;
 
-	d.nl = bbdd_nl_create();
-	if (d.nl == NULL) {
-		fprintf(stderr, "Failed to open netlink socket: %m\n");
+	d.nl = bbdd_nl_create(&error);
+	if (d.nl == NULL)
 		goto closelog;
-	}
 
-	d.pctx = bbdd_poll_init();
+	d.pctx = bbdd_poll_init(&error);
 	if (d.pctx == NULL)
 		goto nl_destroy;
 
-	d.sdir = bbdd_sess_dir_create();
-	if (d.sdir == NULL) {
-		fprintf(stderr, "Failed to create session directory: %m\n");
+	d.sdir = bbdd_sess_dir_create(&error);
+	if (d.sdir == NULL)
 		goto poll_fini;
-	}
 
-	d.mon = bbdd_mon_init();
-	if (d.mon == NULL) {
-		fprintf(stderr, "Failed to create monitoring message bus: %m\n");
+	d.mon = bbdd_mon_init(&error);
+	if (d.mon == NULL)
 		goto sess_dir_destroy;
-	}
 
 	err = bbdd_mon_subscribe_cb(d.mon, bbdd_c_monitor_dispatch, NULL,
 				    topics, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to subscribe to monitor");
+	if (err != 0)
 		goto mon_fini;
-	}
 
 	err = bbdd_d_start_init_veth(d.nl,
 				     &veth_rx_ifindex,
 				     &veth_tx_ifindex,
 				     &error);
-	if (err) {
-		bbdd_util_printerr(&error,  "Failed to prepare veth pair");
+	if (err)
 		goto mon_fini;
-	}
 
 	bpf_conf = (struct bbdd_bpf_global_config) {
 		.veth_rx_ifindex = veth_rx_ifindex,
@@ -2802,34 +2796,29 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	};
 
 	d.bpf = bbdd_bpf_create(d.pctx, d.nl, &bpf_conf, d.sdir, d.mon, &error);
-	if (d.bpf == NULL) {
-		bbdd_util_printerr(&error,  "Failed to initialize BPF");
+	if (d.bpf == NULL)
 		goto fini_veth;
-	}
 
 	err = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to open daemon socket");
+	if (err != 0)
 		goto bpf_destroy;
-	}
 
 	err = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
 			       bbdd_d_ctl_recv, &d, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to register socket for events");
+	if (err != 0)
 		goto sock_close_d;
-	}
 
 	err = bbdd_poll_set_signals(d.pctx, &error);
-	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to set up signal handling");
+	if (err != 0)
 		goto sock_close_d;
-	}
 
 	err = bbdd_poll_loop(d.pctx, &error);
 	if (err != 0)
-		bbdd_util_printerr(&error, NULL);
+		goto cleanup;
 
+	failed = false;
+
+cleanup:
 	bbdd_mon_send_monitor_end(d.mon);
 
 	if (d.bfdd != NULL)
@@ -2852,6 +2841,9 @@ nl_destroy:
 	bbdd_nl_destroy(d.nl);
 closelog:
 	closelog();
+
+	if (failed)
+		bbdd_util_printerr(&error, "Error");
 	return err;
 }
 

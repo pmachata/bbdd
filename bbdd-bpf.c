@@ -1842,7 +1842,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 	bpf = calloc(1, sizeof(*bpf));
 	if (bpf == NULL) {
 		bbdd_util_fmterr(error, "calloc: %m");
-		return NULL;
+		goto err;
 	}
 
 	bpf->conf = *conf;
@@ -1928,6 +1928,8 @@ destroy_prog:
 	bbdd_prog__destroy(bpf->skel);
 free_bpf:
 	free(bpf);
+err:
+	bbdd_util_appenderr(error, "Failed to initialize BPF");
 	return NULL;
 }
 

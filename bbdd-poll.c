@@ -33,13 +33,15 @@ void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx)
 	ctx->should_quit = true;
 }
 
-struct bbdd_poll_ctx *bbdd_poll_init(void)
+struct bbdd_poll_ctx *bbdd_poll_init(char **error)
 {
 	struct bbdd_poll_ctx *pctx;
 
 	pctx = malloc(sizeof(*pctx));
-	if (pctx == NULL)
+	if (pctx == NULL) {
+		bbdd_util_fmterr(error, "Failed to allocate poll context: %m");
 		return NULL;
+	}
 	*pctx = (struct bbdd_poll_ctx){ .sig_fd = -1 };
 	return pctx;
 }
@@ -96,10 +98,10 @@ error:
 	return -1;
 }
 
-int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
-		     int fd, short events,
-		     int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
-		     void *data, char **error)
+int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
+		       int fd, short events,
+		       int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
+		       void *data, char **error)
 {
 	ssize_t ix;
 
@@ -119,6 +121,19 @@ int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 	};
 	return 0;
 
+}
+
+int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
+		     int fd, short events,
+		     int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
+		     void *data, char **error)
+{
+	int rc;
+
+	rc = __bbdd_poll_set_fd(pctx, fd, events, fn, data, error);
+	if (rc != 0)
+		bbdd_util_appenderr(error, "Failed to register socket for events");
+	return rc;
 }
 
 int bbdd_poll_unset_fd(struct bbdd_poll_ctx *pctx, int fd)
@@ -169,19 +184,23 @@ int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
 
 	sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 	if (sig_fd < 0) {
-		bbdd_util_fmterr(error, "signalfd: %m");
-		return -1;
+		bbdd_util_fmterr(error, "%m");
+		goto err;
 	}
 
-	err = bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
-			       bbdd_poll_sig_cb, NULL, error);
-	if (err != 0) {
-		close(sig_fd);
-		return -1;
-	}
+	err = __bbdd_poll_set_fd(pctx, sig_fd, POLLIN,
+				 bbdd_poll_sig_cb, NULL, error);
+	if (err != 0)
+		goto close_sig_fd;
 
 	pctx->sig_fd = sig_fd;
 	return 0;
+
+close_sig_fd:
+	close(sig_fd);
+err:
+	bbdd_util_appenderr(error, "Failed to set up signal handling");
+	return err;
 }
 
 void bbdd_poll_unset_signals(struct bbdd_poll_ctx *pctx)

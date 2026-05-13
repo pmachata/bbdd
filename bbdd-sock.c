@@ -532,9 +532,17 @@ int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error)
 
 	rc = bbdd_ctl_sockaddr(sockdir, &bsa, error);
 	if (rc != 0)
-		return rc;
+		goto err;
 
-	return bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl, error);
+	rc = bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl, error);
+	if (rc != 0)
+		goto err;
+
+	return 0;
+
+err:
+	bbdd_util_appenderr(error, "Failed to open daemon socket");
+	return rc;
 }
 
 void bbdd_sock_close_d(struct bbdd_sock *ctl)
