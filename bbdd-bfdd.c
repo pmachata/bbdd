@@ -101,6 +101,16 @@ static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 	char *error;
 	int rc;
 
+	if (revents & POLLHUP) {
+		/* Like for the error case, unset FD because the callback
+		 * doesn't have to. */
+		bbdd_bfdd_poll_unset(bfdd);
+
+		assert(bfdd->cbs.hangup_cb != NULL);
+		bfdd->cbs.hangup_cb(bfdd, bfdd->cbs.sock_cb_data);
+		return 0;
+	}
+
 	if (revents & POLLIN) {
 		rc = bbdd_bfdd_read_event(bfdd, &error);
 		if (rc < 0)
@@ -234,6 +244,49 @@ free_bfddp:
 	return NULL;
 }
 
+struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
+					struct bbdd_poll_ctx *pctx,
+					const struct bbdd_bfdd_cbs *cbs,
+					char **error)
+{
+	struct bfddp_ctx *bctx;
+	struct bbdd_bfdd *bfdd;
+	int rc;
+
+	bctx = bfddp_new(4096, 4096);
+	if (bctx == NULL) {
+		bbdd_util_fmterr(error, "Failed to open libbfd context");
+		return NULL;
+	}
+
+	bfddp_set_fd(bctx, fd);
+
+	bfdd = malloc(sizeof(*bfdd));
+	if (bfdd == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		goto free_bfddp;
+	}
+	*bfdd = (struct bbdd_bfdd) {
+		.bctx = bctx,
+		.fd = fd,
+		.pctx = pctx,
+		.cbs = *cbs,
+	};
+
+	rc = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLOUT | POLLHUP,
+			      bbdd_bfdd_event, bfdd, error);
+	if (rc < 0)
+		goto free_bfdd;
+
+	return bfdd;
+
+free_bfdd:
+	free(bfdd);
+free_bfddp:
+	bfddp_free(bctx);
+	return NULL;
+}
+
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd)
 {
 	return bfddp_is_connected(bfdd->bctx) == 0;
@@ -244,6 +297,12 @@ static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
 				   char **error)
 {
 	size_t written;
+	int rc;
+
+	rc = bbdd_poll_set_fd(bfdd->pctx, bfdd->fd, POLLIN | POLLOUT | POLLHUP,
+			      bbdd_bfdd_event, bfdd, error);
+	if (rc != 0)
+		return rc;
 
 	/* returns 0 on full buffer or the number of bytes buffered. */
 	written = bfddp_write_enqueue(bfdd->bctx, msg);
@@ -282,20 +341,25 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
-			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo, char **error)
+static uint64_t bbdd_bfdd_now(void)
 {
-	struct bfddp_message msg;
 	struct timeval tv;
-	uint64_t dp_time;
 
 	gettimeofday(&tv, NULL);
-	dp_time = ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
+	return ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
+}
+
+static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
+				 enum bfddp_message_type bmt,
+				 uint16_t msg_id,
+				 const struct bfddp_echo *in_echo, char **error)
+{
+	uint64_t dp_time = bbdd_bfdd_now();
+	struct bfddp_message msg;
 
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
-		.header.type = htons(ECHO_REPLY),
+		.header.type = htons(bmt),
 		.header.id = msg_id,
 		.header.length = htons(sizeof(msg.header) +
 				       sizeof(msg.data.echo)),
@@ -307,6 +371,22 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 	};
 
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
+
+int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error)
+{
+	struct bfddp_echo echo = {
+		.bfdd_time = htobe64(bbdd_bfdd_now()),
+	};
+
+	return __bbdd_bfdd_send_echo(bfdd, ECHO_REQUEST, msg_id, &echo, error);
+}
+
+int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
+			 uint16_t msg_id,
+			 const struct bfddp_echo *in_echo, char **error)
+{
+	return __bbdd_bfdd_send_echo(bfdd, ECHO_REPLY, msg_id, in_echo, error);
 }
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)

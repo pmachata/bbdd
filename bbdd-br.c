@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -18,7 +19,14 @@
 #include "bbdd-poll.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
+#include "bfddp.h"
 #include "bfddp_packet.h"
+
+struct bbdd_br_ping {
+	struct bbdd_sock peer;
+	struct json_object *id;
+	struct json_object *params;
+};
 
 struct bbdd_br {
 	struct bbdd_nl *nl;
@@ -26,8 +34,122 @@ struct bbdd_br {
 	struct bbdd_mon *mon;
 	struct bbdd_sock ctl;
 	struct bbdd_sock bfdd_server;
-	int bfdd_cli_fd;
+	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
+
+	struct bbdd_br_ping *ping; /* non-NULL = ping awaiting ECHO_REPLY */
 };
+
+static struct bbdd_br_ping *bbdd_br_ping_alloc(struct bbdd_sock *peer,
+					       struct json_object *params_obj,
+					       struct json_object *id,
+					       char **error)
+{
+	struct bbdd_br_ping *ping;
+
+	ping = malloc(sizeof(*ping));
+	if (ping == NULL) {
+		bbdd_util_fmterr(error, "Could allocate ping context: %m");
+		return NULL;
+	}
+
+	*ping = (struct bbdd_br_ping) {
+		.peer = *peer,
+		.id = json_object_get(id),
+		.params = json_object_get(params_obj),
+	};
+	return ping;
+}
+
+static void bbdd_br_ping_free(struct bbdd_br_ping *ping)
+{
+	json_object_put(ping->id);
+	json_object_put(ping->params);
+	free(ping);
+}
+
+static void bbdd_br_ping_flush(struct bbdd_br_ping *ping, const char *msg)
+{
+	bbdd_util_jrpc_respond_interr(&ping->peer, ping->id, msg);
+	bbdd_br_ping_free(ping);
+}
+
+static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
+{
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Client disconnected.\n");
+
+	assert(br->bfdd != NULL);
+	bbdd_bfdd_close(br->bfdd);
+	br->bfdd = NULL;
+
+	if (br->ping != NULL) {
+		bbdd_br_ping_flush(br->ping, "BFDD client disconnect");
+		br->ping = NULL;
+	}
+}
+
+static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br)
+{
+	struct bbdd_br_ping *ping = br->ping;
+	struct json_object *resp;
+	int rc;
+
+	if (ping == NULL)
+		return;
+
+	resp = bbdd_jrpc_new_object(ping->id);
+	if (resp == NULL)
+		goto err_memerr;
+
+	rc = json_object_object_add(resp, "result", ping->params);
+	if (rc != 0) {
+		json_object_put(resp);
+		goto err_memerr;
+	}
+	ping->params = NULL; /* ownership transferred to resp */
+
+	bbdd_util_jrpc_send(&ping->peer, resp);
+	json_object_put(resp);
+	bbdd_br_ping_free(ping);
+	br->ping = NULL;
+	return;
+
+err_memerr:
+	bbdd_util_jrpc_respond_memerr(&ping->peer, ping->id);
+	bbdd_br_ping_free(ping);
+	br->ping = NULL;
+}
+
+static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
+				struct json_object *params_obj,
+				struct json_object *id)
+{
+	char *error;
+	int rc;
+
+	if (br->bfdd == NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "No BFDD client connected");
+
+	if (br->ping != NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "Ping already pending");
+
+	br->ping = bbdd_br_ping_alloc(peer, params_obj, id, &error);
+	if (br->ping == NULL)
+		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+
+	// xxx htons not nice here
+	rc = bbdd_bfdd_send_echo(br->bfdd, htons(1), &error);
+	if (rc != 0)
+		goto ping_free;
+
+	return;
+
+ping_free:
+	bbdd_br_ping_free(br->ping);
+	br->ping = NULL;
+}
 
 static void bbdd_br_handle_stop(struct bbdd_br *br, struct bbdd_sock *peer,
 				struct json_object *params_obj,
@@ -61,6 +183,8 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 
 	if (strcmp(method, "stop") == 0)
 		bbdd_br_handle_stop(br, peer, params_obj, id);
+	else if (strcmp(method, "ping") == 0)
+		bbdd_br_handle_ping(br, peer, params_obj, id);
 	else
 		bbdd_br_handle_unhandled(peer, method, id);
 }
@@ -75,31 +199,55 @@ static int bbdd_br_ctl_recv(struct bbdd_poll_ctx *, short revents,
 	return 0;
 }
 
-static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
+static void __bbdd_br_bfdd_hangup(struct bbdd_br *br, struct bbdd_bfdd *bfdd)
 {
-	int rc;
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Client disconnected.\n");
-
-	assert(br->bfdd_cli_fd >= 0);
-	rc = bbdd_poll_unset_fd(br->pctx, br->bfdd_cli_fd);
-	assert(rc == 0);
-
-	close(br->bfdd_cli_fd);
-	br->bfdd_cli_fd = -1;
+	assert(br->bfdd == bfdd);
+	bbdd_br_bfdd_client_close(br);
 }
 
-static int bbdd_br_bfdd_recv(struct bbdd_poll_ctx *pctx, short revents,
-			     void *data, char **error)
+static void __bbdd_br_bfdd_message(struct bbdd_br *br,
+				   struct bbdd_bfdd *bfdd,
+				   struct bfddp_message *msg)
+{
+	enum bfddp_message_type bmt;
+
+	bmt = ntohs(msg->header.type);
+
+	switch (bmt) {
+	case ECHO_REPLY:
+		return bbdd_br_bfdd_handle_echo_reply(br);
+	case BFD_STATE_CHANGE:
+	case BFD_SESSION_COUNTERS:
+	case ECHO_REQUEST:
+	case DP_ADD_SESSION:
+	case DP_DELETE_SESSION:
+	case DP_REQUEST_SESSION_COUNTERS:
+		break;
+	}
+}
+
+static void bbdd_br_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
 {
 	struct bbdd_br *br = data;
 
-	if (revents & POLLHUP) {
-		bbdd_br_bfdd_client_close(br);
-		return 0;
-	}
+	__bbdd_br_bfdd_hangup(br, bfdd);
+}
 
+static void bbdd_br_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
+				    void *data)
+{
+	struct bbdd_br *br = data;
+
+	__bbdd_br_bfdd_hangup(br, bfdd);
+}
+
+static int bbdd_br_bfdd_message_cb(struct bbdd_bfdd *bfdd,
+				   struct bfddp_message *msg,
+				   void *data, char **error)
+{
+	struct bbdd_br *br = data;
+
+	__bbdd_br_bfdd_message(br, bfdd, msg);
 	return 0;
 }
 
@@ -107,6 +255,7 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
 				      void *arg, char **error)
 {
 	struct bbdd_br *br = arg;
+	struct bbdd_bfdd_cbs cbs;
 	int fd;
 
 	if (bbdd_env.verbosity > 0)
@@ -116,14 +265,30 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
 		     SOCK_NONBLOCK | SOCK_CLOEXEC);
 	if (fd < 0) {
 		bbdd_util_fmterr(error, "accept4: %m");
-		return -1;
+		goto err;
 	}
 
-	assert(br->bfdd_cli_fd < 0);
-	br->bfdd_cli_fd = fd;
+	if (br->bfdd != NULL)
+		bbdd_br_bfdd_client_close(br);
 
-	return bbdd_poll_set_fd(pctx, fd, POLLIN | POLLHUP, bbdd_br_bfdd_recv,
-				br, error);
+	cbs = (struct bbdd_bfdd_cbs) {
+		.sock_cb_data = br,
+		.hangup_cb = bbdd_br_bfdd_hangup_cb,
+		.sockerr_cb = bbdd_br_bfdd_sockerr_cb,
+		.message_cb = bbdd_br_bfdd_message_cb,
+		.sock_free_cb = NULL,
+	};
+	br->bfdd = bbdd_bfdd_open_client(fd, pctx, &cbs, error);
+	if (br->bfdd == NULL)
+		goto fd_close;
+
+	return 0;
+
+fd_close:
+	close(fd);
+err:
+	bbdd_util_appenderr(error, "BFDD client accept");
+	return -1;
 }
 
 static int bbdd_br_open_bfdd_server(const struct bbdd_sockaddr *bsa,
@@ -155,9 +320,7 @@ static void bbdd_br_close_bfdd_server(struct bbdd_sock *sock)
 
 static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 {
-	struct bbdd_br br = {
-		.bfdd_cli_fd = -1,
-	};
+	struct bbdd_br br = {};
 	struct bbdd_sockaddr bfdd_bsa;
 	char *error;
 	int err = 0;
@@ -226,11 +389,13 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	if (err != 0)
 		bbdd_util_printerr(&error, NULL);
 
+	if (br.bfdd != NULL)
+		bbdd_br_bfdd_client_close(&br);
+
 	bbdd_mon_send_monitor_end(br.mon);
 
 	bbdd_poll_unset_signals(br.pctx);
-	if (br.bfdd_cli_fd >= 0)
-		close(br.bfdd_cli_fd);
+
 sock_close_d:
 	bbdd_sock_close_d(&br.ctl);
 bfdd_server_close:

@@ -2211,7 +2211,6 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	 * ECHO_REPLY. The rest are outgoing messages that BFDD shouldn't be
 	 * sending to us. */
 	case ECHO_REPLY:
-	/* These are outgoing messages that BFDD shouldn't be sending to us. */
 	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
 	/* Whatever this is. */
@@ -2251,6 +2250,11 @@ static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
 	assert(d->bfdd == bfdd);
 	bbdd_bfdd_close(d->bfdd);
 	d->bfdd = NULL;
+}
+
+static void bbdd_d_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
+{
+	bbdd_d_bfdd_sockerr_cb(bfdd, NULL, data);
 }
 
 struct bbdd_d_bfdd_connect_ctx {
@@ -2323,6 +2327,7 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 		.connect_free_cb = bbdd_d_bfdd_connect_free_cb,
 
 		.sock_cb_data = d,
+		.hangup_cb = bbdd_d_bfdd_hangup_cb,
 		.sockerr_cb = bbdd_d_bfdd_sockerr_cb,
 		.message_cb = bbdd_d_bfdd_message_cb,
 		.sock_free_cb = NULL,

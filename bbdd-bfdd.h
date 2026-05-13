@@ -31,6 +31,7 @@ struct bbdd_bfdd_cbs {
 	void (*connect_free_cb)(void *);
 
 	void *sock_cb_data;
+	void (*hangup_cb)(struct bbdd_bfdd *, void *);
 	void (*sockerr_cb)(struct bbdd_bfdd *, const char *, void *);
 	int (*message_cb)(struct bbdd_bfdd *, struct bfddp_message *,
 			  void *, char **);
@@ -41,6 +42,10 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 struct bbdd_poll_ctx *pctx,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error);
+struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
+					struct bbdd_poll_ctx *pctx,
+					const struct bbdd_bfdd_cbs *cbs,
+					char **error);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
@@ -49,6 +54,8 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 			     uint16_t msg_id, uint32_t discr,
 			     const struct bbdd_prog_session_data_stats *stats,
 			     char **error);
+
+int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error);
