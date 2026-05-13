@@ -18,7 +18,10 @@
 #include <linux/if_ether.h>
 #include <linux/types.h>
 
-#include "bbdd-util.h"
+#include "bbdd-util.h" // xxx util has drifted away from being very low-level
+		       // library into a catch-all of utilities. I think we need
+		       // a bbdd-fmt or bbdd-err for the error-formatting stuff.
+		       // Or these high-level things could be in bbdd maybe.
 
 static int bbdd_sock_parse_range(const char *str, long long *ret,
 				 long long min, long long max,
@@ -428,6 +431,48 @@ int bbdd_sock_parse_addrstr(int af, const char *addr, struct bbdd_sockaddr *bsa,
 	}
 }
 
+int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
+			 int default_port, char **error)
+{
+	const char *addrstr;
+	const char *proto;
+	const char *port;
+	uint16_t port_num;
+	char *copy;
+	int af;
+	int rc;
+
+	copy = bbdd_sock_strdupa(addr, error);
+	if (copy == NULL)
+		return -1;
+
+	rc = __bbdd_sock_split_addr_proto(copy, &af, &proto, &addrstr, &port,
+					  error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_sock_parse_addrstr(af, addrstr, bsa, error);
+	if (rc != 0)
+		return rc;
+
+	switch (af) {
+	case AF_UNIX:
+		return 0;
+	case AF_INET:
+	case AF_INET6:
+		port_num = default_port;
+		if (port != NULL) {
+			rc = bbdd_sock_parse_port(port, &port_num, error);
+			if (rc != 0)
+				return rc;
+		}
+		bsa->sin46.port = htons(port_num);
+		return 0;
+	}
+
+	return bbdd_sock_unsupported_family(af, error);
+}
+
 static int bbdd_ctl_sockaddr(const char *sockdir,
 			     struct bbdd_sockaddr *ctl_bsa, char **error)
 {
@@ -473,17 +518,23 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 	return 0;
 }
 
-static void bbdd_sock_close(struct bbdd_sock *sock)
+void bbdd_sock_close(struct bbdd_sock *sock)
 {
 	close(sock->fd);
-	unlink(sock->sa.sun.sun_path);
+
+	switch (sock->sa.sa.sa_family) {
+	case AF_UNIX:
+		unlink(sock->sa.sun.sun_path);
+		break;
+	case AF_INET:
+	case AF_INET6:
+		break;
+	}
 }
 
 static int bbdd_sock_reuseaddr(struct bbdd_sock *sock, char **error)
 {
 	int af = sock->sa.sa.sa_family;
-	int one = 1;
-	int rc;
 
 	switch (af) {
 	case AF_UNIX:
@@ -495,8 +546,8 @@ static int bbdd_sock_reuseaddr(struct bbdd_sock *sock, char **error)
 	}
 }
 
-static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
-			     struct bbdd_sock *sock, char **error)
+int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
+		      struct bbdd_sock *sock, char **error)
 {
 	int rc;
 

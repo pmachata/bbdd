@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#define _GNU_SOURCE
 #include "bbdd-br.h"
 
+#include <assert.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <json-c/json_object.h>
 
 #include "bbdd.h"
@@ -14,13 +18,15 @@
 #include "bbdd-poll.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
+#include "bfddp_packet.h"
 
 struct bbdd_br {
 	struct bbdd_nl *nl;
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
 	struct bbdd_sock ctl;
-	const char *bfddaddr;
+	struct bbdd_sock bfdd_server;
+	int bfdd_cli_fd;
 };
 
 static void bbdd_br_handle_stop(struct bbdd_br *br, struct bbdd_sock *peer,
@@ -59,20 +65,109 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_unhandled(peer, method, id);
 }
 
-static int bbdd_br_ctl_recv(struct bbdd_poll_ctx *, short, void *arg,
-			    char **)
+static int bbdd_br_ctl_recv(struct bbdd_poll_ctx *, short revents,
+			    void *data, char **)
 {
-	struct bbdd_br *br = arg;
+	struct bbdd_br *br = data;
 
+	assert(revents == POLLIN);
 	bbdd_util_ctl_activity(&br->ctl, bbdd_br_handle_method, br);
 	return 0;
 }
 
+static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
+{
+	int rc;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Client disconnected.\n");
+
+	assert(br->bfdd_cli_fd >= 0);
+	rc = bbdd_poll_unset_fd(br->pctx, br->bfdd_cli_fd);
+	assert(rc == 0);
+
+	close(br->bfdd_cli_fd);
+	br->bfdd_cli_fd = -1;
+}
+
+static int bbdd_br_bfdd_recv(struct bbdd_poll_ctx *pctx, short revents,
+			     void *data, char **error)
+{
+	struct bbdd_br *br = data;
+
+	if (revents & POLLHUP) {
+		bbdd_br_bfdd_client_close(br);
+		return 0;
+	}
+
+	return 0;
+}
+
+static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
+				      void *arg, char **error)
+{
+	struct bbdd_br *br = arg;
+	int fd;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bfdd: Client connected.\n");
+
+	fd = accept4(br->bfdd_server.fd, NULL, NULL,
+		     SOCK_NONBLOCK | SOCK_CLOEXEC);
+	if (fd < 0) {
+		bbdd_util_fmterr(error, "accept4: %m");
+		return -1;
+	}
+
+	assert(br->bfdd_cli_fd < 0);
+	br->bfdd_cli_fd = fd;
+
+	return bbdd_poll_set_fd(pctx, fd, POLLIN | POLLHUP, bbdd_br_bfdd_recv,
+				br, error);
+}
+
+static int bbdd_br_open_bfdd_server(const struct bbdd_sockaddr *bsa,
+				    struct bbdd_sock *sock, char **error)
+{
+	int rc;
+
+	rc = bbdd_sock_open_sa(bsa, SOCK_STREAM | SOCK_CLOEXEC, sock, error);
+	if (rc != 0)
+		return rc;
+
+	rc = listen(sock->fd, SOMAXCONN);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "listen: %m");
+		goto close_sock;
+	}
+
+	return 0;
+
+close_sock:
+	bbdd_sock_close(sock);
+	return -1;
+}
+
+static void bbdd_br_close_bfdd_server(struct bbdd_sock *sock)
+{
+	bbdd_sock_close(sock);
+}
+
 static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 {
-	struct bbdd_br br = { .bfddaddr = addr };
+	struct bbdd_br br = {
+		.bfdd_cli_fd = -1,
+	};
+	struct bbdd_sockaddr bfdd_bsa;
 	char *error;
 	int err = 0;
+
+	err = bbdd_sock_parse_addr(addr, &bfdd_bsa, BFD_DATA_PLANE_DEFAULT_PORT,
+				   &error);
+	if (err != 0) {
+		bbdd_util_appenderr(&error, "Failed to parse BFDD address");
+		goto out;
+	}
 
 	br.nl = bbdd_nl_create(&error);
 	if (br.nl == NULL) {
@@ -97,9 +192,22 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 		goto mon_fini;
 	}
 
+	err = bbdd_br_open_bfdd_server(&bfdd_bsa, &br.bfdd_server, &error);
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to open BFDD server socket");
+		goto mon_fini;
+	}
+
+	err = bbdd_poll_set_fd(br.pctx, br.bfdd_server.fd, POLLIN,
+			       bbdd_br_bfdd_client_accept, &br, &error);
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to register BFDD server socket");
+		goto bfdd_server_close;
+	}
+
 	err = bbdd_sock_open_d(&br.ctl, bbdd_env.sockdir, &error);
 	if (err != 0)
-		goto mon_fini;
+		goto bfdd_server_close;
 
 	err = bbdd_poll_set_fd(br.pctx, br.ctl.fd, POLLIN,
 			       bbdd_br_ctl_recv, &br, &error);
@@ -121,8 +229,12 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	bbdd_mon_send_monitor_end(br.mon);
 
 	bbdd_poll_unset_signals(br.pctx);
+	if (br.bfdd_cli_fd >= 0)
+		close(br.bfdd_cli_fd);
 sock_close_d:
 	bbdd_sock_close_d(&br.ctl);
+bfdd_server_close:
+	bbdd_br_close_bfdd_server(&br.bfdd_server);
 mon_fini:
 	bbdd_mon_fini(br.mon);
 poll_fini:

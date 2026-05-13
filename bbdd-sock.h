@@ -60,6 +60,14 @@ const char *bbdd_sock_af_to_str(int af);
 int bbdd_sock_parse_addrstr(int af, const char *arg, struct bbdd_sockaddr *sa,
 			    char **error);
 
+/* Parse full <family>://<address>:<port> address. */
+int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
+			 int default_port, char **error);
+
+int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
+		      struct bbdd_sock *sock, char **error);
+void bbdd_sock_close(struct bbdd_sock *sock);
+
 int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error);
 void bbdd_sock_close_d(struct bbdd_sock *ctl);
 
