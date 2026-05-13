@@ -2030,22 +2030,45 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	return bbdd_d_bfdd_handle_add_session_vrf(d, &csess, error);
 }
 
+static int __bbdd_d_bfdd_check_length(struct bbdd_d *d,
+				      unsigned int length,
+				      unsigned int exp_len,
+				      const char *where,
+				      char **error)
+{
+	if (length == exp_len)
+		return 0;
+
+	++d->diag_stats.dp_invalid_message_length;
+	bbdd_util_fmterr(error, "%s: Invalid length: got %u, expected %u",
+			 where, length, exp_len);
+	return -EINVAL;
+}
+
+#define bbdd_d_bfdd_check_length(D, MSG, PAYLOAD, WHERE, ERROR)		\
+	({								\
+		const struct bfddp_message *_M = (MSG);			\
+		enum bfddp_message_type _BMT = ntohs(_M->header.type);	\
+		uint16_t _AL = ntohs(_M->header.length);		\
+		uint16_t _EL = sizeof(_M->header) +			\
+			       sizeof(_M->data PAYLOAD);		\
+									\
+		assert(_BMT == WHERE);					\
+		__bbdd_d_bfdd_check_length((D), _AL, _EL, #WHERE, (ERROR)); \
+	})
+
 static int
 bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 				  const struct bfddp_message *msg,
 				  char **error)
 {
-	uint16_t length = ntohs(msg->header.length);
-	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.session);
 	uint32_t discr;
 	int rc;
 
-	if (length != exp_len) {
-		++d->diag_stats.dp_invalid_message_length;
-		bbdd_util_fmterr(error, "DP_DELETE_SESSION: Invalid length: got %u, expected %u",
-				 length, exp_len);
-		return -1;
-	}
+	rc = bbdd_d_bfdd_check_length(d, msg, .session,
+				      DP_DELETE_SESSION, error);
+	if (rc != 0)
+		return rc;
 
 	discr = ntohl(msg->data.session.lid);
 	rc = bbdd_d_handle_session_del_one(d, discr, error);
@@ -2061,20 +2084,16 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 				    const struct bfddp_message *msg,
 				    char **error1)
 {
-	uint16_t length = ntohs(msg->header.length);
-	uint16_t exp_len = sizeof(msg->header) + sizeof(msg->data.counters_req);
 	uint32_t discr;
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_d_session *dsess;
 	char *error2;
 	int rc1, rc2;
 
-	if (length != exp_len) {
-		++d->diag_stats.dp_invalid_message_length;
-		bbdd_util_fmterr(error1, "DP_REQUEST_SESSION_COUNTERS: Invalid length: got %u, expected %u",
-				 length, exp_len);
-		return -EINVAL;
-	}
+	rc1 = bbdd_d_bfdd_check_length(d, msg, .counters_req,
+				       DP_REQUEST_SESSION_COUNTERS, error1);
+	if (rc1 != 0)
+		return rc1;
 
 	discr = ntohl(msg->data.counters_req.lid);
 
