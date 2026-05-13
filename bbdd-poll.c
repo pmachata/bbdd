@@ -213,13 +213,6 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 		for (size_t i = 0; i < pctx->num; i++) {
 			struct pollfd *pollfd = &pctx->fds[i];
 
-			if (pollfd->revents & (POLLERR | POLLHUP |
-					       POLLNVAL)) {
-				bbdd_util_fmterr(error, "Problem on pollfd #%zd: %m",
-						 i);
-				err = -1;
-				goto out;
-			}
 			if (pollfd->revents & pollfd->events) {
 				struct bbdd_poll_cb *cb = &pctx->cbs[i];
 
@@ -227,6 +220,12 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 					     error);
 				if (err)
 					goto out;
+			} else if (pollfd->revents & (POLLERR | POLLHUP |
+						      POLLNVAL)) {
+				bbdd_util_fmterr(error, "Problem on pollfd #%zd: %m",
+						 i);
+				err = -1;
+				goto out;
 			}
 		}
 	}
