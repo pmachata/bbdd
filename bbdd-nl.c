@@ -282,8 +282,8 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
 				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
-		bbdd_util_wraperr(error, "Failed to delete interface `%s': %m, `%s'",
-				  name, *error ?: "");
+		bbdd_util_appenderr(error, "Failed to delete interface `%s': %m",
+				    name);
 		return -1;
 	}
 

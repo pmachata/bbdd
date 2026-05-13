@@ -2808,8 +2808,10 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	}
 
 	err = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
-	if (err != 0)
+	if (err != 0) {
+		bbdd_util_printerr(&error, "Failed to open daemon socket");
 		goto bpf_destroy;
+	}
 
 	err = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
 			       bbdd_d_ctl_recv, &d, &error);
