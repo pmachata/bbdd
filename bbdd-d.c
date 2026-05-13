@@ -2133,6 +2133,22 @@ reply:
 	return bbdd_util_pickerr(rc1, error1, rc2, &error2);
 }
 
+static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
+					   const struct bfddp_message *msg,
+					   char **error)
+{
+	int rc;
+
+	fprintf(stderr, "Handle echo\n"); // xxx
+
+	rc = bbdd_d_bfdd_check_length(d, msg, .echo, ECHO_REQUEST, error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_bfdd_reply_echo(d->bfdd, msg->header.id, &msg->data.echo,
+				    error);
+}
+
 static void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon,
 				 const struct bfddp_message *msg)
 {
@@ -2187,10 +2203,13 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		rc = bbdd_d_bfdd_handle_session_counters(d, msg, &error);
 		break;
 
-	/* We don't generate ECHO_REQUEST's, therefore we don't expect to see
-	 * ECHO_REPLY's. And frr doesn't generate ECHO_REQUEST's either. So
-	 * ignore both. In theory we could use it for liveness probe though. */
 	case ECHO_REQUEST:
+		rc = bbdd_d_bfdd_handle_echo_request(d, msg, &error);
+		break;
+
+	/* We send no ECHO_REQUESTS ourselves, so we shouldn't be getting
+	 * ECHO_REPLY. The rest are outgoing messages that BFDD shouldn't be
+	 * sending to us. */
 	case ECHO_REPLY:
 	/* These are outgoing messages that BFDD shouldn't be sending to us. */
 	case BFD_SESSION_COUNTERS:

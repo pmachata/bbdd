@@ -15,6 +15,7 @@ struct bbdd_prog_session_data_stats;
 struct bbdd_poll_ctx;
 
 /* bfddp_packet.h */
+struct bfddp_echo;
 struct bfddp_message;
 struct bfddp_session_cumulus;
 
@@ -40,12 +41,17 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 struct bbdd_poll_ctx *pctx,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error);
+void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
+
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
+
 int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 			     uint16_t msg_id, uint32_t discr,
 			     const struct bbdd_prog_session_data_stats *stats,
 			     char **error);
-void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
+int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
+			 uint16_t msg_id,
+			 const struct bfddp_echo *in_echo, char **error);
 
 int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,

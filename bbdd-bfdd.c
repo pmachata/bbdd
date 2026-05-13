@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
@@ -279,7 +280,33 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	};
 
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
 
+int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
+			 uint16_t msg_id,
+			 const struct bfddp_echo *in_echo, char **error)
+{
+	struct bfddp_message msg;
+	struct timeval tv;
+	uint64_t dp_time;
+
+	gettimeofday(&tv, NULL);
+	dp_time = ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
+
+	msg = (struct bfddp_message) {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(ECHO_REPLY),
+		.header.id = msg_id,
+		.header.length = htons(sizeof(msg.header) +
+				       sizeof(msg.data.echo)),
+
+		.data.echo = (struct bfddp_echo) {
+			.dp_time = htobe64(dp_time),
+			.bfdd_time = in_echo->bfdd_time,
+		},
+	};
+
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
