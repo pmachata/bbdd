@@ -458,9 +458,6 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 {
 	int fd;
 
-	if (bsa->sa.sa_family == AF_UNIX)
-		unlink(bsa->sun.sun_path);
-
 	*sock = (struct bbdd_sock) { .fd = -1 };
 
 	fd = socket(bsa->sa.sa_family, type, 0);
@@ -473,7 +470,6 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 		.fd = fd,
 		.sa = *bsa,
 	};
-
 	return 0;
 }
 
@@ -481,6 +477,22 @@ static void bbdd_sock_close(struct bbdd_sock *sock)
 {
 	close(sock->fd);
 	unlink(sock->sa.sun.sun_path);
+}
+
+static int bbdd_sock_reuseaddr(struct bbdd_sock *sock, char **error)
+{
+	int af = sock->sa.sa.sa_family;
+	int one = 1;
+	int rc;
+
+	switch (af) {
+	case AF_UNIX:
+		unlink(sock->sa.sun.sun_path);
+		return 0;
+
+	default:
+		return bbdd_sock_unsupported_family(af, error);
+	}
 }
 
 static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
@@ -494,6 +506,10 @@ static int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 	rc = bbdd_sock_open_sa_nobind(bsa, type, sock, error);
 	if (rc != 0)
 		return rc;
+
+	rc = bbdd_sock_reuseaddr(sock, error);
+	if (rc != 0)
+		goto close_sock;
 
 	rc = bind(sock->fd, &bsa->sa, bsa->len);
 	if (rc < 0) {
