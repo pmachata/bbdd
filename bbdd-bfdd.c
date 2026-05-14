@@ -389,6 +389,127 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 	return __bbdd_bfdd_send_echo(bfdd, ECHO_REPLY, msg_id, in_echo, error);
 }
 
+static int bbdd_bfdd_session_d_from_c(struct bbdd_nl *nl,
+				      const struct bbdd_c_session *csess,
+				      struct bbdd_d_session *dsess,
+				      char **error)
+{
+	int rc;
+
+	/* Most either default to 0 or are required.
+	 *
+	 * For the TTL: "the TTL [...] MUST be [...] checked to be equal to the
+	 * maximum value on reception", so it makes sense to default to 255.
+	 */
+	*dsess = (struct bbdd_d_session){
+		.ttl = 255,
+	};
+
+	rc = bbdd_d_session_apply_c(dsess, csess, nl, NULL, error);
+	if (rc != 0)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int bbdd_bfdd_msg_fill_netif(int ifindex, char *buf, char **error)
+{
+	if (ifindex == 0)
+		return 0;
+	if (if_indextoname(ifindex, buf) != NULL)
+		return 0;
+
+	bbdd_util_fmterr(error, "Could not translate ifindex %d to interface name: %m",
+			 ifindex);
+	return -EINVAL;
+}
+
+int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
+			  struct bbdd_nl *nl,
+			  const struct bbdd_c_session *csess,
+			  uint16_t msg_id, char **error)
+{
+	struct bbdd_d_session dsess;
+	struct bfddp_message msg = {};
+	struct in6_addr src = {};
+	struct in6_addr dst;
+	const void *buf;
+	size_t bufsz;
+	uint32_t flags = 0;
+	uint16_t length;
+	int rc;
+
+	rc = bbdd_bfdd_session_d_from_c(nl, csess, &dsess, error);
+	if (rc != 0)
+		return rc;
+
+	length = dsess.vrf_table != 0
+		    ? (sizeof(msg.header) + sizeof(msg.data.session_cumulus))
+		    : (sizeof(msg.header) + sizeof(msg.data.session));
+
+	if (dsess.dst.sa.sa_family == AF_INET6)
+		flags |= SESSION_IPV6;
+	if (dsess.flags.multihop)
+		flags |= SESSION_MULTIHOP;
+	if (dsess.flags.cbit)
+		flags |= SESSION_CBIT;
+	if (dsess.flags.passive)
+		flags |= SESSION_PASSIVE;
+	if (dsess.flags.shutdown)
+		flags |= SESSION_SHUTDOWN;
+
+	if (dsess.src.sa.sa_family != 0) {
+		buf = bbdd_sockaddr_addrbuf(&dsess.src, &bufsz, error);
+		if (buf == NULL)
+			return -EPROTO;
+		memcpy(&src, buf, bufsz);
+	}
+
+	assert(dsess.dst.sa.sa_family != 0);
+	buf = bbdd_sockaddr_addrbuf(&dsess.dst, &bufsz, error);
+	if (buf == NULL)
+		return -EPROTO;
+	memcpy(&dst, buf, bufsz);
+
+	msg = (struct bfddp_message) {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(DP_ADD_SESSION),
+		.header.id = msg_id,
+		.header.length = htons(length),
+
+		.data.session_cumulus = {
+			.session = {
+				.flags = htonl(flags),
+				.src = src,
+				.dst = dst,
+				.lid = htonl(dsess.local.discr),
+				.min_tx = htonl(dsess.local.timing.min_tx_us),
+				.min_rx = htonl(dsess.local.timing.min_rx_us),
+				.min_echo_tx = 0,
+				.min_echo_rx = 0,
+				/* Wire hold_time is in milliseconds. */
+				.hold_time = htonl(dsess.hold_time_us / 1000),
+				.ttl = dsess.ttl,
+				.detect_mult = dsess.local.timing.detect_mult,
+				.ifindex = dsess.ifindex,
+			},
+			.vrf_id = ntohl(dsess.vrf_table),
+		},
+	};
+
+	rc = bbdd_bfdd_msg_fill_netif(dsess.vrf_ifindex,
+				      msg.data.session_cumulus.vrfname, error);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_bfdd_msg_fill_netif(dsess.ifindex,
+				      msg.data.session.ifname, error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
+
 int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			       uint32_t discr, char **error)
 {

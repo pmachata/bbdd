@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <endian.h>
+#include <errno.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -290,6 +291,60 @@ err:
 	br->stats = NULL;
 }
 
+static int
+bbdd_br_jrpc_dissect_params_session_add(struct bbdd_br *br,
+					struct json_object *params_obj,
+					struct bbdd_c_session *csess,
+					char **error)
+{
+	enum {
+		pol_change,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_change] = { .key = "change", .type = json_type_object,
+				 .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_d_jrpc_dissect_validate_session(values[pol_change],
+						    csess, "change",
+						    br->nl, error);
+}
+
+static void bbdd_br_handle_session_add(struct bbdd_br *br, struct bbdd_sock *peer,
+				       struct json_object *params_obj,
+				       struct json_object *id)
+{
+	struct bbdd_c_session csess;
+	char *error;
+	int rc;
+
+	if (br->bfdd == NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "No BFDD client connected");
+
+	rc = bbdd_br_jrpc_dissect_params_session_add(br, params_obj, &csess,
+						     &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+
+	// xxx htons not nice here
+	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, htons(1), &error);
+	if (rc == -EINVAL)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+	else if (rc != 0)
+		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+
+	bbdd_util_jrpc_respond_empty(peer, id);
+}
+
 static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 				struct json_object *params_obj,
 				struct json_object *id)
@@ -395,6 +450,8 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_stop(br, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_br_handle_ping(br, peer, params_obj, id);
+	else if (strcmp(method, "session-add") == 0)
+		bbdd_br_handle_session_add(br, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_br_handle_session_stats(br, peer, params_obj, id);
 	else

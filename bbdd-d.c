@@ -519,11 +519,11 @@ fail:
 	return -1;
 }
 
-static int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
-						struct bbdd_c_session *sess,
-						const char *what,
-						struct bbdd_nl *nl,
-						char **error)
+int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
+					 struct bbdd_c_session *sess,
+					 const char *what,
+					 struct bbdd_nl *nl,
+					 char **error)
 {
 	int rc;
 
@@ -1151,7 +1151,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 	if (csess->vrf.netif.unset) {
 		/* Unset both VRF and table. If the user wants to override the
-		 * table in the same request, do it below. */
+		 * table in the same request, do it with boring fields. */
 		dsess->vrf_ifindex = 0;
 		dsess->vrf_table = 0;
 	} else if (csess->vrf.netif.ifindex_seen) {
@@ -1207,10 +1207,10 @@ static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
 	}
 }
 
-static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
-				  const struct bbdd_c_session *csess,
-				  struct bbdd_nl *nl,
-				  bool *changed, char **error)
+int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+			   const struct bbdd_c_session *csess,
+			   struct bbdd_nl *nl,
+			   bool *changed, char **error)
 {
 	struct bbdd_sockaddr src = {};  bool set_src;
 	struct bbdd_sockaddr dst = {};  bool set_dst;
@@ -1237,7 +1237,11 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			new_dst_af = csess->dst.af;
 		else
 			new_dst_af = dsess->dst.sin46.family;
-		assert(new_dst_af != 0);
+
+		if (new_dst_af == 0) {
+			bbdd_util_fmterr(error, "No destination address");
+			return -1;
+		}
 
 		if (csess->src.unset)
 			new_src_af = 0;
@@ -1247,8 +1251,7 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			new_src_af = dsess->src.sin46.family;
 
 		if (new_src_af != 0 && new_src_af != new_dst_af) {
-			bbdd_util_fmterr(error,
-					 "%s destination but %s source address",
+			bbdd_util_fmterr(error, "%s destination but %s source address",
 					 bbdd_sock_af_to_str(new_dst_af),
 					 bbdd_sock_af_to_str(new_src_af));
 			return -1;
@@ -1289,6 +1292,23 @@ static int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		if (err != 0)
 			return err;
 	}
+
+	/* Some values shouldn't be zero. */
+
+#define MANDATORY_NON0(NAME, NS) do {					\
+		if ((!csess->NAME ## _seen && dsess->NS NAME == 0) ||	\
+		    (csess->NAME ## _seen && csess->NAME == 0))	{	\
+			bbdd_util_fmterr(error, #NAME " needs to be non-0"); \
+			return -1;					\
+		}							\
+	} while (0)
+
+	MANDATORY_NON0(discr, local.);
+	MANDATORY_NON0(min_rx_us, local.timing.);
+	MANDATORY_NON0(min_tx_us, local.timing.);
+	MANDATORY_NON0(detect_mult, local.timing.);
+
+#undef MANDATORY_NON0
 
 	/* Now that we've validated everything, apply it infallibly. */
 	__bbdd_d_session_apply_c(dsess, csess,
@@ -1523,11 +1543,6 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	struct bbdd_d_session *dsess;
 	uint16_t sport;
 	int rc;
-
-	if (!csess->dst.af) {
-		bbdd_util_fmterr(error, "No destination address");
-		return -1;
-	}
 
 	rc = bbdd_d_sport_get(&d->spa, &sport);
 	if (rc) {

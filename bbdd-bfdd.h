@@ -8,6 +8,9 @@
 /* bfddp.h */
 struct bbdd_c_session;
 
+/* bbdd-nl.c */
+struct bbdd_nl;
+
 /* bbdd-prog-stat.h */
 struct bbdd_prog_session_data_stats;
 
@@ -50,17 +53,20 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
 
-int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
-			     uint16_t msg_id, uint32_t discr,
-			     const struct bbdd_prog_session_data_stats *stats,
-			     char **error);
-
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error);
+int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
+			  struct bbdd_nl *nl,
+			  const struct bbdd_c_session *csess,
+			  uint16_t msg_id, char **error);
 int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			       uint32_t discr, char **error);
+int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
+			     uint16_t msg_id, uint32_t discr,
+			     const struct bbdd_prog_session_data_stats *stats,
+			     char **error);
 
 int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,

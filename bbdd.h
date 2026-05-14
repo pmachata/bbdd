@@ -35,6 +35,10 @@ struct bbdd_bpf;
 struct bbdd_mon;
 struct bbdd_mon_topics;
 
+/* bbdd-nl.c */
+
+struct bbdd_nl;
+
 /* bbdd-c.c */
 
 int bbdd_c_stop(int argc, char **argv);
@@ -211,6 +215,11 @@ int bbdd_d_start(int argc, char **argv);
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,
 				    char **error);
+int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
+					 struct bbdd_c_session *sess,
+					 const char *what,
+					 struct bbdd_nl *nl,
+					 char **error);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
@@ -221,6 +230,10 @@ int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv);
 void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 				  struct bbdd_bpf *bpf,
 				  struct bbdd_mon *mon);
+int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+			   const struct bbdd_c_session *csess,
+			   struct bbdd_nl *nl,
+			   bool *changed, char **error);
 
 /* json-c */
 struct json_object;
