@@ -3,6 +3,7 @@
 #include "bbdd-br.h"
 
 #include <assert.h>
+#include <endian.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,12 @@ struct bbdd_br_ping {
 	struct json_object *params;
 };
 
+struct bbdd_br_stats {
+	struct bbdd_sock peer;
+	struct json_object *id;
+	uint32_t discr;
+};
+
 struct bbdd_br {
 	struct bbdd_nl *nl;
 	struct bbdd_poll_ctx *pctx;
@@ -37,6 +44,8 @@ struct bbdd_br {
 	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
 
 	struct bbdd_br_ping *ping; /* non-NULL = ping awaiting ECHO_REPLY */
+	struct bbdd_br_stats *stats; /* non-NULL = session-stats awaiting
+				      * BFD_SESSION_COUNTERS */
 };
 
 static struct bbdd_br_ping *bbdd_br_ping_alloc(struct bbdd_sock *peer,
@@ -73,6 +82,39 @@ static void bbdd_br_ping_close(struct bbdd_br_ping *ping, const char *msg)
 	bbdd_br_ping_free(ping);
 }
 
+static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
+						  struct json_object *id,
+						  uint32_t discr,
+						  char **error)
+{
+	struct bbdd_br_stats *stats;
+
+	stats = malloc(sizeof(*stats));
+	if (stats == NULL) {
+		bbdd_util_fmterr(error, "Could not allocate stats context: %m");
+		return NULL;
+	}
+
+	*stats = (struct bbdd_br_stats) {
+		.peer = *peer,
+		.id = json_object_get(id),
+		.discr = discr,
+	};
+	return stats;
+}
+
+static void bbdd_br_stats_free(struct bbdd_br_stats *stats)
+{
+	json_object_put(stats->id);
+	free(stats);
+}
+
+static void bbdd_br_stats_close(struct bbdd_br_stats *stats, const char *msg)
+{
+	bbdd_util_jrpc_respond_interr(&stats->peer, stats->id, msg);
+	bbdd_br_stats_free(stats);
+}
+
 static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 {
 	if (bbdd_env.verbosity > 0)
@@ -85,6 +127,11 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	if (br->ping != NULL) {
 		bbdd_br_ping_close(br->ping, "BFDD client disconnect");
 		br->ping = NULL;
+	}
+
+	if (br->stats != NULL) {
+		bbdd_br_stats_close(br->stats, "BFDD client disconnect");
+		br->stats = NULL;
 	}
 }
 
@@ -118,6 +165,131 @@ err_memerr:
 	br->ping = NULL;
 }
 
+static int bbdd_br_jrpc_dissect_select_discr(struct json_object *select_obj,
+					     uint32_t *discr, char **error)
+{
+	enum {
+		pol_discr,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_discr] = { .key = "discr", .type = json_type_int,
+				.required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(select_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_jrpc_get_uint32(values[pol_discr], discr, error);
+}
+
+static int bbdd_br_jrpc_dissect_params_stats(struct json_object *params_obj,
+					     uint32_t *discr, char **error)
+{
+	enum {
+		pol_select,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_select] = { .key = "select", .type = json_type_object,
+				 .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
+
+	return bbdd_br_jrpc_dissect_select_discr(values[pol_select], discr,
+						 error);
+}
+
+static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
+						 const struct bfddp_message *msg)
+{
+	const struct bfddp_session_counters *cnt = &msg->data.session_counters;
+	struct json_object *resp;
+	struct json_object *result_obj;
+	struct json_object *array;
+	struct json_object *entry_obj;
+	struct json_object *stats_obj;
+
+	if (br->stats == NULL)
+		return;
+
+	resp = bbdd_jrpc_new_object(br->stats->id);
+	if (resp == NULL)
+		goto err;
+
+	result_obj = json_object_new_object();
+	if (result_obj == NULL)
+		goto put_resp;
+
+	array = json_object_new_array();
+	if (array == NULL)
+		goto put_result_obj;
+
+	entry_obj = json_object_new_object();
+	if (entry_obj == NULL)
+		goto put_array;
+
+	stats_obj = json_object_new_object();
+	if (stats_obj == NULL)
+		goto put_entry_obj;
+
+	if (bbdd_jrpc_append_uint64(stats_obj, "rx_bytes",
+				    be64toh(cnt->control_input_bytes)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "rx_packets",
+				    be64toh(cnt->control_input_packets)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "tx_bytes",
+				    be64toh(cnt->control_output_bytes)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "tx_packets",
+				    be64toh(cnt->control_output_packets)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_bytes",
+				    be64toh(cnt->echo_input_bytes)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_packets",
+				    be64toh(cnt->echo_input_packets)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_bytes",
+				    be64toh(cnt->echo_output_bytes)) ||
+	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_packets",
+				    be64toh(cnt->echo_output_packets)) ||
+
+	    bbdd_jrpc_append_uint64(entry_obj, "discr", br->stats->discr) ||
+	    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj) ||
+
+	    bbdd_jrpc_array_append_obj(array, &entry_obj) ||
+	    bbdd_jrpc_append_obj(result_obj, "sessions", &array) ||
+	    bbdd_jrpc_append_obj(resp, "result", &result_obj))
+		goto put_stats_obj;
+
+	bbdd_util_jrpc_send(&br->stats->peer, resp);
+	json_object_put(resp);
+	bbdd_br_stats_free(br->stats);
+	br->stats = NULL;
+	return;
+
+put_stats_obj:
+	json_object_put(stats_obj);
+put_entry_obj:
+	json_object_put(entry_obj);
+put_array:
+	json_object_put(array);
+put_result_obj:
+	json_object_put(result_obj);
+put_resp:
+	json_object_put(resp);
+err:
+	bbdd_util_jrpc_respond_memerr(&br->stats->peer, br->stats->id);
+	bbdd_br_stats_free(br->stats);
+	br->stats = NULL;
+}
+
 static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 				struct json_object *params_obj,
 				struct json_object *id)
@@ -147,6 +319,44 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 ping_free:
 	bbdd_br_ping_free(br->ping);
 	br->ping = NULL;
+err:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+}
+
+static void bbdd_br_handle_session_stats(struct bbdd_br *br,
+					 struct bbdd_sock *peer,
+					 struct json_object *params_obj,
+					 struct json_object *id)
+{
+	uint32_t discr;
+	char *error;
+	int rc;
+
+	if (br->bfdd == NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "No BFDD client connected");
+
+	if (br->stats != NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "Session stats already pending");
+
+	rc = bbdd_br_jrpc_dissect_params_stats(params_obj, &discr, &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+
+	br->stats = bbdd_br_stats_alloc(peer, id, discr, &error);
+	if (br->stats == NULL)
+		goto err;
+
+	rc = bbdd_bfdd_request_counters(br->bfdd, htons(1), discr, &error);
+	if (rc != 0)
+		goto stats_free;
+
+	return;
+
+stats_free:
+	bbdd_br_stats_free(br->stats);
+	br->stats = NULL;
 err:
 	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
@@ -185,6 +395,8 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_stop(br, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_br_handle_ping(br, peer, params_obj, id);
+	else if (strcmp(method, "session-stats") == 0)
+		bbdd_br_handle_session_stats(br, peer, params_obj, id);
 	else
 		bbdd_br_handle_unhandled(peer, method, id);
 }
@@ -216,8 +428,9 @@ static void __bbdd_br_bfdd_message(struct bbdd_br *br,
 	switch (bmt) {
 	case ECHO_REPLY:
 		return bbdd_br_bfdd_handle_echo_reply(br);
-	case BFD_STATE_CHANGE:
 	case BFD_SESSION_COUNTERS:
+		return bbdd_br_bfdd_handle_session_counters(br, msg);
+	case BFD_STATE_CHANGE:
 	case ECHO_REQUEST:
 	case DP_ADD_SESSION:
 	case DP_DELETE_SESSION:

@@ -597,3 +597,16 @@ int bbdd_jrpc_append_obj(struct json_object *params_obj,
 	*objp = NULL;
 	return 0;
 }
+
+int bbdd_jrpc_array_append_obj(struct json_object *array,
+			       struct json_object **objp)
+{
+	int rc;
+
+	rc = json_object_array_add(array, *objp);
+	if (rc != 0)
+		return rc;
+
+	*objp = NULL;
+	return 0;
+}

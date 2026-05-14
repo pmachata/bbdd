@@ -59,6 +59,8 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error);
+int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
+			       uint32_t discr, char **error);
 
 int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,

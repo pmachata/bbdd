@@ -389,6 +389,26 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 	return __bbdd_bfdd_send_echo(bfdd, ECHO_REPLY, msg_id, in_echo, error);
 }
 
+int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
+			       uint32_t discr, char **error)
+{
+	struct bfddp_message msg;
+
+	msg = (struct bfddp_message) {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(DP_REQUEST_SESSION_COUNTERS),
+		.header.id = msg_id,
+		.header.length = htons(sizeof(msg.header) +
+				       sizeof(msg.data.counters_req)),
+
+		.data.counters_req = {
+			.lid = htonl(discr),
+		},
+	};
+
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
+
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 {
 	bbdd_bfdd_poll_unset(bfdd);
