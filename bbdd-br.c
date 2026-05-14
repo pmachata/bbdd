@@ -67,7 +67,7 @@ static void bbdd_br_ping_free(struct bbdd_br_ping *ping)
 	free(ping);
 }
 
-static void bbdd_br_ping_flush(struct bbdd_br_ping *ping, const char *msg)
+static void bbdd_br_ping_close(struct bbdd_br_ping *ping, const char *msg)
 {
 	bbdd_util_jrpc_respond_interr(&ping->peer, ping->id, msg);
 	bbdd_br_ping_free(ping);
@@ -83,40 +83,38 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	br->bfdd = NULL;
 
 	if (br->ping != NULL) {
-		bbdd_br_ping_flush(br->ping, "BFDD client disconnect");
+		bbdd_br_ping_close(br->ping, "BFDD client disconnect");
 		br->ping = NULL;
 	}
 }
 
 static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br)
 {
-	struct bbdd_br_ping *ping = br->ping;
 	struct json_object *resp;
 	int rc;
 
-	if (ping == NULL)
+	if (br->ping == NULL)
 		return;
 
-	resp = bbdd_jrpc_new_object(ping->id);
+	resp = bbdd_jrpc_new_object(br->ping->id);
 	if (resp == NULL)
 		goto err_memerr;
 
-	rc = json_object_object_add(resp, "result", ping->params);
+	rc = bbdd_jrpc_append_obj(resp, "result", &br->ping->params);
 	if (rc != 0) {
 		json_object_put(resp);
 		goto err_memerr;
 	}
-	ping->params = NULL; /* ownership transferred to resp */
 
-	bbdd_util_jrpc_send(&ping->peer, resp);
+	bbdd_util_jrpc_send(&br->ping->peer, resp);
 	json_object_put(resp);
-	bbdd_br_ping_free(ping);
+	bbdd_br_ping_free(br->ping);
 	br->ping = NULL;
 	return;
 
 err_memerr:
-	bbdd_util_jrpc_respond_memerr(&ping->peer, ping->id);
-	bbdd_br_ping_free(ping);
+	bbdd_util_jrpc_respond_memerr(&br->ping->peer, br->ping->id);
+	bbdd_br_ping_free(br->ping);
 	br->ping = NULL;
 }
 
@@ -137,7 +135,7 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 
 	br->ping = bbdd_br_ping_alloc(peer, params_obj, id, &error);
 	if (br->ping == NULL)
-		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		goto err;
 
 	// xxx htons not nice here
 	rc = bbdd_bfdd_send_echo(br->bfdd, htons(1), &error);
@@ -149,6 +147,8 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 ping_free:
 	bbdd_br_ping_free(br->ping);
 	br->ping = NULL;
+err:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
 static void bbdd_br_handle_stop(struct bbdd_br *br, struct bbdd_sock *peer,
