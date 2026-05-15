@@ -24,7 +24,7 @@
  * information is carried in bbdd_c_session. This contains the state & diag bits
  * for local session, and known remote session configuration. */
 struct bbdd_c_session_state {
-	struct bbdd_d_session_state_end local;
+	struct bbdd_d_session_state_end local;		bool local_seen;
 	struct bbdd_d_session_data remote;
 
 	/* Optional fields added by bbdd-bpf. */
@@ -613,8 +613,7 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 		pol_bpf,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_local]      = { .key = "local",      .type = json_type_object,
-				     .required = true },
+		[pol_local]      = { .key = "local",      .type = json_type_object },
 		[pol_remote]     = { .key = "remote",     .type = json_type_object,
 				     .required = true },
 		[pol_bpf]        = { .key = "bpf",        .type = json_type_object },
@@ -628,10 +627,16 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_c_jrpc_dissect_session_state_local(values[pol_local],
-						     &state->local, error);
-	if (rc != 0)
-		return rc;
+	if (seen[pol_local]) {
+		rc = bbdd_c_jrpc_dissect_session_state_local(values[pol_local],
+							     &state->local, error);
+		if (rc != 0)
+			return rc;
+
+		state->local_seen = true;
+	} else {
+		state->local_seen = false;
+	}
 
 	rc = bbdd_c_jrpc_dissect_session_state_remote(values[pol_remote],
 						      &state->remote, error);
@@ -676,8 +681,7 @@ static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_c_jrpc_dissect_session_state(values[pol_state], state,
-					       error);
+	rc = bbdd_c_jrpc_dissect_session_state(values[pol_state], state, error);
 	if (rc != 0)
 		return rc;
 
@@ -910,8 +914,11 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	if (!seen)
 		printf("(session without data)");
 
-	printf("| local ");
-	bbdd_c_session_show_state_end(&state->local);
+	if (state->local_seen) {
+		printf("| local ");
+		bbdd_c_session_show_state_end(&state->local);
+	}
+
 	printf("| remote ");
 	bbdd_c_session_show_data(&state->remote);
 
