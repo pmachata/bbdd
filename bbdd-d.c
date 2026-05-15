@@ -2571,10 +2571,10 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
-static void bbdd_d_handle_monitor_subscribe(struct bbdd_d *d,
-					    struct bbdd_sock *peer,
-					    struct json_object *params_obj,
-					    struct json_object *id)
+void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
+				     struct bbdd_sock *peer,
+				     struct json_object *params_obj,
+				     struct json_object *id)
 {
 	enum {
 		pol_topics,
@@ -2623,7 +2623,7 @@ static void bbdd_d_handle_monitor_subscribe(struct bbdd_d *d,
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	}
 
-	rc = bbdd_mon_subscribe(d->mon, peer, topics, &error);
+	rc = bbdd_mon_subscribe(mon, peer, topics, &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
@@ -2670,7 +2670,7 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 	else if (strcmp(method, "bfdd-disconnect") == 0)
 		bbdd_d_handle_bfdd_disconnect(d, peer, params_obj, id);
 	else if (strcmp(method, "monitor-subscribe") == 0)
-		bbdd_d_handle_monitor_subscribe(d, peer, params_obj, id);
+		bbdd_d_handle_monitor_subscribe(d->mon, peer, params_obj, id);
 	else
 		bbdd_d_handle_unhandled(peer, method, id);
 }

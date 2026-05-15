@@ -479,6 +479,8 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_session_del(br, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_br_handle_session_stats(br, peer, params_obj, id);
+	else if (strcmp(method, "monitor-subscribe") == 0)
+		bbdd_d_handle_monitor_subscribe(br->mon, peer, params_obj, id);
 	else
 		bbdd_br_handle_unhandled(peer, method, id);
 }

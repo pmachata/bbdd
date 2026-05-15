@@ -220,6 +220,10 @@ int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 					 const char *what,
 					 struct bbdd_nl *nl,
 					 char **error);
+void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
+				     struct bbdd_sock *peer,
+				     struct json_object *params_obj,
+				     struct json_object *id);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
