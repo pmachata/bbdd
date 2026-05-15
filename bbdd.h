@@ -227,9 +227,6 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
 const char *bbdd_d_bfd_diag_to_str(enum bbdd_bfd_pkt_diag dv);
 int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv);
 
-void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
-				  struct bbdd_bpf *bpf,
-				  struct bbdd_mon *mon);
 int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			   const struct bbdd_c_session *csess,
 			   struct bbdd_nl *nl,

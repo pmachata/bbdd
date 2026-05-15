@@ -39,10 +39,10 @@
 
 /* Interface between bbdd_bpf_rb_recv() and bbdd_bpf_rb_handle(). */
 struct bbdd_bpf_rb_context {
+	const struct bbdd_bpf_cbs *cbs;
 	struct bbdd_bpf *bpf;
 	struct ring_buffer *rb;
 	struct bbdd_nl *nl;
-	struct bbdd_sess_dir *sdir;
 	struct bbdd_mon *mon;
 };
 
@@ -764,76 +764,6 @@ error:
 	bbdd_mon_senderr(mon, &error, "no neighbor");
 }
 
-/* Return number of found sessions, or < 0 on error. The last matched session,
- * if any, is returned through ret_discr. */
-static int
-bbdd_bpf_rb_discr0_find_session(uint32_t *ret_discr,
-				struct bbdd_sess_dir *sdir,
-				uint32_t ifindex, uint8_t ttl,
-				bool multihop, uint32_t table,
-				const struct bbdd_sockaddr *pk_src,
-				const struct bbdd_sockaddr *pk_dst,
-				char **error)
-{
-	int nmatch = 0;
-	int err;
-
-	for (struct bbdd_d_session *dsess = bbdd_sess_iter_start(sdir);
-	     dsess != NULL; dsess = bbdd_sess_iter_next(dsess)) {
-		const struct bbdd_sockaddr *ss_src = &dsess->src;
-		const struct bbdd_sockaddr *ss_dst = &dsess->dst;
-
-		if (multihop != dsess->flags.multihop)
-			continue;
-
-		if (dsess->ifindex != 0 && dsess->ifindex != ifindex)
-			continue;
-
-		if (dsess->vrf_table != table)
-			continue;
-
-		if (ttl < dsess->ttl)
-			continue;
-
-		/* This is incoming packet aimed at us, so we need to match
-		 * packet DST vs. session SRC and vice versa. */
-
-		if (ss_src->sa.sa_family == 0)
-			/* Session doesn't have set source address. */
-			goto src;
-		if (ss_src->sa.sa_family != pk_dst->sa.sa_family)
-			continue;
-
-		err = bbdd_sockaddr_eq(ss_src, pk_dst, error);
-		if (err < 0)
-			return err;
-		if (err == false)
-			/* ss_src != pk_dst. */
-			continue;
-
-	src:
-		if (ss_dst->sa.sa_family == 0)
-			/* Session doesn't have set destination address. Weird,
-			 * but we are not validating here, so eat it. */
-			goto match;
-		if (ss_dst->sa.sa_family != pk_src->sa.sa_family)
-			continue;
-
-		err = bbdd_sockaddr_eq(ss_dst, pk_src, error);
-		if (err < 0)
-			return err;
-		if (err == false)
-			/* ss_dst != pk_src. */
-			continue;
-
-	match:
-		nmatch++;
-		*ret_discr = dsess->local.discr;
-	}
-
-	return nmatch;
-}
-
 static void bbdd_bpf_session_call_update(struct bbdd_bpf *bpf,
 					 struct bbdd_d_session *dsess,
 					 struct bbdd_bpf_session *bsess)
@@ -852,7 +782,7 @@ static void bbdd_bpf_session_state_changed(struct bbdd_bpf *bpf,
 					   struct bbdd_bpf_session *bsess)
 {
 	bbdd_bpf_session_call_update(bpf, dsess, bsess);
-	bbdd_d_session_state_changed(dsess, bpf, bpf->rb_ctx->mon);
+	bpf->rb_ctx->cbs->session_state_changed(dsess, bpf->rb_ctx->cbs->data);
 }
 
 static void bbdd_bpf_handle_packet_got_final(struct bbdd_bpf *bpf,
@@ -891,15 +821,13 @@ static void bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
 
 static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
-		       struct bbdd_sess_dir *sdir,
-		       uint32_t local_discr,
+		       struct bbdd_d_session *dsess,
 		       const struct bbdd_bfd_pkt *packet,
 		       uint16_t skb_len, uint8_t ttl)
 {
 	struct bbdd_d_session_data old_local;
 	struct bbdd_d_session_data old_remote;
 	struct bbdd_bpf_session *bsess;
-	struct bbdd_d_session *dsess;
 	bool final_recvd;
 	bool poll_recvd;
 	int err;
@@ -907,8 +835,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	/* Errors here are problematic, but not worth killing the daemon
 	 * over. Just eat them. */
 
-	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
-	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
+	bsess = bbdd_bpf_sdir_get_session(bpf, dsess->local.discr);
 	if (dsess == NULL || bsess == NULL) {
 		/* I think this can come up when BPF found a session and emit an
 		 * event, but before we got to process it, the session gets
@@ -1052,38 +979,40 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 }
 
 static void
-bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
-			   struct bbdd_bpf *bpf, struct bbdd_sess_dir *sdir,
+bbdd_bpf_rb_handle_discr_0(struct bbdd_bpf *bpf,
+			   const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 			   struct bbdd_nl *nl)
 {
-	struct bbdd_sockaddr saddr;
-	struct bbdd_sockaddr daddr;
-	uint32_t discr;
-	uint32_t table;
+	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
+	struct bbdd_bpf_match_digest digest = {
+		.ifindex = elem->ifindex,
+		.ttl = elem->ttl,
+		.multihop = elem->multihop,
+	};
+	struct bbdd_d_session *dsess = NULL;
 	int err;
 	unsigned int nmatch;
 	char *error;
 
-	err = bbdd_nl_get_l3_master(nl, elem->ifindex, &table, &error);
+	err = bbdd_nl_get_l3_master(nl, elem->ifindex, &digest.table, &error);
 	if (err != 0)
 		goto error;
 
-	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr, &saddr,
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr,
+					&digest.src,
 					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
 					&error);
 	if (err != 0)
 		goto error;
 
-	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->daddr, &daddr,
+	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->daddr,
+					&digest.dst,
 					"BBDD_BPF_RB_ELEM_RX_DISCR_0",
 					&error);
 	if (err != 0)
 		goto error;
 
-	err = bbdd_bpf_rb_discr0_find_session(&discr, sdir,
-					      elem->ifindex, elem->ttl,
-					      elem->multihop, table,
-					      &saddr, &daddr, &error);
+	err = cbs->match_session(&dsess, &digest, cbs->data, &error);
 	if (err < 0)
 		goto error;
 
@@ -1094,34 +1023,37 @@ bbdd_bpf_rb_handle_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 		return;
 	}
 
-	return bbdd_bpf_handle_packet(bpf, sdir, discr, &elem->packet,
-				      elem->skb_len, elem->ttl);
+	assert(dsess != NULL);
+	return bbdd_bpf_handle_packet(bpf, dsess, &elem->packet, elem->skb_len,
+				      elem->ttl);
 
 error:
 	bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "`your_discr' of 0");
 }
 
 static void
-bbdd_bpf_rb_handle_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
-			   struct bbdd_bpf *bpf,
-			   struct bbdd_sess_dir *sdir)
+bbdd_bpf_rb_handle_unx_pkt(struct bbdd_bpf *bpf,
+			   const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem)
 {
 	uint32_t local_discr = ntohl(elem->packet.your_disc);
+	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
+	struct bbdd_d_session *dsess;
 
-	return bbdd_bpf_handle_packet(bpf, sdir, local_discr, &elem->packet,
-				      elem->skb_len, elem->ttl);
+	dsess = cbs->find_session(local_discr, cbs->data);
+	bbdd_bpf_handle_packet(bpf, dsess, &elem->packet,
+			       elem->skb_len, elem->ttl);
 }
 
 static void
-bbdd_bpf_rb_handle_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
-			   struct bbdd_bpf *bpf,
-			   struct bbdd_sess_dir *sdir)
+bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
+			   const struct bbdd_bpf_rb_elem_rx_timeout *elem)
 {
+	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
 	uint32_t local_discr = elem->discr;
 	struct bbdd_bpf_session *bsess;
 	struct bbdd_d_session *dsess;
 
-	dsess = bbdd_sess_dir_get_session(sdir, local_discr);
+	dsess = cbs->find_session(local_discr, cbs->data);
 	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
 	if (dsess == NULL || bsess == NULL) {
 		/* As when processing unexpected packets, this can probably
@@ -1470,14 +1402,13 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 		bbdd_bpf_rb_handle_no_neigh(data, rb_ctx->nl, rb_ctx->mon);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		bbdd_bpf_rb_handle_discr_0(data, rb_ctx->bpf, rb_ctx->sdir,
-					   rb_ctx->nl);
+		bbdd_bpf_rb_handle_discr_0(rb_ctx->bpf, data, rb_ctx->nl);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_UNX_PKT:
-		bbdd_bpf_rb_handle_unx_pkt(data, rb_ctx->bpf, rb_ctx->sdir);
+		bbdd_bpf_rb_handle_unx_pkt(rb_ctx->bpf, data);
 		break;
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
-		bbdd_bpf_rb_handle_timeout(data, rb_ctx->bpf, rb_ctx->sdir);
+		bbdd_bpf_rb_handle_timeout(rb_ctx->bpf, data);
 		break;
 	}
 	return 0;
@@ -1496,8 +1427,8 @@ static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data, char **)
 }
 
 static struct bbdd_bpf_rb_context *
-bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
-		 struct bbdd_nl *nl, struct bbdd_sess_dir *sdir,
+bbdd_bpf_rb_init(const struct bbdd_bpf_cbs *cbs, struct bbdd_prog *skel,
+		 struct bbdd_poll_ctx *pctx, struct bbdd_nl *nl,
 		 struct bbdd_mon *mon, char **error)
 {
 	struct bbdd_bpf_rb_context *rb_ctx;
@@ -1525,9 +1456,9 @@ bbdd_bpf_rb_init(struct bbdd_prog *skel, struct bbdd_poll_ctx *pctx,
 		goto free_ring_buffer;
 
 	*rb_ctx = (struct bbdd_bpf_rb_context) {
+		.cbs = cbs,
 		.rb = rb,
 		.nl = nl,
-		.sdir = sdir,
 		.mon = mon,
 	};
 	return rb_ctx;
@@ -1829,10 +1760,10 @@ static void bbdd_bpf_sk_lookup_detach(struct bbdd_bpf *bpf)
 			strerror(-err));
 }
 
-struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
+struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
+				 struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
 				 struct bbdd_bpf_global_config *conf,
-				 struct bbdd_sess_dir *sdir,
 				 struct bbdd_mon *mon,
 				 char **error)
 {
@@ -1855,7 +1786,7 @@ struct bbdd_bpf *bbdd_bpf_create(struct bbdd_poll_ctx *pctx,
 		goto free_bpf;
 	}
 
-	bpf->rb_ctx = bbdd_bpf_rb_init(bpf->skel, pctx, nl, sdir, mon, error);
+	bpf->rb_ctx = bbdd_bpf_rb_init(cbs, bpf->skel, pctx, nl, mon, error);
 	if (bpf->rb_ctx == NULL)
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;

@@ -1062,9 +1062,9 @@ put_obj:
 		bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
-void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
-				  struct bbdd_bpf *bpf,
-				  struct bbdd_mon *mon)
+static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
+					 struct bbdd_bpf *bpf,
+					 struct bbdd_mon *mon)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
 	struct json_object *sess_obj;
@@ -1110,6 +1110,97 @@ put_msg:
 	if (rc != 0)
 		bbdd_mon_senderr(mon, &error, "session %u: failed to format notification",
 				 dsess->local.discr);
+}
+
+static void bbdd_d_session_state_changed_cb(struct bbdd_d_session *dsess,
+					    void *data)
+{
+	struct bbdd_d *d = data;
+
+	bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
+}
+
+/* Return number of found sessions, or < 0 on error. The last matched session,
+ * if any, is returned through ret_discr. */
+static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
+				struct bbdd_sess_dir *sdir,
+				const struct bbdd_bpf_match_digest *digest,
+				char **error)
+{
+	int nmatch = 0;
+	int err;
+
+	for (struct bbdd_d_session *dsess = bbdd_sess_iter_start(sdir);
+	     dsess != NULL; dsess = bbdd_sess_iter_next(dsess)) {
+		const struct bbdd_sockaddr *ss_src = &dsess->src;
+		const struct bbdd_sockaddr *ss_dst = &dsess->dst;
+
+		if (digest->multihop != dsess->flags.multihop)
+			continue;
+
+		if (dsess->ifindex != 0 && dsess->ifindex != digest->ifindex)
+			continue;
+
+		if (dsess->vrf_table != digest->table)
+			continue;
+
+		if (digest->ttl < dsess->ttl)
+			continue;
+
+		/* This is incoming packet aimed at us, so we need to match
+		 * packet DST vs. session SRC and vice versa. */
+
+		if (ss_src->sa.sa_family == 0)
+			/* Session doesn't have set source address. */
+			goto src;
+		if (ss_src->sa.sa_family != digest->dst.sa.sa_family)
+			continue;
+
+		err = bbdd_sockaddr_eq(ss_src, &digest->dst, error);
+		if (err < 0)
+			return err;
+		if (err == false)
+			/* ss_src != pk_dst. */
+			continue;
+
+	src:
+		if (ss_dst->sa.sa_family == 0)
+			/* Session doesn't have set destination address. Weird,
+			 * but we are not validating here, so eat it. */
+			goto match;
+		if (ss_dst->sa.sa_family != digest->src.sa.sa_family)
+			continue;
+
+		err = bbdd_sockaddr_eq(ss_dst, &digest->src, error);
+		if (err < 0)
+			return err;
+		if (err == false)
+			/* ss_dst != pk_src. */
+			continue;
+
+	match:
+		nmatch++;
+		*ret_dsess = dsess;
+	}
+
+	return nmatch;
+}
+
+static int bbdd_d_match_session_cb(struct bbdd_d_session **ret_dsess,
+				   struct bbdd_bpf_match_digest *digest,
+				   void *data, char **error)
+{
+	struct bbdd_d *d = data;
+
+	return bbdd_d_match_session(ret_dsess, d->sdir, digest, error);
+}
+
+static struct bbdd_d_session *
+bbdd_d_find_session_cb(uint32_t discr, void *data)
+{
+	struct bbdd_d *d = data;
+
+	return bbdd_sess_dir_get_session(d->sdir, discr);
 }
 
 static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
@@ -2808,6 +2899,12 @@ err:
 static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 {
 	struct bbdd_d d = {};
+	const struct bbdd_bpf_cbs bpf_cbs = {
+		.data = &d,
+		.session_state_changed = bbdd_d_session_state_changed_cb,
+		.match_session = bbdd_d_match_session_cb,
+		.find_session = bbdd_d_find_session_cb,
+	};
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_bpf_global_config bpf_conf;
@@ -2853,7 +2950,8 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		.veth_tx_ifindex = veth_tx_ifindex,
 	};
 
-	d.bpf = bbdd_bpf_create(d.pctx, d.nl, &bpf_conf, d.sdir, d.mon, &error);
+	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, &bpf_conf, d.mon,
+				&error);
 	if (d.bpf == NULL)
 		goto fini_veth;
 
