@@ -5,8 +5,9 @@
 #include <stdint.h>
 #include <json-c/json_object.h>
 
-/* bfddp.h */
+/* bbdd.h */
 struct bbdd_c_session;
+struct bbdd_d_session;
 
 /* bbdd-nl.c */
 struct bbdd_nl;
@@ -57,6 +58,9 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error);
+int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
+				const struct bbdd_d_session *dsess,
+				char **error);
 int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 			  struct bbdd_nl *nl,
 			  const struct bbdd_c_session *csess,

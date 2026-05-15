@@ -1064,7 +1064,8 @@ put_obj:
 
 static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 					 struct bbdd_bpf *bpf,
-					 struct bbdd_mon *mon)
+					 struct bbdd_mon *mon,
+					 struct bbdd_bfdd *bfdd)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
 	struct json_object *sess_obj;
@@ -1072,6 +1073,13 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 	struct json_object *msg;
 	char *error = NULL;
 	int rc = -1;
+
+	if (bfdd != NULL) {
+		if (bbdd_bfdd_send_state_change(bfdd, dsess, &error) != 0)
+			bbdd_mon_senderr(mon, &error,
+					 "session %u: failed to send state change to bfdd",
+					 dsess->local.discr);
+	}
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
@@ -1117,7 +1125,7 @@ static void bbdd_d_session_state_changed_cb(struct bbdd_d_session *dsess,
 {
 	struct bbdd_d *d = data;
 
-	bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
+	bbdd_d_session_state_changed(dsess, d->bpf, d->mon, d->bfdd);
 }
 
 /* Return number of found sessions, or < 0 on error. The last matched session,
@@ -1535,6 +1543,7 @@ struct bbdd_d_hold {
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_bpf *bpf;
 	struct bbdd_mon *mon;
+	struct bbdd_bfdd **bfdd;
 	int timer_fd;
 };
 
@@ -1564,9 +1573,9 @@ static int bbdd_d_hold_timer_cb(struct bbdd_poll_ctx *pctx, short,
 		goto out;
 	}
 
-	/* Don't report this anymore now that we are past the hold time. */
+	/* Don't report hold time anymore now that it expired. */
 	dsess->hold_time_us = 0;
-	bbdd_d_session_state_changed(dsess, hold->bpf, hold->mon);
+	bbdd_d_session_state_changed(dsess, hold->bpf, hold->mon, *hold->bfdd);
 
 out:
 	bbdd_d_hold_destroy(hold);
@@ -1614,6 +1623,7 @@ bbdd_d_hold_create(struct bbdd_d *d, struct bbdd_d_session *dsess, char **error)
 		.pctx = d->pctx,
 		.bpf = d->bpf,
 		.mon = d->mon,
+		.bfdd = &d->bfdd,
 		.timer_fd = timer_fd,
 	};
 	return hold;
@@ -1814,7 +1824,7 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 		}
 
 		if (changed)
-			bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
+			bbdd_d_session_state_changed(dsess, d->bpf, d->mon, d->bfdd);
 	}
 
 	if (!set) {
@@ -2104,7 +2114,7 @@ static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 		goto interr;
 
 	if (changed)
-		bbdd_d_session_state_changed(dsess, d->bpf, d->mon);
+		bbdd_d_session_state_changed(dsess, d->bpf, d->mon, d->bfdd);
 	return 0;
 
 invalid:

@@ -424,6 +424,30 @@ static int bbdd_bfdd_msg_fill_netif(int ifindex, char *buf, char **error)
 	return -EINVAL;
 }
 
+int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
+				const struct bbdd_d_session *dsess,
+				char **error)
+{
+	struct bfddp_message msg = {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(BFD_STATE_CHANGE),
+		.header.length = htons(sizeof(msg.header) +
+				       sizeof(msg.data.state)),
+
+		.data.state = {
+			.lid = htonl(dsess->local.discr),
+			.rid = htonl(dsess->remote.discr),
+			.desired_tx = htonl(dsess->remote.timing.min_tx_us),
+			.required_rx = htonl(dsess->remote.timing.min_rx_us),
+			.state = dsess->remote.state.state,
+			.diagnostics = dsess->remote.state.diag,
+			.detection_multiplier = dsess->remote.timing.detect_mult,
+		},
+	};
+
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
+
 int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 			  struct bbdd_nl *nl,
 			  const struct bbdd_c_session *csess,
