@@ -510,6 +510,22 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
+int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
+			  uint32_t discr, char **error)
+{
+	struct bfddp_message msg = {
+		.header.version = BFD_DP_VERSION,
+		.header.type = htons(DP_DELETE_SESSION),
+		.header.id = msg_id,
+		.header.length = htons(sizeof(msg.header) +
+				       sizeof(msg.data.session)),
+
+		.data.session.lid = htonl(discr),
+	};
+
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+}
+
 int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			       uint32_t discr, char **error)
 {

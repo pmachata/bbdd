@@ -61,6 +61,8 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 			  struct bbdd_nl *nl,
 			  const struct bbdd_c_session *csess,
 			  uint16_t msg_id, char **error);
+int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
+			  uint32_t discr, char **error);
 int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			       uint32_t discr, char **error);
 int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,

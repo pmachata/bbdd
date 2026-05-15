@@ -345,6 +345,29 @@ static void bbdd_br_handle_session_add(struct bbdd_br *br, struct bbdd_sock *pee
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
+static void bbdd_br_handle_session_del(struct bbdd_br *br, struct bbdd_sock *peer,
+				       struct json_object *params_obj,
+				       struct json_object *id)
+{
+	uint32_t discr;
+	char *error;
+	int rc;
+
+	if (br->bfdd == NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id,
+						     "No BFDD client connected");
+
+	rc = bbdd_br_jrpc_dissect_params_stats(params_obj, &discr, &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+
+	rc = bbdd_bfdd_del_session(br->bfdd, htons(1), discr, &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+
+	bbdd_util_jrpc_respond_empty(peer, id);
+}
+
 static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 				struct json_object *params_obj,
 				struct json_object *id)
@@ -452,6 +475,8 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_ping(br, peer, params_obj, id);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_br_handle_session_add(br, peer, params_obj, id);
+	else if (strcmp(method, "session-del") == 0)
+		bbdd_br_handle_session_del(br, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_br_handle_session_stats(br, peer, params_obj, id);
 	else
