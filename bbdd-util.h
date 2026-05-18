@@ -3,6 +3,10 @@
 #include <stdarg.h>
 #include <json-c/json_object.h>
 
+/* bbdd-mon.c */
+
+struct bbdd_mon;
+
 /* bbdd-sock.c */
 
 struct bbdd_sock;
@@ -78,6 +82,7 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af);
 
 void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
+			    struct bbdd_mon *mon,
 			    void (*cb)(struct bbdd_sock *peer,
 				       const char *method,
 				       struct json_object *params_obj,

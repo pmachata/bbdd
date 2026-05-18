@@ -14,6 +14,7 @@ struct bbdd_mon;
 	X(ringbuf, true)	\
 	X(bfdd,    true)	\
 	X(session, true)	\
+	X(jrpc,    true)	\
 	X(error,   true)	\
 	X(debug,   false)	\
 	/**/

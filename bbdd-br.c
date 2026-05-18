@@ -493,7 +493,7 @@ static int bbdd_br_ctl_recv(struct bbdd_poll_ctx *, short revents,
 	struct bbdd_br *br = data;
 
 	assert(revents == POLLIN);
-	bbdd_util_ctl_activity(&br->ctl, bbdd_br_handle_method, br);
+	bbdd_util_ctl_activity(&br->ctl, br->mon, bbdd_br_handle_method, br);
 	return 0;
 }
 

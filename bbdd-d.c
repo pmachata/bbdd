@@ -2684,7 +2684,7 @@ static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
 {
 	struct bbdd_d *d = arg;
 
-	bbdd_util_ctl_activity(&d->ctl, bbdd_d_handle_method, d);
+	bbdd_util_ctl_activity(&d->ctl, d->mon, bbdd_d_handle_method, d);
 	return 0;
 }
 

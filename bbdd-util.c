@@ -9,6 +9,7 @@
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-mon.h"
 #include "bbdd-sock.h"
 
 int bbdd_util_vfmterr(char **strp, const char *fmt, va_list ap)
@@ -269,7 +270,49 @@ put_obj:
 	return NULL;
 }
 
+static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
+				   enum bbdd_mon_topic topic,
+				   const char *request,
+				   struct json_object *request_obj)
+{
+	struct json_object *notif;
+	struct json_object *params;
+	int rc;
+
+	notif = bbdd_jrpc_new_notif("jrpc:request");
+	if (notif == NULL)
+		return;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_notif;
+
+	/* If we could parse it, append the parse, fall back to string. */
+	if (request_obj != NULL) {
+		rc = json_object_object_add(params, "message", request_obj);
+		if (rc != 0)
+			goto string;
+		json_object_get(request_obj);
+	} else {
+	string:
+		rc = bbdd_jrpc_append_str(params, "message", request);
+		if (rc != 0)
+			goto put_params;
+	}
+
+	if (bbdd_jrpc_append_obj(notif, "params", &params) != 0)
+		goto put_params;
+
+	bbdd_mon_send(mon, notif, topic);
+
+put_params:
+	json_object_put(params);
+put_notif:
+	json_object_put(notif);
+}
+
 void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
+			    struct bbdd_mon *mon,
 			    void (*cb)(struct bbdd_sock *peer,
 				       const char *method,
 				       struct json_object *params_obj,
@@ -277,6 +320,7 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 				       void *data),
 			    void *data)
 {
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_jrpc;
 	struct json_object *request_obj;
 	struct json_object *params;
 	struct bbdd_sock peer;
@@ -291,6 +335,10 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 		return;
 
 	request_obj = json_tokener_parse(request);
+
+	if (bbdd_mon_topic_active(mon, topic))
+		bbdd_util_ctl_mon_send(mon, topic, request, request_obj);
+
 	if (request_obj == NULL) {
 		bbdd_util_jrpc_respond(&peer,
 				       bbdd_jrpc_new_error_inv_request(NULL));
