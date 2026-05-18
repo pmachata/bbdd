@@ -503,11 +503,46 @@ static void __bbdd_br_bfdd_hangup(struct bbdd_br *br, struct bbdd_bfdd *bfdd)
 	bbdd_br_bfdd_client_close(br);
 }
 
-static void __bbdd_br_bfdd_message(struct bbdd_br *br,
-				   struct bbdd_bfdd *bfdd,
-				   struct bfddp_message *msg)
+static void
+bbdd_br_bfdd_handle_state_change(struct bbdd_br *br,
+				 const struct bfddp_message *msg)
+{
+	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
+	struct json_object *jmsg;
+	char *error;
+
+	/* For session change messages, we don't really have good options
+	 * besides sending as a monitor message in case anyone is watching. This
+	 * message should be on a session: topic. Note that we have already
+	 * produced a message on a bfdd: topic, so this may be duplicate. I
+	 * think that's OK, it's the consistent thing to do. bfdd: is a generic
+	 * topic for all BFDD messages, whereas BFD_STATE_CHANGE specifically
+	 * produces a session: message because it's a session change. */
+
+	if (!bbdd_mon_topic_active(br->mon, topic))
+		return;
+
+	jmsg = bbdd_bfdd_format_state_change("session:change", msg, &error);
+	if (jmsg == NULL)
+		return bbdd_mon_senderr(br->mon, &error,
+					"Failed to forward BFD_STATE_CHANGE message");
+
+	bbdd_mon_send(br->mon, jmsg, topic);
+	json_object_put(jmsg);
+}
+
+static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
+				      struct bbdd_bfdd *bfdd,
+				      struct bfddp_message *msg)
 {
 	enum bfddp_message_type bmt;
+	char *error;
+
+	if (msg->header.version != 1) {
+		bbdd_util_fmterr(&error, "bfdd: Wrong message version number %d",
+				 msg->header.version);
+		goto senderr;
+	}
 
 	bbdd_d_bfdd_mon_send(br->mon, msg);
 
@@ -518,12 +553,18 @@ static void __bbdd_br_bfdd_message(struct bbdd_br *br,
 	case BFD_SESSION_COUNTERS:
 		return bbdd_br_bfdd_handle_session_counters(br, msg);
 	case BFD_STATE_CHANGE:
+		return bbdd_br_bfdd_handle_state_change(br, msg);
 	case ECHO_REQUEST:
 	case DP_ADD_SESSION:
 	case DP_DELETE_SESSION:
 	case DP_REQUEST_SESSION_COUNTERS:
-		break;
+	default:
+		bbdd_util_fmterr(&error, "bfdd: Invalid message type %d", bmt);
+		goto senderr;
 	}
+
+senderr:
+	bbdd_mon_senderr(br->mon, &error, "bfdd");
 }
 
 static void bbdd_br_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
@@ -547,7 +588,7 @@ static int bbdd_br_bfdd_message_cb(struct bbdd_bfdd *bfdd,
 {
 	struct bbdd_br *br = data;
 
-	__bbdd_br_bfdd_message(br, bfdd, msg);
+	__bbdd_br_bfdd_message_cb(br, bfdd, msg);
 	return 0;
 }
 
