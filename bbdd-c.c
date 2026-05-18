@@ -664,7 +664,7 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 }
 
 static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
-					    struct bbdd_c_session *sess,
+					    struct bbdd_c_session *csess,
 					    struct bbdd_c_session_state *state,
 					    char **error)
 {
@@ -687,7 +687,7 @@ static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], sess, error);
+	rc = bbdd_d_jrpc_dissect_session_one(values[pol_data], csess, error);
 	if (rc != 0)
 		return rc;
 
@@ -886,59 +886,59 @@ static bool bbdd_c_session_show_netif(const struct bbdd_c_session_netif *netif,
 	return seen;
 }
 
-static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
+static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 				    struct bbdd_c_session_state *state)
 {
 	bool seen = false;
 	bool seen_vrf;
 
-	if (sess->discr_seen) {
-		printf("discr %u ", sess->discr);
+	if (csess->discr_seen) {
+		printf("discr %u ", csess->discr);
 		seen = true;
 	}
-	if (sess->src.unset) {
+	if (csess->src.unset) {
 		if (bbdd_env.verbosity > 0) {
 			printf("no src ");
 			seen = true;
 		}
-	} else if (sess->src.af) {
-		printf("src %s ", sess->src.str);
+	} else if (csess->src.af) {
+		printf("src %s ", csess->src.str);
 		seen = true;
 	}
 
-	if (sess->dst.af) {
-		printf("dst %s ", sess->dst.str);
+	if (csess->dst.af) {
+		printf("dst %s ", csess->dst.str);
 		seen = true;
 	}
-	if (sess->min_tx_us_seen) {
-		bbdd_c_show_time_us("min-tx", sess->min_tx_us);
+	if (csess->min_tx_us_seen) {
+		bbdd_c_show_time_us("min-tx", csess->min_tx_us);
 		seen = true;
 	}
-	if (sess->min_rx_us_seen) {
-		bbdd_c_show_time_us("min-rx", sess->min_rx_us);
+	if (csess->min_rx_us_seen) {
+		bbdd_c_show_time_us("min-rx", csess->min_rx_us);
 		seen = true;
 	}
-	if (sess->hold_time_us_seen) {
-		bbdd_c_show_time_us("hold-time", sess->hold_time_us);
+	if (csess->hold_time_us_seen) {
+		bbdd_c_show_time_us("hold-time", csess->hold_time_us);
 		seen = true;
 	}
-	if (sess->ttl_seen) {
-		printf("ttl %u ", sess->ttl);
+	if (csess->ttl_seen) {
+		printf("ttl %u ", csess->ttl);
 		seen = true;
 	}
-	if (sess->detect_mult_seen) {
-		printf("detect-mult %u ", sess->detect_mult);
+	if (csess->detect_mult_seen) {
+		printf("detect-mult %u ", csess->detect_mult);
 		seen = true;
 	}
 
-	if (bbdd_c_session_show_netif(&sess->netif, "netif"))
+	if (bbdd_c_session_show_netif(&csess->netif, "netif"))
 		seen = true;
 
 	/* Prefer VRF name to table ID, but show both in verbose mode. */
-	seen_vrf = bbdd_c_session_show_netif(&sess->vrf.netif, "vrf");
+	seen_vrf = bbdd_c_session_show_netif(&csess->vrf.netif, "vrf");
 	if ((!seen_vrf || bbdd_env.verbosity > 0) &&
-	    sess->vrf.table_seen) {
-		printf("vrf-table %d ", sess->vrf.table);
+	    csess->vrf.table_seen) {
+		printf("vrf-table %d ", csess->vrf.table);
 		seen_vrf = true;
 	}
 	if (seen_vrf)
@@ -1655,7 +1655,7 @@ obj_put:
 	return -1;
 }
 
-struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
+struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 {
 	struct json_object *params_obj;
 
@@ -1664,7 +1664,7 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 		goto err;
 
 	for (int i = 0; i < bbdd_sess_nflags; i++) {
-		const struct bbdd_flag *flag = &sess->flags.flags[i];
+		const struct bbdd_flag *flag = &csess->flags.flags[i];
 		const char *flag_name = bbdd_sess_flag_name(i);
 
 		if (!flag->seen)
@@ -1674,26 +1674,26 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 			goto put_params_obj;
 	}
 
-	if ((sess->discr_seen &&
-	     bbdd_jrpc_append_int(params_obj, "discr", sess->discr)) ||
-	    (sess->min_tx_us_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_tx_us", sess->min_tx_us)) ||
-	    (sess->min_rx_us_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_rx_us", sess->min_rx_us)) ||
-	    (sess->hold_time_us_seen &&
+	if ((csess->discr_seen &&
+	     bbdd_jrpc_append_int(params_obj, "discr", csess->discr)) ||
+	    (csess->min_tx_us_seen &&
+	     bbdd_jrpc_append_int(params_obj, "min_tx_us", csess->min_tx_us)) ||
+	    (csess->min_rx_us_seen &&
+	     bbdd_jrpc_append_int(params_obj, "min_rx_us", csess->min_rx_us)) ||
+	    (csess->hold_time_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "hold_time_us",
-				  sess->hold_time_us)) ||
-	    (sess->ttl_seen &&
-	     bbdd_jrpc_append_int(params_obj, "ttl", sess->ttl)) ||
-	    (sess->detect_mult_seen &&
+				  csess->hold_time_us)) ||
+	    (csess->ttl_seen &&
+	     bbdd_jrpc_append_int(params_obj, "ttl", csess->ttl)) ||
+	    (csess->detect_mult_seen &&
 	     bbdd_jrpc_append_int(params_obj, "detect_mult",
-				  sess->detect_mult)) ||
-	    bbdd_c_jrpc_append_addr(params_obj, "src", &sess->src) ||
-	    bbdd_c_jrpc_append_addr(params_obj, "dst", &sess->dst) ||
-	    bbdd_c_jrpc_append_netif(params_obj, "netif", &sess->netif) ||
-	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &sess->vrf.netif) ||
-	    (sess->vrf.table_seen &&
-	     bbdd_jrpc_append_int(params_obj, "vrf_table", sess->vrf.table)))
+				  csess->detect_mult)) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "src", &csess->src) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "dst", &csess->dst) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "netif", &csess->netif) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &csess->vrf.netif) ||
+	    (csess->vrf.table_seen &&
+	     bbdd_jrpc_append_int(params_obj, "vrf_table", csess->vrf.table)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -1803,10 +1803,10 @@ bbdd_c_session_check_params_netif(const struct bbdd_c_session_netif *netif)
 		assert(!netif->unset);
 }
 
-static int bbdd_c_session_check_params(struct bbdd_c_session *sess)
+static int bbdd_c_session_check_params(struct bbdd_c_session *csess)
 {
-	bbdd_c_session_check_params_netif(&sess->netif);
-	bbdd_c_session_check_params_netif(&sess->vrf.netif);
+	bbdd_c_session_check_params_netif(&csess->netif);
+	bbdd_c_session_check_params_netif(&csess->vrf.netif);
 	return 0;
 }
 
@@ -1814,7 +1814,7 @@ int bbdd_c_session(int argc, char **argv)
 {
 	struct bbdd_c_session select = {};
 	struct bbdd_c_session change = {};
-	struct bbdd_c_session *sess = &select;
+	struct bbdd_c_session *csess = &select;
 	bool seen_arg = false;
 	struct bbdd_flag bulk = {};
 	struct bbdd_flag diag = {};
@@ -1844,9 +1844,9 @@ int bbdd_c_session(int argc, char **argv)
 			}
 
 			if (command->allow_change)
-				sess = &change;
+				csess = &change;
 			else
-				sess = NULL;
+				csess = NULL;
 
 			NEXT_ARG_FWD();
 			break;
@@ -1860,7 +1860,7 @@ int bbdd_c_session(int argc, char **argv)
 			return 0;
 		}
 
-		if (sess == NULL) {
+		if (csess == NULL) {
 			fprintf(stderr, "`%s' used with session change parameters\n",
 				command->name);
 			return -1;
@@ -1869,43 +1869,43 @@ int bbdd_c_session(int argc, char **argv)
 		seen_arg = true;
 
 		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
-					       &sess->flags.multihop)) ||
+					       &csess->flags.multihop)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
-					       &sess->flags.cbit)) ||
+					       &csess->flags.cbit)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
-					       &sess->flags.passive)) ||
+					       &csess->flags.passive)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
-					       &sess->flags.shutdown)) ||
+					       &csess->flags.shutdown)) ||
 
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "discr",
-					      &sess->discr,
-					      &sess->discr_seen)) ||
+					      &csess->discr,
+					      &csess->discr_seen)) ||
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-tx",
-						  &sess->min_tx_us,
-						  &sess->min_tx_us_seen)) ||
+						  &csess->min_tx_us,
+						  &csess->min_tx_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-rx",
-						  &sess->min_rx_us,
-						  &sess->min_rx_us_seen)) ||
+						  &csess->min_rx_us,
+						  &csess->min_rx_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "hold-time",
-						  &sess->hold_time_us,
-						  &sess->hold_time_us_seen)) ||
+						  &csess->hold_time_us,
+						  &csess->hold_time_us_seen)) ||
 		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "ttl",
-					     &sess->ttl,
-					     &sess->ttl_seen)) ||
+					     &csess->ttl,
+					     &csess->ttl_seen)) ||
 		    (rc = bbdd_c_parse_kw_u8(&argc, &argv, "detect-mult",
-					     &sess->detect_mult,
-					     &sess->detect_mult_seen)) ||
+					     &csess->detect_mult,
+					     &csess->detect_mult_seen)) ||
 		    (rc = bbdd_c_session_parse_addr(&argc, &argv,
-						    "src", &sess->src)) ||
+						    "src", &csess->src)) ||
 		    (rc = bbdd_c_session_parse_addr(&argc, &argv,
-						    "dst", &sess->dst)) ||
+						    "dst", &csess->dst)) ||
 		    (rc = bbdd_c_session_parse_netif(&argc, &argv,
-						     "netif", &sess->netif)) ||
+						     "netif", &csess->netif)) ||
 		    (rc = bbdd_c_session_parse_netif(&argc, &argv,
-						     "vrf", &sess->vrf.netif)) ||
+						     "vrf", &csess->vrf.netif)) ||
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "vrf-table",
-					      &sess->vrf.table,
-					      &sess->vrf.table_seen)) ||
+					      &csess->vrf.table,
+					      &csess->vrf.table_seen)) ||
 
 		    (command == NULL &&
 		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "bulk", &bulk))) ||
@@ -2604,7 +2604,7 @@ bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
 	struct bbdd_c_session_state state = {};
-	struct bbdd_c_session sess = {};
+	struct bbdd_c_session csess = {};
 	int rc;
 
 	rc = bbdd_jrpc_dissect(params, policy, seen, values,
@@ -2614,10 +2614,10 @@ bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 
 	if (seen[pol_session]) {
 		rc = bbdd_c_jrpc_dissect_session_list(values[pol_session],
-						      &sess, &state, error);
+						      &csess, &state, error);
 		if (rc != 0)
 			goto try_discr;
-		bbdd_c_session_show_one(&sess, &state);
+		bbdd_c_session_show_one(&csess, &state);
 		return BBDD_C_MONITOR_PRINT_OK;
 	}
 
