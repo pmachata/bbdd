@@ -663,7 +663,7 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 	return 0;
 }
 
-static int bbdd_c_jrpc_dissect_session_list(struct json_object *obj,
+static int bbdd_c_jrpc_dissect_session_elem(struct json_object *obj,
 					    struct bbdd_c_session *csess,
 					    struct bbdd_c_session_state *state,
 					    char **error)
@@ -732,7 +732,7 @@ bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
 		struct bbdd_c_session_state *state = &states[i];
 		int err;
 
-		err = bbdd_c_jrpc_dissect_session_list(sess_obj, session,
+		err = bbdd_c_jrpc_dissect_session_elem(sess_obj, session,
 						       state, error);
 		if (err != 0)
 			goto free_sessions;
@@ -2613,7 +2613,7 @@ bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 		return BBDD_C_MONITOR_PRINT_ERROR;
 
 	if (seen[pol_session]) {
-		rc = bbdd_c_jrpc_dissect_session_list(values[pol_session],
+		rc = bbdd_c_jrpc_dissect_session_elem(values[pol_session],
 						      &csess, &state, error);
 		if (rc != 0)
 			goto try_discr;
