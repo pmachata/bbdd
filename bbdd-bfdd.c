@@ -791,6 +791,90 @@ err:
 	return NULL;
 }
 
+struct json_object *
+bbdd_bfdd_format_state_change(const char *method,
+			      const struct bfddp_message *msg, char **error)
+{
+	const struct bfddp_state_change *sc = &msg->data.state;
+	struct json_object *notif;
+	struct json_object *params;
+	struct json_object *sess_obj;
+	struct json_object *state_obj;
+	struct json_object *data_obj;
+	struct json_object *remote_obj;
+
+	notif = bbdd_jrpc_new_notif(method);
+	if (notif == NULL)
+		goto err;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_notif;
+
+	sess_obj = json_object_new_object();
+	if (sess_obj == NULL)
+		goto put_params;
+
+	data_obj = json_object_new_object();
+	if (data_obj == NULL)
+		goto put_sess_obj;
+
+	state_obj = json_object_new_object();
+	if (state_obj == NULL)
+		goto put_data_obj;
+
+	remote_obj = json_object_new_object();
+	if (remote_obj == NULL)
+		goto put_state_obj;
+
+	if (bbdd_jrpc_append_str(remote_obj, "state",
+				 bbdd_d_bfd_state_to_str(sc->state)) != 0 ||
+	    bbdd_jrpc_append_str(remote_obj, "diag",
+				 bbdd_d_bfd_diag_to_str(sc->diagnostics)) != 0 ||
+	    bbdd_jrpc_append_int(remote_obj, "discr",
+				 ntohl(sc->rid)) != 0 ||
+	    bbdd_jrpc_append_int(remote_obj, "detect_mult",
+				 sc->detection_multiplier) != 0 ||
+	    bbdd_jrpc_append_int(remote_obj, "min_tx_us",
+				 ntohl(sc->desired_tx)) != 0 ||
+	    bbdd_jrpc_append_int(remote_obj, "min_rx_us",
+				 ntohl(sc->required_rx)) != 0 ||
+
+	    bbdd_jrpc_append_obj(state_obj, "remote", &remote_obj) != 0)
+		goto put_remote_obj;
+
+	if (bbdd_jrpc_append_obj(sess_obj, "state", &state_obj) != 0)
+		goto put_state_obj;
+
+	if (bbdd_jrpc_append_int(data_obj, "discr", ntohl(sc->lid)) != 0 ||
+	    bbdd_jrpc_append_obj(sess_obj, "data", &data_obj) != 0)
+		goto put_data_obj;
+
+	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) != 0)
+		goto put_sess_obj;
+
+	if (bbdd_jrpc_append_obj(notif, "params", &params) != 0)
+		goto put_notif;
+
+	return notif;
+
+put_remote_obj:
+	json_object_put(remote_obj);
+put_state_obj:
+	json_object_put(state_obj);
+put_data_obj:
+	json_object_put(data_obj);
+put_sess_obj:
+	json_object_put(sess_obj);
+put_params:
+	json_object_put(params);
+put_notif:
+	json_object_put(notif);
+err:
+	bbdd_util_fmterr(error, "%m");
+	return NULL;
+}
+
 static struct json_object *
 bbdd_bfdd_format_lid_msg(const char *method, uint32_t lid, char **error)
 {
@@ -881,14 +965,16 @@ bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg, char **error)
 						ntohl(msg->data.counters_req.lid),
 						error);
 
+	case BFD_STATE_CHANGE:
+		return bbdd_bfdd_format_state_change("bfdd:state-change", msg,
+						     error);
+
 	case ECHO_REQUEST:
 		return bbdd_bfdd_format_bare_notif("bfdd:echo-req", error);
 	case ECHO_REPLY:
 		return bbdd_bfdd_format_bare_notif("bfdd:echo-rep", error);
 	case BFD_SESSION_COUNTERS:
 		return bbdd_bfdd_format_bare_notif("bfdd:sess-cnt-rep", error);
-	case BFD_STATE_CHANGE:
-		return bbdd_bfdd_format_bare_notif("bfdd:state-change", error);
 
 	default:
 		return bbdd_bfdd_format_unknown("bfdd:unknown", bmt, error);
