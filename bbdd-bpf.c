@@ -26,6 +26,7 @@
 #include <uthash.h>
 
 #include "bbdd.h"
+#include "bbdd-d.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
@@ -1094,7 +1095,7 @@ bbdd_bpf_jrpc_addr_obj(uint16_t ethtype, const struct bbdd_bpf_addr *bpf_addr,
 	if (err != 0)
 		return NULL;
 
-	return bbdd_c_jrpc_addr_obj(buf, addr.sa.sa_family);
+	return bbdd_util_jrpc_addr_obj(buf, addr.sa.sa_family);
 }
 
 static struct json_object *

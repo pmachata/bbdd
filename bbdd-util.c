@@ -3,11 +3,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <json-c/json_tokener.h>
 
 #include "bbdd.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-sock.h"
 
 int bbdd_util_vfmterr(char **strp, const char *fmt, va_list ap)
 {
@@ -246,6 +248,25 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 put_obj:
 	json_object_put(obj);
 	bbdd_util_jrpc_respond_memerr(peer, id);
+}
+
+struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af)
+{
+	struct json_object *obj;
+
+	obj = json_object_new_object();
+	if (obj == NULL)
+		return NULL;
+
+	if (bbdd_jrpc_append_str(obj, "addr", addr) ||
+	    bbdd_jrpc_append_str(obj, "family", bbdd_sock_af_to_str(af)))
+		goto put_obj;
+
+	return obj;
+
+put_obj:
+	json_object_put(obj);
+	return NULL;
 }
 
 void bbdd_util_ctl_activity(struct bbdd_sock *ctl,

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
+#include "bbdd-c.h"
+
 #include <assert.h>
 #include <errno.h>
 #include <poll.h>
@@ -14,6 +16,7 @@
 #include "bbdd.h"
 #include "bbdd-bfdd.h"
 #include "bbdd-br.h"
+#include "bbdd-d.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
@@ -1223,7 +1226,7 @@ incomplete_command:
 
 static int
 bbdd_c_parse_kw_flag(int *up_argc, char ***up_argv,
-		     const char *kw, struct bbdd_c_session_flag *flag)
+		     const char *kw, struct bbdd_flag *flag)
 {
 	int argc = *up_argc;
 	char **argv = *up_argv;
@@ -1258,7 +1261,7 @@ incomplete_command:
 
 int bbdd_c_global(int argc, char **argv)
 {
-	struct bbdd_c_session_flag diag = {};
+	struct bbdd_flag diag = {};
 	bool seen_stats = false;
 	int rc;
 
@@ -1502,7 +1505,7 @@ bbdd_c_session_parse_netif_flag(int *up_argc, char ***up_argv,
 				const char *kw, const char *ix_kw,
 				struct bbdd_c_session_netif *ret_netif)
 {
-	struct bbdd_c_session_flag flag = {
+	struct bbdd_flag flag = {
 		.seen = ret_netif->unset,
 		.value = false,
 	};
@@ -1570,7 +1573,7 @@ static int
 bbdd_c_session_parse_addr_flag(int *up_argc, char ***up_argv, const char *kw,
 			       struct bbdd_c_session_addr *ret_addr)
 {
-	struct bbdd_c_session_flag flag = {
+	struct bbdd_flag flag = {
 		.seen = ret_addr->unset,
 		.value = false,
 	};
@@ -1596,18 +1599,6 @@ static int bbdd_c_session_parse_addr(int *up_argc, char ***up_argv,
 {
 	return bbdd_c_session_parse_addr_kw(up_argc, up_argv, kw, addr) ?:
 	       bbdd_c_session_parse_addr_flag(up_argc, up_argv, kw, addr);
-}
-
-#define BBDD_C_SESSION_EXPAND_NAME_STR(NAME, name, ...)	#name,
-static const char *bbdd_c_session_flag_names[] = {
-	BBDD_C_SESSION_FLAGS(BBDD_C_SESSION_EXPAND_NAME_STR)
-};
-#undef BBDD_C_SESSION_EXPAND_NAME_STR
-
-const char *
-bbdd_c_session_flag_name(enum bbdd_c_session_flag_ix flag)
-{
-	return bbdd_c_session_flag_names[flag];
 }
 
 static int bbdd_c_enomem(void)
@@ -1638,25 +1629,6 @@ static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
 	return 0;
 }
 
-struct json_object *bbdd_c_jrpc_addr_obj(const char *addr, int af)
-{
-	struct json_object *obj;
-
-	obj = json_object_new_object();
-	if (obj == NULL)
-		return NULL;
-
-	if (bbdd_jrpc_append_str(obj, "addr", addr) ||
-	    bbdd_jrpc_append_str(obj, "family", bbdd_sock_af_to_str(af)))
-		goto put_obj;
-
-	return obj;
-
-put_obj:
-	json_object_put(obj);
-	return NULL;
-}
-
 static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
 				   const char *kw,
 				   const struct bbdd_c_session_addr *addr)
@@ -1668,7 +1640,7 @@ static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
 	if (addr->af == 0)
 		return 0;
 
-	obj = bbdd_c_jrpc_addr_obj(addr->str, addr->af);
+	obj = bbdd_util_jrpc_addr_obj(addr->str, addr->af);
 	if (obj == NULL)
 		return -1;
 
@@ -1690,9 +1662,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess)
 	if (params_obj == NULL)
 		goto err;
 
-	for (int i = 0; i < bbdd_c_session_nflags; i++) {
-		const char *flag_name = bbdd_c_session_flag_names[i];
-		const struct bbdd_c_session_flag *flag = &sess->flags.flags[i];
+	for (int i = 0; i < bbdd_sess_nflags; i++) {
+		const struct bbdd_flag *flag = &sess->flags.flags[i];
+		const char *flag_name = bbdd_sess_flag_name(i);
 
 		if (!flag->seen)
 			continue;
@@ -1735,8 +1707,8 @@ err:
 static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 			       const struct bbdd_c_session *select,
 			       const struct bbdd_c_session *change,
-			       struct bbdd_c_session_flag bulk,
-			       struct bbdd_c_session_flag diag)
+			       struct bbdd_flag bulk,
+			       struct bbdd_flag diag)
 {
 	struct json_object *select_obj = NULL;
 	struct json_object *change_obj = NULL;
@@ -1843,8 +1815,8 @@ int bbdd_c_session(int argc, char **argv)
 	struct bbdd_c_session change = {};
 	struct bbdd_c_session *sess = &select;
 	bool seen_arg = false;
-	struct bbdd_c_session_flag bulk = {};
-	struct bbdd_c_session_flag diag = {};
+	struct bbdd_flag bulk = {};
+	struct bbdd_flag diag = {};
 	const struct bbdd_c_session_command *command = NULL;
 	int rc;
 

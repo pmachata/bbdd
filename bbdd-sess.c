@@ -6,8 +6,20 @@
 #include <uthash.h>
 #include <sys/random.h>
 
-#include "bbdd.h"
+#include "bbdd-d.h"
 #include "bbdd-util.h"
+
+#define BBDD_SESS_EXPAND_NAME_STR(NAME, name, ...)	#name,
+static const char *bbdd_sess_flag_names[] = {
+	BBDD_SESS_FLAGS(BBDD_SESS_EXPAND_NAME_STR)
+};
+#undef BBDD_SESS_EXPAND_NAME_STR
+
+const char *
+bbdd_sess_flag_name(enum bbdd_sess_flag_ix flag)
+{
+	return bbdd_sess_flag_names[flag];
+}
 
 /* "in uthash, your structure will never be moved or copied into another
  * location when you add it into a hash table." So it's OK to wrap the

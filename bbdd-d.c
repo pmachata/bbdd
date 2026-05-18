@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
-#include "bbdd.h"
+#include "bbdd-d.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -23,13 +23,15 @@
 #include <json-c/json_util.h>
 #include <linux/if_ether.h>
 
+#include "bbdd.h"
 #include "bbdd-bfdd.h"
+#include "bbdd-c.h"
 #include "bbdd-bpf.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
-#include "bbdd-prog.h"
 #include "bbdd-poll.h"
+#include "bbdd-prog.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
@@ -384,7 +386,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_ ## name] =  { .key = #name, .type = json_type_boolean },
 
 	enum {
-		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POL_IX)
+		BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_POL_IX)
 
 		pol_discr,
 
@@ -405,7 +407,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		pol_vrf_table,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
+		BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
 
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 
@@ -457,7 +459,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				json_object_get_boolean(values[pol_ ## name]); \
 		}
 
-	BBDD_C_SESSION_FLAGS(BBDD_D_SESSION_EXPAND_DISSECT);
+	BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_DISSECT);
 
 #undef BBDD_D_SESSION_EXPAND_DISSECT
 
@@ -667,7 +669,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 {
 	*csess = (struct bbdd_c_session){};
 
-	for (int i = 0; i < bbdd_c_session_nflags; i++)
+	for (int i = 0; i < bbdd_sess_nflags; i++)
 		/* Only mark as seen set flags. */
 		csess->flags.flags[i].seen = csess->flags.flags[i].value =
 			dsess->flags.flags[i];
@@ -1218,8 +1220,8 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 {
 	uint16_t sport;
 
-	for (int i = 0; i < bbdd_c_session_nflags; i++) {
-		struct bbdd_c_session_flag cflag = csess->flags.flags[i];
+	for (int i = 0; i < bbdd_sess_nflags; i++) {
+		struct bbdd_flag cflag = csess->flags.flags[i];
 		if (cflag.seen)
 			dsess->flags.flags[i] = cflag.value;
 	}
@@ -1456,7 +1458,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 {
 	int rc;
 
-	for (int i = 0; i < bbdd_c_session_nflags; i++)
+	for (int i = 0; i < bbdd_sess_nflags; i++)
 		if (query->flags.flags[i].seen &&
 		    query->flags.flags[i].value != dsess->flags.flags[i])
 			return 0;

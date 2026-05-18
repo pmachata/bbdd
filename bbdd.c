@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bbdd-c.h"
+#include "bbdd-d.h"
 #include "config.h"
 
 struct bbdd_env bbdd_env = {

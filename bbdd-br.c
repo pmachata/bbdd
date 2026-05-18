@@ -15,6 +15,8 @@
 
 #include "bbdd.h"
 #include "bbdd-bfdd.h"
+#include "bbdd-c.h"
+#include "bbdd-d.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"

@@ -9,6 +9,8 @@
 #include <sys/time.h>
 
 #include "bbdd.h"
+#include "bbdd-c.h"
+#include "bbdd-d.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-poll.h"
 #include "bbdd-prog-stat.h"
