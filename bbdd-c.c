@@ -20,18 +20,21 @@
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
+/* State information added by bbdd-bpf. */
+struct bbdd_c_session_state_bpf {
+	const char *bstate;
+	struct bbdd_d_session_data_timing eff_timing;	bool eff_timing_seen;
+	struct bbdd_d_session_data_timing poll_timing;	bool poll_timing_seen;
+	bool qd_timing;					bool qd_timing_seen;
+};
+
 /* For carrying state information decoded from RPC. Most local session-specific
  * information is carried in bbdd_c_session. This contains the state & diag bits
  * for local session, and known remote session configuration. */
 struct bbdd_c_session_state {
 	struct bbdd_d_session_state_end local;		bool local_seen;
 	struct bbdd_d_session_data remote;
-
-	/* Optional fields added by bbdd-bpf. */
-	const char *bstate;
-	struct bbdd_d_session_data_timing eff_timing;	bool eff_timing_seen;
-	struct bbdd_d_session_data_timing poll_timing;	bool poll_timing_seen;
-	bool qd_timing;					bool qd_timing_seen;
+	struct bbdd_c_session_state_bpf bpf;		bool bpf_seen;
 };
 
 static bool bbdd_c_validate_id(struct json_object *id_obj, int expect_id)
@@ -554,7 +557,7 @@ bbdd_c_jrpc_dissect_timing(struct json_object *obj,
 
 static int
 bbdd_c_jrpc_dissect_session_state_bpf(struct json_object *obj,
-				      struct bbdd_c_session_state *state,
+				      struct bbdd_c_session_state_bpf *bstate,
 				      char **error)
 {
 	enum {
@@ -579,24 +582,24 @@ bbdd_c_jrpc_dissect_session_state_bpf(struct json_object *obj,
 		return rc;
 
 	if (seen[pol_bstate])
-		state->bstate = json_object_get_string(values[pol_bstate]);
+		bstate->bstate = json_object_get_string(values[pol_bstate]);
 	if (seen[pol_eff_timing]) {
-		state->eff_timing_seen = true;
+		bstate->eff_timing_seen = true;
 		rc = bbdd_c_jrpc_dissect_timing(values[pol_eff_timing],
-						&state->eff_timing, error);
+						&bstate->eff_timing, error);
 		if (rc != 0)
 			return rc;
 	}
 	if (seen[pol_poll_timing]) {
-		state->poll_timing_seen = true;
+		bstate->poll_timing_seen = true;
 		rc = bbdd_c_jrpc_dissect_timing(values[pol_poll_timing],
-						&state->poll_timing, error);
+						&bstate->poll_timing, error);
 		if (rc != 0)
 			return rc;
 	}
 	if (seen[pol_qd_timing]) {
-		state->qd_timing_seen = true;
-		state->qd_timing = json_object_get_boolean(values[pol_qd_timing]);
+		bstate->qd_timing_seen = true;
+		bstate->qd_timing = json_object_get_boolean(values[pol_qd_timing]);
 	}
 
 	return 0;
@@ -645,9 +648,13 @@ bbdd_c_jrpc_dissect_session_state(struct json_object *obj,
 
 	if (seen[pol_bpf]) {
 		rc = bbdd_c_jrpc_dissect_session_state_bpf(values[pol_bpf],
-							   state, error);
+							   &state->bpf, error);
 		if (rc != 0)
 			return rc;
+
+		state->bpf_seen = true;
+	} else {
+		state->bpf_seen = false;
 	}
 
 	return 0;
@@ -818,6 +825,28 @@ static void bbdd_c_show_time_us(const char *label, uint64_t us)
 }
 
 static void
+bbdd_c_session_show_state_bpf(const struct bbdd_c_session_state_bpf *bstate)
+{
+	if (bstate->bstate != NULL)
+		printf("state %s ", bstate->bstate);
+	if (bstate->eff_timing_seen) {
+		printf("eff-timing detect-mult %u ",
+			bstate->eff_timing.detect_mult);
+		bbdd_c_show_time_us("min-tx",
+				    bstate->eff_timing.min_tx_us);
+		bbdd_c_show_time_us("min-rx",
+				    bstate->eff_timing.min_rx_us);
+	}
+	if (bstate->poll_timing_seen) {
+		printf("poll-timing detect-mult %u ", bstate->poll_timing.detect_mult);
+		bbdd_c_show_time_us("min-tx", bstate->poll_timing.min_tx_us);
+		bbdd_c_show_time_us("min-rx", bstate->poll_timing.min_rx_us);
+	}
+	if (bstate->qd_timing_seen)
+		printf("qd-timing %s ", bstate->qd_timing ? "yes" : "no");
+}
+
+static void
 bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 {
 	printf("discr %u ", data->discr);
@@ -922,27 +951,9 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 	printf("| remote ");
 	bbdd_c_session_show_data(&state->remote);
 
-	if (bbdd_env.verbosity > 0 &&
-	    (state->bstate != NULL || state->eff_timing_seen ||
-	     state->poll_timing_seen || state->qd_timing_seen)) {
+	if (bbdd_env.verbosity > 0 && state->bpf_seen) {
 		printf("| bpf ");
-		if (state->bstate != NULL)
-			printf("state %s ", state->bstate);
-		if (state->eff_timing_seen) {
-			printf("eff-timing detect-mult %u ",
-			       state->eff_timing.detect_mult);
-			bbdd_c_show_time_us("min-tx",
-					    state->eff_timing.min_tx_us);
-			bbdd_c_show_time_us("min-rx",
-					    state->eff_timing.min_rx_us);
-		}
-		if (state->poll_timing_seen) {
-			printf("poll-timing detect-mult %u ", state->poll_timing.detect_mult);
-			bbdd_c_show_time_us("min-tx", state->poll_timing.min_tx_us);
-			bbdd_c_show_time_us("min-rx", state->poll_timing.min_rx_us);
-		}
-		if (state->qd_timing_seen)
-			printf("qd-timing %s ", state->qd_timing ? "yes" : "no");
+		bbdd_c_session_show_state_bpf(&state->bpf);
 	}
 }
 
