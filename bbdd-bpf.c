@@ -1865,8 +1865,26 @@ err:
 	return NULL;
 }
 
+static void __bbdd_bpf_session_del(struct bbdd_bpf *bpf,
+				   struct bbdd_bpf_session *bsess)
+{
+	HASH_DEL(bpf->sdir, bsess);
+
+	/* The packet will be dropped by the looper when no matching session is
+	 * found. */
+	bbdd_bpf_session_conf_delete(bpf, bsess->discr);
+
+	close(bsess->sock_fd);
+	free(bsess);
+}
+
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 {
+	struct bbdd_bpf_session *bsess, *tmp;
+
+	HASH_ITER(hh, bpf->sdir, bsess, tmp)
+		__bbdd_bpf_session_del(bpf, bsess);
+
 	bbdd_bpf_sk_lookup_detach(bpf);
 	bbdd_bpf_sockets_detach(bpf);
 	bbdd_bpf_sockets_close(&bpf->sockets);
@@ -2358,12 +2376,5 @@ void bbdd_bpf_session_del(struct bbdd_bpf *bpf,
 	if (bsess == NULL)
 		return;
 
-	HASH_DEL(bpf->sdir, bsess);
-
-	/* The packet will be dropped by the looper when no matching session is
-	 * found. */
-	bbdd_bpf_session_conf_delete(bpf, bsess->discr);
-
-	close(bsess->sock_fd);
-	free(bsess);
+	__bbdd_bpf_session_del(bpf, bsess);
 }
