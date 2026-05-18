@@ -2615,8 +2615,10 @@ bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 	if (seen[pol_session]) {
 		rc = bbdd_c_jrpc_dissect_session_elem(values[pol_session],
 						      &csess, &state, error);
-		if (rc != 0)
+		if (rc != 0) {
+			bbdd_util_printerr(error, NULL);
 			goto try_discr;
+		}
 		bbdd_c_session_show_one(&csess, &state);
 		return BBDD_C_MONITOR_PRINT_OK;
 	}
