@@ -2263,8 +2263,6 @@ static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
 {
 	int rc;
 
-	fprintf(stderr, "Handle echo\n"); // xxx
-
 	rc = bbdd_d_bfdd_check_length(d, msg, .echo, ECHO_REQUEST, error);
 	if (rc != 0)
 		return rc;
@@ -2340,8 +2338,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	default:
 		++d->diag_stats.dp_invalid_message_type;
 		bbdd_util_fmterr(&error, "bfdd: Invalid message type %d", bmt);
-		rc = -1;
-		break;
+		goto senderr;
 	}
 
 	if (rc == 0)
