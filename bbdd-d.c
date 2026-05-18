@@ -648,6 +648,8 @@ static void bbdd_d_session_to_c_vrf(struct bbdd_d_session *dsess,
 		sess_vrf->netif.name_seen = 1;
 		sess_vrf->netif.ifindex = dsess->vrf_ifindex;
 		sess_vrf->netif.ifindex_seen = 1;
+	} else {
+		sess_vrf->netif.unset = true;
 	}
 
 	if (dsess->vrf_table != 0) {
@@ -662,6 +664,8 @@ static void bbdd_d_session_to_c_addr(struct bbdd_c_session_addr *to,
 	to->af = from->sa.sa_family;
 	if (to->af != 0)
 		bbdd_d_sockaddr_ntop(&from->sa, to->str, sizeof(to->str));
+	else
+		to->unset = true;
 }
 
 static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
@@ -680,6 +684,8 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	if (dsess->ifindex != 0) {
 		if_indextoname(dsess->ifindex, csess->netif.name);
 		csess->netif.name_seen = 1;
+	} else {
+		csess->netif.unset = true;
 	}
 
 	bbdd_d_session_to_c_vrf(dsess, &csess->vrf);

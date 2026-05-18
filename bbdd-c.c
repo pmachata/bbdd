@@ -878,8 +878,7 @@ static bool bbdd_c_session_show_netif(const struct bbdd_c_session_netif *netif,
 	}
 
 	/* Show the negative form in verbose mode. */
-	if (!netif->name_seen && !netif->ifindex_seen &&
-	    bbdd_env.verbosity > 0) {
+	if (netif->unset && bbdd_env.verbosity > 0) {
 		printf("no %s ", kw);
 		seen = true;
 	}
@@ -897,11 +896,13 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *sess,
 		printf("discr %u ", sess->discr);
 		seen = true;
 	}
-	if (sess->src.af) {
+	if (sess->src.unset) {
+		if (bbdd_env.verbosity > 0) {
+			printf("no src ");
+			seen = true;
+		}
+	} else if (sess->src.af) {
 		printf("src %s ", sess->src.str);
-		seen = true;
-	} else if (bbdd_env.verbosity > 0) {
-		printf("no src ");
 		seen = true;
 	}
 
