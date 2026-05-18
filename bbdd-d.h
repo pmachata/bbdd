@@ -23,6 +23,10 @@ struct bbdd_nl;
 
 struct bbdd_c_session;
 
+/* bfddp_packet.h */
+
+struct bfddp_message;
+
 /* bbdd-d.c */
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
@@ -105,10 +109,13 @@ int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 					 const char *what,
 					 struct bbdd_nl *nl,
 					 char **error);
+
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 				     struct bbdd_sock *peer,
 				     struct json_object *params_obj,
 				     struct json_object *id);
+void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon,
+			  const struct bfddp_message *msg);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);

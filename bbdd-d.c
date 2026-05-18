@@ -2273,8 +2273,7 @@ static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
 				    error);
 }
 
-static void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon,
-				 const struct bfddp_message *msg)
+void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon, const struct bfddp_message *msg)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_bfdd;
 	struct json_object *jmsg;

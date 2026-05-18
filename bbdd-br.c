@@ -509,8 +509,9 @@ static void __bbdd_br_bfdd_message(struct bbdd_br *br,
 {
 	enum bfddp_message_type bmt;
 
-	bmt = ntohs(msg->header.type);
+	bbdd_d_bfdd_mon_send(br->mon, msg);
 
+	bmt = ntohs(msg->header.type);
 	switch (bmt) {
 	case ECHO_REPLY:
 		return bbdd_br_bfdd_handle_echo_reply(br);
