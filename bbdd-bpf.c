@@ -613,7 +613,6 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t tbid = dsess->vrf_table;
 	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
 	uint32_t fwd_ifindex;
-	uint8_t bfd_flags;
 	bool admdown;
 	bool down;
 	int rc;
@@ -695,12 +694,20 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
 			    dsess->local.discr, bsess->gen_id);
 
-	bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);
-	rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-					 bpf->conf.veth_tx_ifindex,
-					 bfd_flags, error);
-	if (rc != 0)
-		return rc;
+	/* A system taking the Passive role MUST NOT begin sending BFD packets
+	 * for a particular session until it has received a BFD packet for that
+	 * session, and thus has learned the remote system's discriminator
+	 * value. */
+	if (dsess->remote.discr != 0 || ! dsess->flags.passive) {
+		uint8_t bfd_flags;
+
+		bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);
+		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
+						 bpf->conf.veth_tx_ifindex,
+						 bfd_flags, error);
+		if (rc != 0)
+			return rc;
+	}
 
 	if (rearm_timer > bsess->timer_armed) {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
