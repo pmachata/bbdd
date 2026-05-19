@@ -337,9 +337,7 @@ static void bbdd_br_handle_session_add(struct bbdd_br *br, struct bbdd_sock *pee
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	// xxx htons not nice here
-	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, bbdd_hton16(1),
-				   &error);
+	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, 1, &error);
 	if (rc == -EINVAL)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	else if (rc != 0)
@@ -364,7 +362,7 @@ static void bbdd_br_handle_session_del(struct bbdd_br *br, struct bbdd_sock *pee
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	rc = bbdd_bfdd_del_session(br->bfdd, bbdd_hton16(1), discr, &error);
+	rc = bbdd_bfdd_del_session(br->bfdd, 1, discr, &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
@@ -390,8 +388,7 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 	if (br->ping == NULL)
 		goto err;
 
-	// xxx htons not nice here
-	rc = bbdd_bfdd_send_echo(br->bfdd, bbdd_hton16(1), &error);
+	rc = bbdd_bfdd_send_echo(br->bfdd, 1, &error);
 	if (rc != 0)
 		goto ping_free;
 
@@ -429,8 +426,7 @@ static void bbdd_br_handle_session_stats(struct bbdd_br *br,
 	if (br->stats == NULL)
 		goto err;
 
-	rc = bbdd_bfdd_request_counters(br->bfdd, bbdd_hton16(1), discr,
-					&error);
+	rc = bbdd_bfdd_request_counters(br->bfdd, 1, discr, &error);
 	if (rc != 0)
 		goto stats_free;
 

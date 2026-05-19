@@ -2247,8 +2247,8 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	}
 
 reply:
-	rc2 = bbdd_bfdd_reply_counters(d->bfdd, msg->header.id, discr, &stats,
-				      &error2);
+	rc2 = bbdd_bfdd_reply_counters(d->bfdd, bbdd_ntoh16(msg->header.id),
+				       discr, &stats, &error2);
 	if (rc2 != 0) {
 		++d->diag_stats.dp_buffer_error;
 		bbdd_util_appenderr(&error2, "reply DP_REQUEST_SESSION_COUNTERS");
@@ -2267,8 +2267,8 @@ static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
 	if (rc != 0)
 		return rc;
 
-	return bbdd_bfdd_reply_echo(d->bfdd, msg->header.id, &msg->data.echo,
-				    error);
+	return bbdd_bfdd_reply_echo(d->bfdd, bbdd_ntoh16(msg->header.id),
+				    &msg->data.echo, error);
 }
 
 void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon, const struct bfddp_message *msg)

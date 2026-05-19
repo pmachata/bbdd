@@ -317,7 +317,7 @@ static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
 }
 
 int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
-			     bbdd_be16_t msg_id, uint32_t discr,
+			     uint16_t msg_id, uint32_t discr,
 			     const struct bbdd_prog_session_data_stats *stats,
 			     char **error)
 {
@@ -326,7 +326,7 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(BFD_SESSION_COUNTERS),
-		.header.id = msg_id,
+		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.session_counters)),
 
@@ -353,7 +353,7 @@ static uint64_t bbdd_bfdd_now(void)
 
 static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
 				 enum bfddp_message_type bmt,
-				 bbdd_be16_t msg_id,
+				 uint16_t msg_id,
 				 const struct bfddp_echo *in_echo, char **error)
 {
 	uint64_t dp_time = bbdd_bfdd_now();
@@ -362,7 +362,7 @@ static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(bmt),
-		.header.id = msg_id,
+		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.echo)),
 
@@ -375,7 +375,7 @@ static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id, char **error)
+int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error)
 {
 	struct bfddp_echo echo = {
 		.bfdd_time = bbdd_hton64(bbdd_bfdd_now()),
@@ -385,7 +385,7 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id, char **error
 }
 
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
-			 bbdd_be16_t msg_id,
+			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error)
 {
 	return __bbdd_bfdd_send_echo(bfdd, ECHO_REPLY, msg_id, in_echo, error);
@@ -453,7 +453,7 @@ int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
 int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 			  struct bbdd_nl *nl,
 			  const struct bbdd_c_session *csess,
-			  bbdd_be16_t msg_id, char **error)
+			  uint16_t msg_id, char **error)
 {
 	struct bbdd_d_session dsess;
 	struct bfddp_message msg = {};
@@ -500,7 +500,7 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(DP_ADD_SESSION),
-		.header.id = msg_id,
+		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(length),
 
 		.data.session_cumulus = {
@@ -534,13 +534,13 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id,
+int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			  uint32_t discr, char **error)
 {
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(DP_DELETE_SESSION),
-		.header.id = msg_id,
+		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.session)),
 
@@ -550,7 +550,7 @@ int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id,
+int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			       uint32_t discr, char **error)
 {
 	struct bfddp_message msg;
@@ -558,7 +558,7 @@ int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, bbdd_be16_t msg_id,
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(DP_REQUEST_SESSION_COUNTERS),
-		.header.id = msg_id,
+		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.counters_req)),
 
