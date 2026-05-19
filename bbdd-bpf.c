@@ -165,11 +165,10 @@ bbdd_bpf_make_packet(uint32_t my_disc,
 		.state_bits = (uint8_t) (state->state << 6 | flags),
 		.detection_multiplier = timing->detect_mult,
 		.length = sizeof(struct bbdd_bfd_pkt),
-		.my_disc = htonl(my_disc),
-		.your_disc = htonl(your_disc),
-		.desired_tx = htonl(timing->min_tx_us),
-		.required_rx = htonl(timing->min_rx_us),
-		.required_echo_rx = 0,
+		.my_disc = bbdd_hton32(my_disc),
+		.your_disc = bbdd_hton32(your_disc),
+		.desired_tx = bbdd_hton32(timing->min_tx_us),
+		.required_rx = bbdd_hton32(timing->min_rx_us),
 	};
 }
 
@@ -351,15 +350,15 @@ bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
 		      bool *poll, bool *final)
 {
 	uint8_t bits = bbdd_bfd_pkt_bits(packet);
-	uint32_t remote_discr = ntohl(packet->my_disc);
-	uint32_t local_discr = ntohl(packet->your_disc);
+	uint32_t remote_discr = bbdd_ntoh32(packet->my_disc);
+	uint32_t local_discr = bbdd_ntoh32(packet->your_disc);
 	enum bbdd_bfd_pkt_state state;
 
 	/* Note: Version and length are validated in BPF. */
 
 	state = bbdd_bfd_pkt_state(packet);
 
-	if (packet->required_echo_rx != 0 ||
+	if (bbdd_ntoh32(packet->required_echo_rx) != 0 ||
 	    bits & (BBDD_BFD_PKT_BIT_AUTH |
 		    BBDD_BFD_PKT_BIT_DEMAND)) {
 		++bsess->diag_stats.rx_unsupported;
@@ -396,8 +395,8 @@ bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
 				    bsess->discr, remote_discr);
 		remote_data->discr = remote_discr;
 	}
-	remote_data->timing.min_rx_us = ntohl(packet->required_rx);
-	remote_data->timing.min_tx_us = ntohl(packet->desired_tx);
+	remote_data->timing.min_rx_us = bbdd_ntoh32(packet->required_rx);
+	remote_data->timing.min_tx_us = bbdd_ntoh32(packet->desired_tx);
 	remote_data->timing.detect_mult = packet->detection_multiplier;
 	remote_data->state.state = state;
 	remote_data->state.diag = bbdd_bfd_pkt_diag(packet);
@@ -475,8 +474,8 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.fib_lookup = {
 			.family = (uint8_t) af,
 			.l4_protocol = IPPROTO_UDP,
-			.sport = src->sin46.port,
-			.dport = dst->sin46.port,
+			.sport = bbdd_n16v(src->sin46.port),
+			.dport = bbdd_n16v(dst->sin46.port),
 			.ifindex = ifindex,
 			.tbid = tbid,
 			.mark = bsess->gen_id,
@@ -1043,7 +1042,7 @@ static void
 bbdd_bpf_rb_handle_unx_pkt(struct bbdd_bpf *bpf,
 			   const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem)
 {
-	uint32_t local_discr = ntohl(elem->packet.your_disc);
+	uint32_t local_discr = bbdd_ntoh32(elem->packet.your_disc);
 	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
 	struct bbdd_d_session *dsess;
 
@@ -1179,11 +1178,14 @@ bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
 				 bbdd_d_bfd_diag_to_str(diag)) ||
 	    bbdd_jrpc_append_int(obj, "detect_mult",
 				 packet->detection_multiplier) ||
-	    bbdd_jrpc_append_int(obj, "my-disc",    ntohl(packet->my_disc)) ||
-	    bbdd_jrpc_append_int(obj, "your-disc",  ntohl(packet->your_disc)) ||
-	    bbdd_jrpc_append_int(obj, "desired-tx", ntohl(packet->desired_tx)) ||
+	    bbdd_jrpc_append_int(obj, "my-disc",
+				 bbdd_ntoh32(packet->my_disc)) ||
+	    bbdd_jrpc_append_int(obj, "your-disc",
+				 bbdd_ntoh32(packet->your_disc)) ||
+	    bbdd_jrpc_append_int(obj, "desired-tx",
+				 bbdd_ntoh32(packet->desired_tx)) ||
 	    bbdd_jrpc_append_int(obj, "required-rx",
-				 ntohl(packet->required_rx)))
+				 bbdd_ntoh32(packet->required_rx)))
 		goto oom;
 
 	return obj;

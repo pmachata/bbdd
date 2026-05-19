@@ -247,21 +247,21 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 		goto put_entry_obj;
 
 	if (bbdd_jrpc_append_uint64(stats_obj, "rx_bytes",
-				    be64toh(cnt->control_input_bytes)) ||
+				    bbdd_ntoh64(cnt->control_input_bytes)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_packets",
-				    be64toh(cnt->control_input_packets)) ||
+				    bbdd_ntoh64(cnt->control_input_packets)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_bytes",
-				    be64toh(cnt->control_output_bytes)) ||
+				    bbdd_ntoh64(cnt->control_output_bytes)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_packets",
-				    be64toh(cnt->control_output_packets)) ||
+				    bbdd_ntoh64(cnt->control_output_packets)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_bytes",
-				    be64toh(cnt->echo_input_bytes)) ||
+				    bbdd_ntoh64(cnt->echo_input_bytes)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_packets",
-				    be64toh(cnt->echo_input_packets)) ||
+				    bbdd_ntoh64(cnt->echo_input_packets)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_bytes",
-				    be64toh(cnt->echo_output_bytes)) ||
+				    bbdd_ntoh64(cnt->echo_output_bytes)) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_packets",
-				    be64toh(cnt->echo_output_packets)) ||
+				    bbdd_ntoh64(cnt->echo_output_packets)) ||
 
 	    bbdd_jrpc_append_uint64(entry_obj, "discr", br->stats->discr) ||
 	    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj) ||
@@ -338,7 +338,8 @@ static void bbdd_br_handle_session_add(struct bbdd_br *br, struct bbdd_sock *pee
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
 	// xxx htons not nice here
-	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, htons(1), &error);
+	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, bbdd_hton16(1),
+				   &error);
 	if (rc == -EINVAL)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	else if (rc != 0)
@@ -363,7 +364,7 @@ static void bbdd_br_handle_session_del(struct bbdd_br *br, struct bbdd_sock *pee
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	rc = bbdd_bfdd_del_session(br->bfdd, htons(1), discr, &error);
+	rc = bbdd_bfdd_del_session(br->bfdd, bbdd_hton16(1), discr, &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
@@ -390,7 +391,7 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 		goto err;
 
 	// xxx htons not nice here
-	rc = bbdd_bfdd_send_echo(br->bfdd, htons(1), &error);
+	rc = bbdd_bfdd_send_echo(br->bfdd, bbdd_hton16(1), &error);
 	if (rc != 0)
 		goto ping_free;
 
@@ -428,7 +429,8 @@ static void bbdd_br_handle_session_stats(struct bbdd_br *br,
 	if (br->stats == NULL)
 		goto err;
 
-	rc = bbdd_bfdd_request_counters(br->bfdd, htons(1), discr, &error);
+	rc = bbdd_bfdd_request_counters(br->bfdd, bbdd_hton16(1), discr,
+					&error);
 	if (rc != 0)
 		goto stats_free;
 
@@ -546,7 +548,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 
 	bbdd_d_bfdd_mon_send(br->mon, msg);
 
-	bmt = ntohs(msg->header.type);
+	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {
 	case ECHO_REPLY:
 		return bbdd_br_bfdd_handle_echo_reply(br);

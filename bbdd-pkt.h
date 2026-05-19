@@ -2,4 +2,5 @@
 #pragma once
 #include <linux/types.h>
 #include <stdint.h>
+#include "bbdd-be.h"
 #include "bbdd-prog-pkt.h"

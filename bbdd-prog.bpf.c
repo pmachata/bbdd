@@ -368,7 +368,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 
 	final = bbdd_bfd_pkt_bits(bfd) & BBDD_BFD_PKT_BIT_FINAL;
 
-	discr = bpf_ntohl(bfd->my_disc);
+	discr = bbdd_ntoh32(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
 	if (config == NULL)
 		goto tx_no_session;
@@ -566,7 +566,7 @@ int bbdd_xmit_veth_rx_xmit(struct __sk_buff *skb)
 		goto shot;
 	}
 
-	discr = bpf_ntohl(bfd->my_disc);
+	discr = bbdd_ntoh32(bfd->my_disc);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
 	if (config == NULL)
 		goto ra_no_session;
@@ -696,7 +696,7 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	if (bfd->your_disc == 0) {
+	if (bbdd_ntoh32(bfd->your_disc) == 0) {
 		/* If the Your Discriminator field is zero, the session MUST be
 		 * selected based on some combination of other fields [...] */
 		BUMP(bbdd_prog_global_diag_stats.rx_your_discr_0);
@@ -705,7 +705,7 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
-	discr = bpf_ntohl(bfd->your_disc);
+	discr = bbdd_ntoh32(bfd->your_disc);
 	data = bpf_map_lookup_elem(&bbdd_prog_session_data_hash, &discr);
 	config = bpf_map_lookup_elem(&bbdd_prog_session_config_hash, &discr);
 	if (data == NULL || config == NULL) {

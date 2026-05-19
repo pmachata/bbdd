@@ -5,11 +5,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "bbdd-be.h"
+
 /* This structure is layout-compatible with the start of struct sockaddr_in and
  * struct sockaddr_in6, but not struct sockaddr_un. */
 struct bddd_sockaddr_in46 {
 	sa_family_t family;
-	in_port_t port;
+	bbdd_be16_t port;
 };
 
 struct bbdd_sockaddr {

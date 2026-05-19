@@ -466,7 +466,7 @@ int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
 			if (rc != 0)
 				return rc;
 		}
-		bsa->sin46.port = htons(port_num);
+		bsa->sin46.port = bbdd_hton16(port_num);
 		return 0;
 	}
 

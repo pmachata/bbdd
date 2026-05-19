@@ -1232,7 +1232,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			dsess->flags.flags[i] = cflag.value;
 	}
 
-	sport = ntohs(dsess->src.sin46.port);
+	sport = bbdd_ntoh16(dsess->src.sin46.port);
 
 	if (set_src)
 		dsess->src = *src;
@@ -1240,12 +1240,12 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 		dsess->dst = *dst;
 
 	/* Preserve the source port. */
-	dsess->src.sin46.port = htons(sport);
+	dsess->src.sin46.port = bbdd_hton16(sport);
 
 	if (dsess->flags.multihop)
-		dsess->dst.sin46.port = htons(BFD_MULTI_HOP_PORT);
+		dsess->dst.sin46.port = bbdd_hton16(BFD_MULTI_HOP_PORT);
 	else
-		dsess->dst.sin46.port = htons(BFD_SINGLE_HOP_PORT);
+		dsess->dst.sin46.port = bbdd_hton16(BFD_SINGLE_HOP_PORT);
 
 	/* Interface is given as netif_index,netif_name / vrf_index,vrf_name by
 	 * the RPC, but at this point, the indices have been validated to match
@@ -1665,7 +1665,7 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 		goto put_port;
 	}
 
-	dsess->src.sin46.port = htons(sport);
+	dsess->src.sin46.port = bbdd_hton16(sport);
 
 	/* RFC 6.2: Down state means that the session is down (or has just been
 	 * created). */
@@ -1864,7 +1864,7 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 
 	bbdd_bpf_session_del(d->bpf, dsess);
 
-	sport = ntohs(dsess->src.sin46.port);
+	sport = bbdd_ntoh16(dsess->src.sin46.port);
 	bbdd_d_sport_put(&d->spa, sport);
 
 	bbdd_sess_dir_del_session(d->sdir, dsess);
@@ -2172,8 +2172,8 @@ static int __bbdd_d_bfdd_check_length(struct bbdd_d *d,
 #define bbdd_d_bfdd_check_length(D, MSG, PAYLOAD, WHERE, ERROR)		\
 	({								\
 		const struct bfddp_message *_M = (MSG);			\
-		enum bfddp_message_type _BMT = ntohs(_M->header.type);	\
-		uint16_t _AL = ntohs(_M->header.length);		\
+		enum bfddp_message_type _BMT = bbdd_ntoh16(_M->header.type); \
+		uint16_t _AL = bbdd_ntoh16(_M->header.length);		\
 		uint16_t _EL = sizeof(_M->header) +			\
 			       sizeof(_M->data PAYLOAD);		\
 									\
@@ -2194,7 +2194,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 	if (rc != 0)
 		return rc;
 
-	discr = ntohl(msg->data.session.lid);
+	discr = bbdd_ntoh32(msg->data.session.lid);
 	rc = bbdd_d_handle_session_del_one(d, discr, error);
 	if (rc != 0) {
 		++d->diag_stats.dp_no_session;
@@ -2219,7 +2219,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	if (rc1 != 0)
 		return rc1;
 
-	discr = ntohl(msg->data.counters_req.lid);
+	discr = bbdd_ntoh32(msg->data.counters_req.lid);
 
 	/* On errors, form a nonsense response, but do respond, so that the
 	 * sender doesn't stay hanging. */
@@ -2310,7 +2310,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	 * return error, the sockerr callback is called and causes the socket to
 	 * close, but does not shut the daemon down. */
 
-	bmt = ntohs(msg->header.type);
+	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {
 	case DP_ADD_SESSION:
 		rc = bbdd_d_bfdd_handle_add_session(d, msg, &error);

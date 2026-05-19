@@ -32,6 +32,7 @@
 #include <netinet/in.h>
 
 #include <stdint.h>
+#include "bbdd-be.h"
 
 /*
  * Protocol definitions.
@@ -120,9 +121,9 @@ enum bfddp_message_type {
  */
 struct bfddp_echo {
 	/** Filled by data plane. */
-	uint64_t dp_time;
+	bbdd_be64_t dp_time;
 	/** Filled by BFD daemon. */
-	uint64_t bfdd_time;
+	bbdd_be64_t bfdd_time;
 };
 
 
@@ -155,7 +156,7 @@ enum bfddp_session_flag {
  */
 struct bfddp_session {
 	/** Important session flags. \see bfddp_session_flag. */
-	uint32_t flags;
+	bbdd_be32_t flags;
 	/**
 	 * Session source address.
 	 *
@@ -170,39 +171,39 @@ struct bfddp_session {
 	struct in6_addr dst;
 
 	/** Local discriminator. */
-	uint32_t lid;
+	bbdd_be32_t lid;
 	/**
 	 * Minimum desired transmission interval (in microseconds) without
 	 * jitter.
 	 */
-	uint32_t min_tx;
+	bbdd_be32_t min_tx;
 	/**
 	 * Required minimum receive interval rate (in microseconds) without
 	 * jitter.
 	 */
-	uint32_t min_rx;
+	bbdd_be32_t min_rx;
 	/**
 	 * Minimum desired echo transmission interval (in microseconds)
 	 * without jitter.
 	 */
-	uint32_t min_echo_tx;
+	bbdd_be32_t min_echo_tx;
 	/**
 	 * Required minimum echo receive interval rate (in microseconds)
 	 * without jitter.
 	 */
-	uint32_t min_echo_rx;
+	bbdd_be32_t min_echo_rx;
 	/** Amount of milliseconds to wait before starting the session */
-	uint32_t hold_time;
+	bbdd_be32_t hold_time;
 
 	/** Minimum TTL. */
 	uint8_t ttl;
 	/** Detection multiplier. */
 	uint8_t detect_mult;
 	/** Reserved / zeroed. */
-	uint16_t zero;
+	bbdd_be16_t zero;
 
 	/** Interface index (set to `0` when unavailable). */
-	uint32_t ifindex;
+	bbdd_be32_t ifindex;
 	/** Interface name (empty when unavailable). */
 	char ifname[BFDDP_INTERFACE_MAX_SIZE];
 
@@ -216,7 +217,7 @@ struct bfddp_session_cumulus {
 	struct bfddp_session session;
 
 	/** VRF table ID **/
-	uint32_t vrf_id;
+	bbdd_be32_t vrf_id;
 	/** VRF NAME **/
 	char vrfname[36];
 };
@@ -270,17 +271,17 @@ enum bfd_remote_flags {
  */
 struct bfddp_state_change {
 	/** Local discriminator. */
-	uint32_t lid;
+	bbdd_be32_t lid;
 	/** Remote discriminator. */
-	uint32_t rid;
+	bbdd_be32_t rid;
 	/** Remote configurations/bits set. \see bfd_remote_flags. */
-	uint32_t remote_flags;
+	bbdd_be32_t remote_flags;
 	/** Remote minimum desired transmission interval. */
-	uint32_t desired_tx;
+	bbdd_be32_t desired_tx;
 	/** Remote minimum receive interval. */
-	uint32_t required_rx;
+	bbdd_be32_t required_rx;
 	/** Remote minimum echo receive interval. */
-	uint32_t required_echo_rx;
+	bbdd_be32_t required_echo_rx;
 	/** Remote state. \see bfd_state_values.*/
 	uint8_t state;
 	/** Remote diagnostics (if any) */
@@ -326,15 +327,15 @@ struct bfddp_control_packet {
 	/** Packet length in bytes. */
 	uint8_t length;
 	/** Our discriminator. */
-	uint32_t local_id;
+	bbdd_be32_t local_id;
 	/** Remote system discriminator. */
-	uint32_t remote_id;
+	bbdd_be32_t remote_id;
 	/** Desired minimum send interval in microseconds. */
-	uint32_t desired_tx;
+	bbdd_be32_t desired_tx;
 	/** Desired minimum receive interval in microseconds. */
-	uint32_t required_rx;
+	bbdd_be32_t required_rx;
 	/** Desired minimum echo receive interval in microseconds. */
-	uint32_t required_echo_rx;
+	bbdd_be32_t required_echo_rx;
 };
 
 /** helper function to standardize state bits reading. */
@@ -366,16 +367,16 @@ struct bfddp_message_header {
 	/** Reserved / zero field. */
 	uint8_t zero;
 	/** Message contents type. \see bfddp_message_type. */
-	uint16_t type;
+	bbdd_be16_t type;
 	/**
 	 * Message identification (to pair request/response).
 	 *
 	 * The ID `0` is reserved for asynchronous messages (e.g. unrequested
 	 * messages).
 	 */
-	uint16_t id;
+	bbdd_be16_t id;
 	/** Message length. */
-	uint16_t length;
+	bbdd_be16_t length;
 };
 
 /**
@@ -385,7 +386,7 @@ struct bfddp_message_header {
  */
 struct bfddp_request_counters {
 	/** Session local discriminator. */
-	uint32_t lid;
+	bbdd_be32_t lid;
 };
 
 /**
@@ -395,25 +396,25 @@ struct bfddp_request_counters {
  */
 struct bfddp_session_counters {
 	/** Session local discriminator. */
-	uint32_t lid;
+	bbdd_be32_t lid;
 
 	/** Control packet bytes input. */
-	uint64_t control_input_bytes;
+	bbdd_be64_t control_input_bytes;
 	/** Control packets input. */
-	uint64_t control_input_packets;
+	bbdd_be64_t control_input_packets;
 	/** Control packet bytes output. */
-	uint64_t control_output_bytes;
+	bbdd_be64_t control_output_bytes;
 	/** Control packets output. */
-	uint64_t control_output_packets;
+	bbdd_be64_t control_output_packets;
 
 	/** Echo packet bytes input. */
-	uint64_t echo_input_bytes;
+	bbdd_be64_t echo_input_bytes;
 	/** Echo packets input. */
-	uint64_t echo_input_packets;
+	bbdd_be64_t echo_input_packets;
 	/** Echo packet bytes output. */
-	uint64_t echo_output_bytes;
+	bbdd_be64_t echo_output_bytes;
 	/** Echo packets output. */
-	uint64_t echo_output_packets;
+	bbdd_be64_t echo_output_packets;
 };
 
 /**
@@ -452,9 +453,9 @@ struct bfddp_echo_packet {
 	/** Length of data */
 	uint8_t length;
 	/** Reserved */
-	uint16_t reserved1;
+	bbdd_be16_t reserved1;
 	/** Our discriminator. */
-	uint32_t local_id;
+	bbdd_be32_t local_id;
 };
 
 #endif /* BFD_DP_PACKET_H */

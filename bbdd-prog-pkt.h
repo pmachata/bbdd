@@ -6,11 +6,11 @@ struct bbdd_bfd_pkt {
 	uint8_t state_bits;
 	uint8_t detection_multiplier;
 	uint8_t length;
-	__be32 my_disc;
-	__be32 your_disc;
-	__be32 desired_tx;
-	__be32 required_rx;
-	__be32 required_echo_rx;
+	bbdd_be32_t my_disc;
+	bbdd_be32_t your_disc;
+	bbdd_be32_t desired_tx;
+	bbdd_be32_t required_rx;
+	bbdd_be32_t required_echo_rx;
 };
 
 enum bbdd_bfd_pkt_state {

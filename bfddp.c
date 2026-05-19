@@ -439,7 +439,7 @@ bfddp_next_message(struct bfddp_ctx *bctx)
 
 	/* Check if we have the whole message. */
 	header = (struct bfddp_message_header *)&buf->buf[buf->packet];
-	msglen = ntohs(header->length);
+	msglen = bbdd_ntoh16(header->length);
 	if ((buf->packet + msglen) > buf->position)
 		return NULL;
 
@@ -461,7 +461,7 @@ bfddp_write_enqueue(struct bfddp_ctx *bctx, const struct bfddp_message *msg)
 	struct bfddp_buf *buf = &bctx->outbuf;
 	size_t amount;
 
-	amount = ntohs(msg->header.length);
+	amount = bbdd_ntoh16(msg->header.length);
 	/* Buffer is full, tell user about it. */
 	if (amount > buf->remaining)
 		return 0;
