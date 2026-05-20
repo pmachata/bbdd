@@ -39,11 +39,6 @@ int bbdd_util_appenderr(char **error, const char *fmt, ...);
 __attribute__((format(printf, 2, 3)))
 void bbdd_util_printerr(char **error, const char *fmt, ...);
 
-/* Like bbdd_util_printerr(), but only prints when verbosity > 0; always frees
- * *error. */
-__attribute__((format(printf, 2, 3)))
-void bbdd_util_verberr(char **error, const char *fmt, ...);
-
 int bbdd_util_pickerr(int rc1, char **error1, int rc2, char **error2);
 
 /* JRPC helpers. */
@@ -65,8 +60,8 @@ void bbdd_util_jrpc_respond_interr(struct bbdd_sock *peer,
 				   const char *msg);
 
 void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
-				  struct json_object *id,
-				  char **data);
+				       struct json_object *id,
+				       char **data);
 
 __attribute__((format(printf, 3, 4)))
 void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,

@@ -103,21 +103,6 @@ static void bbdd_util_vprinterr(char **error, const char *fmt, va_list ap)
 }
 
 __attribute__((format(printf, 2, 3)))
-void bbdd_util_verberr(char **error, const char *fmt, ...)
-{
-	va_list ap;
-
-	if (bbdd_env.verbosity <= 0) {
-		free(*error);
-		return;
-	}
-
-	va_start(ap, fmt);
-	bbdd_util_vprinterr(error, fmt, ap);
-	va_end(ap);
-}
-
-__attribute__((format(printf, 2, 3)))
 void bbdd_util_printerr(char **error, const char *fmt, ...)
 {
 	va_list ap;

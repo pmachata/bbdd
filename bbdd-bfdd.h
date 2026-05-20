@@ -11,6 +11,10 @@
 struct bbdd_c_session;
 struct bbdd_d_session;
 
+/* bbdd-mon.c */
+
+struct bbdd_mon;
+
 /* bbdd-nl.c */
 struct bbdd_nl;
 
@@ -46,10 +50,12 @@ struct bbdd_bfdd_cbs {
 
 struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 struct bbdd_poll_ctx *pctx,
+				 struct bbdd_mon *mon,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error);
 struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 					struct bbdd_poll_ctx *pctx,
+					struct bbdd_mon *mon,
 					const struct bbdd_bfdd_cbs *cbs,
 					char **error);
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);

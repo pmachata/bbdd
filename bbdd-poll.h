@@ -3,9 +3,15 @@
 
 #include <stdlib.h>
 
+/* bbdd-mon.c */
+
+struct bbdd_mon;
+
+/* bbdd-poll.c */
+
 struct bbdd_poll_ctx;
 
-struct bbdd_poll_ctx *bbdd_poll_init(char **error);
+struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error);
 void bbdd_poll_fini(struct bbdd_poll_ctx *ctx);
 
 int bbdd_poll_set_fd(struct bbdd_poll_ctx *ctx,

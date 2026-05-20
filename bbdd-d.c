@@ -2363,9 +2363,12 @@ static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
 {
 	struct bbdd_d *d = data;
 
-	// xxx monitor event, when we have a monitor bus
-	fprintf(stderr, "BFD socket closed%c%s\n",
-		error ? ':' : '.', error ?: "");
+	if (error != NULL) {
+		char *error_copy = strdup(error);
+		bbdd_mon_senderr(d->mon, &error_copy, "BFD socket closed");
+	} else {
+		bbdd_mon_send_debug(d->mon, "BFD socket closed");
+	}
 
 	assert(d->bfdd == bfdd);
 	bbdd_bfdd_close(d->bfdd);
@@ -2386,9 +2389,9 @@ struct bbdd_d_bfdd_connect_ctx {
 static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *bfdd, void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+	struct bbdd_d *d = cctx->d;
 
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Connected.\n");
+	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
 	bbdd_util_jrpc_respond_empty(&cctx->peer, cctx->id);
 }
 
@@ -2398,8 +2401,8 @@ static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 	struct bbdd_d *d = cctx->d;
 
-	fprintf(stderr, "Failed to connect to BFD: %s\n", *error);
-	bbdd_util_jrpc_respond_interr_err(&cctx->peer, cctx->id, error);
+	bbdd_util_jrpc_respond_interr(&cctx->peer, cctx->id, *error);
+	bbdd_mon_senderr(d->mon, error, "Failed to connect to BFD");
 
 	assert(d->bfdd == bfdd);
 	bbdd_bfdd_close(d->bfdd);
@@ -2453,7 +2456,7 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 		.sock_free_cb = NULL,
 	};
 
-	d->bfdd = bbdd_bfdd_open(path, d->pctx, &cbs, error);
+	d->bfdd = bbdd_bfdd_open(path, d->pctx, d->mon, &cbs, error);
 	if (d->bfdd == NULL) {
 		rc = -ENOMEM;
 		goto cctx_free;
@@ -2569,8 +2572,7 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 	bbdd_bfdd_close(d->bfdd);
 	d->bfdd = NULL;
 
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Disconnected.\n");
+	bbdd_mon_send_debug(d->mon, "bfdd: Disconnected");
 
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
@@ -2817,10 +2819,8 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 
 	/* Note: the peer is autodeleted when the first endpoint is deleted. */
 	err = bbdd_nl_del_if(nl, bbdd_d_veth_rx_name, &error);
-	if (err) {
-		fprintf(stderr, "Failed to clean up veth pair: %s\n", error);
-		free(error);
-	}
+	if (err)
+		bbdd_util_printerr(&error, "Failed to clean up veth pair");
 }
 
 static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
@@ -2935,29 +2935,29 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (d.nl == NULL)
 		goto closelog;
 
-	d.pctx = bbdd_poll_init(&error);
-	if (d.pctx == NULL)
+	d.mon = bbdd_mon_init(&error);
+	if (d.mon == NULL)
 		goto nl_destroy;
+
+	d.pctx = bbdd_poll_init(d.mon, &error);
+	if (d.pctx == NULL)
+		goto mon_fini;
 
 	d.sdir = bbdd_sess_dir_create(&error);
 	if (d.sdir == NULL)
 		goto poll_fini;
 
-	d.mon = bbdd_mon_init(&error);
-	if (d.mon == NULL)
-		goto sess_dir_destroy;
-
 	err = bbdd_mon_subscribe_cb(d.mon, bbdd_c_monitor_dispatch, NULL,
 				    topics, &error);
 	if (err != 0)
-		goto mon_fini;
+		goto sess_dir_destroy;
 
 	err = bbdd_d_start_init_veth(d.nl,
 				     &veth_rx_ifindex,
 				     &veth_tx_ifindex,
 				     &error);
 	if (err)
-		goto mon_fini;
+		goto sess_dir_destroy;
 
 	bpf_conf = (struct bbdd_bpf_global_config) {
 		.veth_rx_ifindex = veth_rx_ifindex,
@@ -3001,12 +3001,12 @@ bpf_destroy:
 	bbdd_bpf_destroy(d.bpf);
 fini_veth:
 	bbdd_d_start_fini_veth(d.nl);
-mon_fini:
-	bbdd_mon_fini(d.mon);
 sess_dir_destroy:
 	bbdd_sess_dir_destroy(d.sdir);
 poll_fini:
 	bbdd_poll_fini(d.pctx);
+mon_fini:
+	bbdd_mon_fini(d.mon);
 nl_destroy:
 	bbdd_nl_destroy(d.nl);
 closelog:
@@ -3017,23 +3017,11 @@ closelog:
 	return err;
 }
 
-int bbdd_d_start(int argc, char **argv)
+int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
-	struct bbdd_mon_topics topics = {};
-
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		fprintf(stderr, "Usage: bbdd start [monitor [topics...]]\n");
 		return 0;
-	}
-
-	if (argc > 0 && strcmp(*argv, "monitor") == 0) {
-		int rc;
-
-		NEXT_ARG_FWD();
-		rc = bbdd_c_monitor_parse_topics(argc, argv, &topics);
-		if (rc != 0)
-			return rc;
-		return bbdd_d_do_start(topics);
 	}
 
 	if (argc > 0) {
@@ -3041,6 +3029,5 @@ int bbdd_d_start(int argc, char **argv)
 		return -1;
 	}
 
-	topics.enabled[BBDD_MON_TOPIC_error] = true;
-	return bbdd_d_do_start(topics);
+	return bbdd_d_do_start(*topics);
 }

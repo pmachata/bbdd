@@ -14,6 +14,7 @@ struct bbdd_bpf;
 /* bbdd-mon.c */
 
 struct bbdd_mon;
+struct bbdd_mon_topics;
 
 /* bbdd-nl.c */
 
@@ -99,7 +100,7 @@ struct bbdd_d_session {
 	struct bbdd_d_hold *hold;
 };
 
-int bbdd_d_start(int argc, char **argv);
+int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics);
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,

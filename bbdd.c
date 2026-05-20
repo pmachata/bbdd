@@ -11,6 +11,7 @@
 
 #include "bbdd-c.h"
 #include "bbdd-d.h"
+#include "bbdd-mon.h"
 #include "config.h"
 
 struct bbdd_env bbdd_env = {
@@ -35,13 +36,13 @@ static int bbdd_help(void)
 	return 0;
 }
 
-static int bbdd_cmd(int argc, char **argv)
+static int bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
 	if (!argc || strcmp(*argv, "help") == 0) {
 		return bbdd_help();
 	} else if (strcmp(*argv, "start") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_d_start(argc, argv);
+		return bbdd_d_start(argc, argv, topics);
 	} else if (strcmp(*argv, "stop") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_stop(argc, argv);
@@ -56,10 +57,10 @@ static int bbdd_cmd(int argc, char **argv)
 		return bbdd_c_global(argc, argv);
 	} else if (strcmp(*argv, "bfdd") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd(argc, argv);
+		return bbdd_c_bfdd(argc, argv, topics);
 	} else if (strcmp(*argv, "monitor") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_monitor(argc, argv);
+		return bbdd_c_monitor(argc, argv, topics);
 	}
 
 	fprintf(stderr, "Unknown command \"%s\"\n", *argv);
@@ -84,6 +85,8 @@ int main(int argc, char **argv)
 		{ "debug",	required_argument, NULL, opt_debug },
 		{ NULL, 0, NULL, 0 }
 	};
+	struct bbdd_mon_topics topics;
+	int verbosity = 0;
 	int opt;
 	int rc;
 
@@ -98,10 +101,10 @@ int main(int argc, char **argv)
 			bbdd_help();
 			return EXIT_SUCCESS;
 		case 'v':
-			bbdd_env.verbosity++;
+			verbosity++;
 			break;
 		case 'q':
-			bbdd_env.verbosity--;
+			verbosity--;
 			break;
 		case opt_sockaddr:
 			bbdd_env.sockdir = optarg;
@@ -134,7 +137,12 @@ int main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-	rc = bbdd_cmd(argc, argv);
+	if (verbosity >= 0)
+		topics.enabled[BBDD_MON_TOPIC_error] = true;
+	if (verbosity >= 1)
+		topics.enabled[BBDD_MON_TOPIC_debug] = true;
+
+	rc = bbdd_cmd(argc, argv, &topics);
 	if (rc != 0)
 		return EXIT_FAILURE;
 	return EXIT_SUCCESS;

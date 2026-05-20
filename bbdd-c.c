@@ -2137,7 +2137,7 @@ static void bbdd_c_bfdd_help(void)
 	);
 }
 
-int bbdd_c_bfdd(int argc, char **argv)
+int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
 	if (!argc || strcmp(*argv, "help") == 0) {
 		bbdd_c_bfdd_help();
@@ -2150,7 +2150,7 @@ int bbdd_c_bfdd(int argc, char **argv)
 			return 0;
 		} else if (strcmp(*argv, "start") == 0) {
 			NEXT_ARG_FWD();
-			return bbdd_br_start(argc, argv);
+			return bbdd_br_start(argc, argv, topics);
 		}
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
 		return -1;
@@ -2790,7 +2790,8 @@ put_request:
 	return NULL;
 }
 
-static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
+static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
+			       struct bbdd_mon_topics remote_topics)
 {
 	struct bbdd_c_monitor_ctx mctx = {};
 	struct bbdd_poll_ctx *pctx;
@@ -2798,6 +2799,7 @@ static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
 	struct json_object *request;
 	struct json_object *result;
 	struct bbdd_sock peer;
+	struct bbdd_mon *mon;
 	const int id = 1;
 	char *error;
 	int err;
@@ -2806,7 +2808,7 @@ static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
 	if (err < 0)
 		goto err;
 
-	request = bbdd_c_monitor_build_request(topics, id);
+	request = bbdd_c_monitor_build_request(remote_topics, id);
 	if (request == NULL) {
 		bbdd_util_fmterr(&error, "Failed to build monitor request");
 		err = -1;
@@ -2827,10 +2829,21 @@ static int bbdd_c_monitor_jrpc(struct bbdd_mon_topics topics)
 		goto put_response;
 	}
 
-	pctx = bbdd_poll_init(&error);
-	if (pctx == NULL) {
+	mon = bbdd_mon_init(&error);
+	if (mon == NULL) {
 		err = -1;
 		goto put_response;
+	}
+
+	err = bbdd_mon_subscribe_cb(mon, bbdd_c_monitor_dispatch, NULL,
+				    *int_topics, &error);
+	if (err != 0)
+		goto mon_fini;
+
+	pctx = bbdd_poll_init(mon, &error);
+	if (pctx == NULL) {
+		err = -1;
+		goto mon_fini;
 	}
 
 	err = bbdd_poll_set_signals(pctx, &error);
@@ -2852,6 +2865,8 @@ unset_signals:
 	bbdd_poll_unset_signals(pctx);
 fini_pctx:
 	bbdd_poll_fini(pctx);
+mon_fini:
+	bbdd_mon_fini(mon);
 put_response:
 	json_object_put(response);
 put_request:
@@ -2894,8 +2909,8 @@ static bool bbdd_c_monitor_enable_topic(struct bbdd_mon_topics *topics,
 #undef MATCH_TOPIC
 }
 
-int bbdd_c_monitor_parse_topics(int argc, char **argv,
-				struct bbdd_mon_topics *topics)
+static int bbdd_c_monitor_parse_topics(int argc, char **argv,
+				       struct bbdd_mon_topics *topics)
 {
 	bool have_topics = false;
 
@@ -2935,7 +2950,8 @@ void bbdd_c_monitor_dispatch(struct json_object *msg, void *)
 	bbdd_c_monitor_handle_notif(method, params);
 }
 
-int bbdd_c_monitor(int argc, char **argv)
+int bbdd_c_monitor(int argc, char **argv,
+		   const struct bbdd_mon_topics *int_topics)
 {
 	struct bbdd_mon_topics topics = {};
 
@@ -2947,5 +2963,5 @@ int bbdd_c_monitor(int argc, char **argv)
 	if (bbdd_c_monitor_parse_topics(argc, argv, &topics) < 0)
 		return -1;
 
-	return bbdd_c_monitor_jrpc(topics);
+	return bbdd_c_monitor_jrpc(int_topics, topics);
 }

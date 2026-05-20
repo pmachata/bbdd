@@ -120,8 +120,7 @@ static void bbdd_br_stats_close(struct bbdd_br_stats *stats, const char *msg)
 
 static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 {
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Client disconnected.\n");
+	bbdd_mon_send_debug(br->mon, "bfdd: Client disconnected");
 
 	assert(br->bfdd != NULL);
 	bbdd_bfdd_close(br->bfdd);
@@ -597,8 +596,7 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
 	struct bbdd_bfdd_cbs cbs;
 	int fd;
 
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: Client connected.\n");
+	bbdd_mon_send_debug(br->mon, "bfdd: Client connected");
 
 	fd = accept4(br->bfdd_server.fd, NULL, NULL,
 		     SOCK_NONBLOCK | SOCK_CLOEXEC);
@@ -617,7 +615,7 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
 		.message_cb = bbdd_br_bfdd_message_cb,
 		.sock_free_cb = NULL,
 	};
-	br->bfdd = bbdd_bfdd_open_client(fd, pctx, &cbs, error);
+	br->bfdd = bbdd_bfdd_open_client(fd, pctx, br->mon, &cbs, error);
 	if (br->bfdd == NULL)
 		goto fd_close;
 
@@ -677,15 +675,15 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 		goto out;
 	}
 
-	br.pctx = bbdd_poll_init(&error);
-	if (br.pctx == NULL) {
-		err = -1;
-		goto nl_destroy;
-	}
-
 	br.mon = bbdd_mon_init(&error);
 	if (br.mon == NULL)
+		goto nl_destroy;
+
+	br.pctx = bbdd_poll_init(br.mon, &error);
+	if (br.pctx == NULL) {
+		err = -1;
 		goto poll_fini;
+	}
 
 	err = bbdd_mon_subscribe_cb(br.mon, bbdd_c_monitor_dispatch, NULL,
 				    topics, &error);
@@ -739,10 +737,10 @@ sock_close_d:
 	bbdd_sock_close_d(&br.ctl);
 bfdd_server_close:
 	bbdd_br_close_bfdd_server(&br.bfdd_server);
-mon_fini:
-	bbdd_mon_fini(br.mon);
 poll_fini:
 	bbdd_poll_fini(br.pctx);
+mon_fini:
+	bbdd_mon_fini(br.mon);
 nl_destroy:
 	bbdd_nl_destroy(br.nl);
 out:
@@ -759,34 +757,24 @@ static void bbdd_br_start_help(void)
 	);
 }
 
-int bbdd_br_start(int argc, char **argv)
+int bbdd_br_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
-	struct bbdd_mon_topics topics = {};
 	const char *addr = BBDD_BFDD_DEFAULT_ADDR;
-	int rc;
 
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		bbdd_br_start_help();
 		return 0;
 	}
 
-	/* Optional socket address — anything that is not "monitor". */
-	if (argc > 0 && strcmp(*argv, "monitor") != 0) {
+	if (argc > 0) {
 		addr = *argv;
 		NEXT_ARG_FWD();
 	}
 
-	if (argc > 0 && strcmp(*argv, "monitor") == 0) {
-		NEXT_ARG_FWD();
-		rc = bbdd_c_monitor_parse_topics(argc, argv, &topics);
-		if (rc != 0)
-			return rc;
-	} else if (argc > 0) {
+	if (argc > 0) {
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
 		return -1;
-	} else {
-		topics.enabled[BBDD_MON_TOPIC_error] = true;
 	}
 
-	return bbdd_br_do_start(addr, topics);
+	return bbdd_br_do_start(addr, *topics);
 }

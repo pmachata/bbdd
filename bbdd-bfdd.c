@@ -12,6 +12,7 @@
 #include "bbdd-c.h"
 #include "bbdd-d.h"
 #include "bbdd-jrpc.h"
+#include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-prog-stat.h"
 #include "bbdd-util.h"
@@ -21,6 +22,7 @@ struct bbdd_bfdd {
 	struct bfddp_ctx *bctx;
 	int fd;
 	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
 
 	struct bbdd_bfdd_cbs cbs;
 };
@@ -75,8 +77,8 @@ static int bbdd_bfdd_read_event(struct bbdd_bfdd *bfdd, char **error)
 	if (rv == -1)
 		return bbdd_bfdd_fmterr_errno(error);
 
-	if (rv > 0 && bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: received %zd bytes\n", rv);
+	if (rv > 0)
+		bbdd_mon_send_debug(bfdd->mon, "bfdd: received %zd bytes", rv);
 
 	return bbdd_bfdd_handle_messages(bfdd, error);
 }
@@ -89,8 +91,8 @@ static int bbdd_bfdd_write_event(struct bbdd_bfdd *bfdd, char **error)
 	if (rv == -1)
 		return bbdd_bfdd_fmterr_errno(error);
 
-	if (rv > 0 && bbdd_env.verbosity > 0)
-		fprintf(stderr, "bfdd: sent %zd bytes\n", rv);
+	if (rv > 0)
+		bbdd_mon_send_debug(bfdd->mon, "bfdd: sent %zd bytes", rv);
 
 	return 0;
 }
@@ -187,6 +189,7 @@ error:
 
 struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 				 struct bbdd_poll_ctx *pctx,
+				 struct bbdd_mon *mon,
 				 const struct bbdd_bfdd_cbs *cbs,
 				 char **error)
 {
@@ -228,6 +231,7 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 		.bctx = bctx,
 		.fd = fd,
 		.pctx = pctx,
+		.mon = mon,
 		.cbs = *cbs,
 	};
 
@@ -248,6 +252,7 @@ free_bfddp:
 
 struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 					struct bbdd_poll_ctx *pctx,
+					struct bbdd_mon *mon,
 					const struct bbdd_bfdd_cbs *cbs,
 					char **error)
 {
@@ -272,6 +277,7 @@ struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 		.bctx = bctx,
 		.fd = fd,
 		.pctx = pctx,
+		.mon = mon,
 		.cbs = *cbs,
 	};
 

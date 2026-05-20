@@ -11,6 +11,7 @@
 #include <sys/signalfd.h>
 
 #include "bbdd.h"
+#include "bbdd-mon.h"
 #include "bbdd-util.h"
 
 struct bbdd_poll_cb {
@@ -21,19 +22,19 @@ struct bbdd_poll_cb {
 struct bbdd_poll_ctx {
 	struct pollfd *fds;
 	struct bbdd_poll_cb *cbs;
+	struct bbdd_mon *mon;
 	size_t num;
 	bool should_quit;
 	int sig_fd;
 };
 
-void bbdd_poll_request_quit(struct bbdd_poll_ctx *ctx)
+void bbdd_poll_request_quit(struct bbdd_poll_ctx *pctx)
 {
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "requested stop\n");
-	ctx->should_quit = true;
+	bbdd_mon_send_debug(pctx->mon, "requested stop");
+	pctx->should_quit = true;
 }
 
-struct bbdd_poll_ctx *bbdd_poll_init(char **error)
+struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error)
 {
 	struct bbdd_poll_ctx *pctx;
 
@@ -215,8 +216,7 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 {
 	int err = 0;
 
-	if (bbdd_env.verbosity > 0)
-		fprintf(stdout, "Ready.\n");
+	bbdd_mon_send_debug(pctx->mon, "ready");
 
 	while (!pctx->should_quit) {
 		int nfds;
