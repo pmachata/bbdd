@@ -5,11 +5,7 @@
 
 #include "bbdd-flag.h"
 
-/* bbdd.h */
-struct bbdd_d_session;
-
-/* bbdd-sess.c */
-struct bbdd_sess_dir;
+#include "bbdd-d.i"
 
 #define BBDD_SESS_FLAGS(X)		\
 	X(MULTIHOP, multihop)		\

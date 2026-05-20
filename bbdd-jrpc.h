@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <json-c/json_object.h>
 
-struct bbdd_sock;
+#include "bbdd-sock.i"
 
 enum bbdd_jrpc_e {
 	bbdd_jrpc_e_capacity = -1,

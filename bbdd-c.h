@@ -7,11 +7,7 @@
 
 #include "bbdd-sess.h"
 
-/* bbdd-mon.c */
-
-struct bbdd_mon_topics;
-
-/* bbdd-c.c */
+#include "bbdd-mon.i"
 
 struct bbdd_c_session_netif {
 	/* Request to unset interface, or explicit request to match

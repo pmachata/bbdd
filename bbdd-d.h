@@ -7,28 +7,11 @@
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
 
-/* bbdd-bpf.c */
-
-struct bbdd_bpf;
-
-/* bbdd-mon.c */
-
-struct bbdd_mon;
-struct bbdd_mon_topics;
-
-/* bbdd-nl.c */
-
-struct bbdd_nl;
-
-/* bbdd-c.c */
-
-struct bbdd_c_session;
-
-/* bfddp_packet.h */
-
-struct bfddp_message;
-
-/* bbdd-d.c */
+#include "bbdd-c.i"
+#include "bbdd-bpf.i"
+#include "bbdd-mon.i"
+#include "bbdd-nl.i"
+#include "bfddp_packet.i"
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(dp_wrong_version_number)		\
@@ -75,8 +58,6 @@ struct bbdd_d_session_data {
 	struct bbdd_d_session_data_timing timing;
 	struct bbdd_d_session_state_end state;
 };
-
-struct bbdd_d_hold;
 
 struct bbdd_d_session {
 	/* Local session configuration. */

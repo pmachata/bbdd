@@ -3,15 +3,8 @@
 #include <stdarg.h>
 #include <json-c/json_object.h>
 
-/* bbdd-mon.c */
-
-struct bbdd_mon;
-
-/* bbdd-sock.c */
-
-struct bbdd_sock;
-
-/* bbdd-util.c */
+#include "bbdd-mon.i"
+#include "bbdd-sock.i"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*(x)))
 

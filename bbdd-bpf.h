@@ -9,26 +9,11 @@
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
 
-/* bbdd-prog.h */
-
-struct bbdd_bpf_global_config;
-
-/* bbdd-prog-stat.h */
-
-struct bbdd_prog_session_data_stats;
-
-/* bbdd-mon.c */
-
-struct bbdd_mon;
-
-/* bbdd-bfdd.c */
-
-struct bbdd_bfdd;
-
-/* bbdd-bpf.c */
-
-struct bbdd_bpf;
-struct bbdd_bpf_session;
+#include "bbdd-prog.i"
+#include "bbdd-prog-stat.i"
+#include "bbdd-mon.i"
+#include "bbdd-bfdd.i"
+#include "bbdd-bpf.i"
 
 struct bbdd_bpf_match_digest {
 	uint32_t ifindex;

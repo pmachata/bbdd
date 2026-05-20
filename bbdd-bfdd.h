@@ -7,30 +7,14 @@
 
 #include "bbdd-be.h"
 
-/* bbdd.h */
-struct bbdd_c_session;
-struct bbdd_d_session;
-
-/* bbdd-mon.c */
-
-struct bbdd_mon;
-
-/* bbdd-nl.c */
-struct bbdd_nl;
-
-/* bbdd-prog-stat.h */
-struct bbdd_prog_session_data_stats;
-
-/* bbdd-poll.c */
-struct bbdd_poll_ctx;
-
-/* bfddp_packet.h */
-struct bfddp_echo;
-struct bfddp_message;
-struct bfddp_session_cumulus;
-
-/* bbdd-bfdd.c */
-struct bbdd_bfdd;
+#include "bbdd-bfdd.i"
+#include "bbdd-c.i"
+#include "bbdd-d.i"
+#include "bbdd-mon.i"
+#include "bbdd-nl.i"
+#include "bfddp_packet.i"
+#include "bbdd-poll.i"
+#include "bbdd-prog-stat.i"
 
 #define BBDD_BFDD_DEFAULT_ADDR "unix:/var/run/frr/bfdd_dplane.sock"
 

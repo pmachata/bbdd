@@ -2,13 +2,8 @@
 #pragma once
 #include <json-c/json_object.h>
 
-/* bbdd-sock.c */
-
-struct bbdd_sock;
-
-/* bbdd-mon.c */
-
-struct bbdd_mon;
+#include "bbdd-mon.i"
+#include "bbdd-sock.i"
 
 #define BBDD_MON_TOPICS(X)	\
 	X(ringbuf, true)	\
