@@ -752,68 +752,59 @@ int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 	return -EMSGSIZE;
 }
 
-static struct json_object *
-bbdd_bfdd_format_add_session(const char *method,
-			     const struct bfddp_message *msg, char **error)
+static int bbdd_bfdd_format_add_session(const struct bfddp_message *msg,
+					struct bbdd_mon_message *mon_msg,
+					char **error)
 {
 	struct bbdd_c_session csess = {};
-	struct json_object *notif = NULL;
 	struct json_object *params = NULL;
 	struct json_object *sess_obj = NULL;
 	int rc;
 
 	rc = bbdd_bfdd_session_msg_to_c(msg, &csess, error);
 	if (rc != 0)
-		return NULL;
-
-	notif = bbdd_jrpc_new_notif(method);
-	if (notif == NULL)
-		goto err;
+		return -1;
 
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_notif;
+		goto err;
 
 	sess_obj = bbdd_c_jrpc_session_obj(&csess);
 	if (sess_obj == NULL)
 		goto put_params;
 
-	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) ||
-	    bbdd_jrpc_append_obj(notif, "params", &params))
+	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) != 0)
 		goto put_sess_obj;
 
-	return notif;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "bfdd:sess-add",
+		.params = params,
+	};
+	return 0;
 
 put_sess_obj:
 	json_object_put(sess_obj);
 put_params:
 	json_object_put(params);
-put_notif:
-	json_object_put(notif);
 err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-struct json_object *
-bbdd_bfdd_format_state_change(const char *method,
-			      const struct bfddp_message *msg, char **error)
+int bbdd_bfdd_format_state_change(const struct bfddp_state_change *sc,
+				  const char *method,
+				  struct bbdd_mon_message *mon_msg,
+				  char **error)
 {
-	const struct bfddp_state_change *sc = &msg->data.state;
-	struct json_object *notif;
 	struct json_object *params;
 	struct json_object *sess_obj;
 	struct json_object *state_obj;
 	struct json_object *data_obj;
 	struct json_object *remote_obj;
 
-	notif = bbdd_jrpc_new_notif(method);
-	if (notif == NULL)
-		goto err;
-
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_notif;
+		goto err;
 
 	sess_obj = json_object_new_object();
 	if (sess_obj == NULL)
@@ -857,10 +848,11 @@ bbdd_bfdd_format_state_change(const char *method,
 	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) != 0)
 		goto put_sess_obj;
 
-	if (bbdd_jrpc_append_obj(notif, "params", &params) != 0)
-		goto put_notif;
-
-	return notif;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = method,
+		.params = params,
+	};
+	return 0;
 
 put_remote_obj:
 	json_object_put(remote_obj);
@@ -872,115 +864,121 @@ put_sess_obj:
 	json_object_put(sess_obj);
 put_params:
 	json_object_put(params);
-put_notif:
-	json_object_put(notif);
 err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-static struct json_object *
-bbdd_bfdd_format_lid_msg(const char *method, uint32_t lid, char **error)
+static int bbdd_bfdd_format_lid_msg(uint32_t lid, const char *method,
+				    struct bbdd_mon_message *mon_msg,
+				    char **error)
 {
-	struct json_object *notif = NULL;
-	struct json_object *params = NULL;
-
-	notif = bbdd_jrpc_new_notif(method);
-	if (notif == NULL)
-		goto err;
-
-	params = json_object_new_object();
-	if (params == NULL)
-		goto put_notif;
-
-	if (bbdd_jrpc_append_int(params, "lid", lid) ||
-	    bbdd_jrpc_append_obj(notif, "params", &params))
-		goto put_params;
-
-	return notif;
-
-put_params:
-	json_object_put(params);
-put_notif:
-	json_object_put(notif);
-err:
-	bbdd_util_fmterr(error, "%m");
-	return NULL;
-}
-
-static struct json_object *
-bbdd_bfdd_format_bare_notif(const char *method, char **error)
-{
-	struct json_object *notif;
-
-	notif = bbdd_jrpc_new_notif(method);
-	if (notif == NULL)
-		bbdd_util_fmterr(error, "%m");
-	return notif;
-}
-
-static struct json_object *
-bbdd_bfdd_format_unknown(const char *method, enum bfddp_message_type bmt,
-			 char **error)
-{
-	struct json_object *notif;
 	struct json_object *params;
 
-	notif = bbdd_jrpc_new_notif(method);
-	if (notif == NULL)
-		goto err;
-
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_notif;
+		goto err;
 
-	if (bbdd_jrpc_append_int(params, "type", bmt) ||
-	    bbdd_jrpc_append_obj(notif, "params", &params))
+	if (bbdd_jrpc_append_int(params, "lid", lid) != 0)
 		goto put_params;
 
-	return notif;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = method,
+		.params = params,
+	};
+	return 0;
 
 put_params:
 	json_object_put(params);
-put_notif:
-	json_object_put(notif);
 err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-struct json_object *
-bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg, char **error)
+static int
+bbdd_bfdd_msg_format_bare(const char *method, struct bbdd_mon_message *mon_msg,
+			  char **error)
+{
+	struct json_object *params;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto err;
+
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = method,
+		.params = params,
+	};
+	return 0;
+
+err:
+	bbdd_util_fmterr(error, "%m");
+	return -1;
+}
+
+static int
+bbdd_bfdd_format_unknown(enum bfddp_message_type bmt,
+			 struct bbdd_mon_message *mon_msg, char **error)
+{
+	struct json_object *params;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto err;
+
+	if (bbdd_jrpc_append_int(params, "type", bmt) != 0)
+		goto put_params;
+
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "bfdd:unknown",
+		.params = params,
+	};
+	return 0;
+
+put_params:
+	json_object_put(params);
+err:
+	bbdd_util_fmterr(error, "%m");
+	return -1;
+}
+
+int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
+			     struct bbdd_mon_message *mon_msg, char **error)
 {
 	enum bfddp_message_type bmt = bbdd_ntoh16(msg->header.type);
 
 	switch (bmt) {
+		uint32_t lid;
+
 	case DP_ADD_SESSION:
-		return bbdd_bfdd_format_add_session("bfdd:sess-add", msg,
-						    error);
+		return bbdd_bfdd_format_add_session(msg, mon_msg, error);
 
 	case DP_DELETE_SESSION:
-		return bbdd_bfdd_format_lid_msg("bfdd:sess-del",
-						bbdd_ntoh32(msg->data.session.lid),
-						error);
+		lid = bbdd_ntoh32(msg->data.session.lid);
+		return bbdd_bfdd_format_lid_msg(lid, "bfdd:sess-del",
+						mon_msg, error);
 
 	case DP_REQUEST_SESSION_COUNTERS:
-		return bbdd_bfdd_format_lid_msg("bfdd:sess-cnt-req",
-						bbdd_ntoh32(msg->data.counters_req.lid),
-						error);
+		lid = bbdd_ntoh32(msg->data.counters_req.lid);
+		return bbdd_bfdd_format_lid_msg(lid, "bfdd:sess-cnt-req",
+						mon_msg, error);
 
 	case BFD_STATE_CHANGE:
-		return bbdd_bfdd_format_state_change("bfdd:state-change", msg,
-						     error);
+		return bbdd_bfdd_format_state_change(&msg->data.state,
+						     "bfdd:state-change",
+						     mon_msg, error);
 
 	case ECHO_REQUEST:
-		return bbdd_bfdd_format_bare_notif("bfdd:echo-req", error);
+		return bbdd_bfdd_msg_format_bare("bfdd:echo-req", mon_msg,
+						 error);
 	case ECHO_REPLY:
-		return bbdd_bfdd_format_bare_notif("bfdd:echo-rep", error);
+		return bbdd_bfdd_msg_format_bare("bfdd:echo-rep", mon_msg,
+						 error);
 	case BFD_SESSION_COUNTERS:
-		return bbdd_bfdd_format_bare_notif("bfdd:sess-cnt-rep", error);
+		return bbdd_bfdd_msg_format_bare("bfdd:sess-cnt-rep", mon_msg,
+						 error);
 
 	default:
-		return bbdd_bfdd_format_unknown("bfdd:unknown", bmt, error);
+		return bbdd_bfdd_format_unknown(bmt, mon_msg, error);
 	}
 }

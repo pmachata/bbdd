@@ -260,40 +260,32 @@ static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 				   const char *request,
 				   struct json_object *request_obj)
 {
-	struct json_object *notif;
-	struct json_object *params;
+	struct bbdd_mon_message mon_msg = {
+		.method = "jrpc:request",
+	};
 	int rc;
 
-	notif = bbdd_jrpc_new_notif("jrpc:request");
-	if (notif == NULL)
+	mon_msg.params = json_object_new_object();
+	if (mon_msg.params == NULL)
 		return;
-
-	params = json_object_new_object();
-	if (params == NULL)
-		goto put_notif;
 
 	/* If we could parse it, append the parse, fall back to string. */
 	if (request_obj != NULL) {
-		rc = json_object_object_add(params, "message", request_obj);
+		rc = json_object_object_add(mon_msg.params, "message",
+					    request_obj);
 		if (rc != 0)
 			goto string;
 		json_object_get(request_obj);
 	} else {
 	string:
-		rc = bbdd_jrpc_append_str(params, "message", request);
-		if (rc != 0)
-			goto put_params;
+		rc = bbdd_jrpc_append_str(mon_msg.params, "message", request);
+		if (rc != 0) {
+			json_object_put(mon_msg.params);
+			return;
+		}
 	}
 
-	if (bbdd_jrpc_append_obj(notif, "params", &params) != 0)
-		goto put_params;
-
-	bbdd_mon_send(mon, notif, topic);
-
-put_params:
-	json_object_put(params);
-put_notif:
-	json_object_put(notif);
+	bbdd_mon_send(mon, &mon_msg, topic);
 }
 
 void bbdd_util_ctl_activity(struct bbdd_sock *ctl,

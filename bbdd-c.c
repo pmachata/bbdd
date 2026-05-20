@@ -2343,9 +2343,11 @@ static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_message(struct json_object *params, char **error)
 {
 	enum {
+		pol_ts,
 		pol_msg,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]   = { .key = "ts",   .type = json_type_int    },
 		[pol_msg]  = { .key = "msg",  .type = json_type_string },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -2373,6 +2375,7 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 					 char **error)
 {
 	enum {
+		pol_ts,
 		pol_ifindex,
 		pol_skb_len,
 		pol_ttl,
@@ -2382,6 +2385,7 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 		pol_bfd,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]       = { .key = "ts",       .type = json_type_int },
 		[pol_ifindex]  = { .key = "ifindex",  .type = json_type_int },
 		[pol_skb_len]  = { .key = "skb-len",  .type = json_type_int },
 		[pol_ttl]      = { .key = "ttl",      .type = json_type_int },
@@ -2467,11 +2471,13 @@ bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(struct json_object *params,
 					 char **error)
 {
 	enum {
+		pol_ts,
 		pol_skb_len,
 		pol_ttl,
 		pol_bfd,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_skb_len] = { .key = "skb-len", .type = json_type_int },
 		[pol_ttl]     = { .key = "ttl",     .type = json_type_int },
 		[pol_bfd]     = { .key = "bfd",     .type = json_type_object },
@@ -2519,9 +2525,11 @@ bbdd_c_monitor_handle_ringbuf_rx_timeout(struct json_object *params,
 					 char **error)
 {
 	enum {
+		pol_ts,
 		pol_discr
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]    = { .key = "ts",    .type = json_type_int },
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -2550,10 +2558,12 @@ bbdd_c_monitor_handle_ringbuf_tx_no_neigh(struct json_object *params,
 					  char **error)
 {
 	enum {
+		pol_ts,
 		pol_ifindex,
 		pol_addr,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
 		[pol_addr]    = { .key = "addr",    .type = json_type_object },
 	};
@@ -2594,10 +2604,12 @@ static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 {
 	enum {
+		pol_ts,
 		pol_discr,
 		pol_session,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_discr]   = { .key = "discr",   .type = json_type_int },
 		[pol_session] = { .key = "session", .type = json_type_object },
 	};
@@ -2633,27 +2645,47 @@ try_discr:
 	return BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static void bbdd_c_monitor_print_ts_fmt(time_t sec, long ms, bool local)
+{
+	struct tm tm;
+
+	localtime_r(&sec, &tm);
+	printf("[%s%04d-%02d-%02dT%02d:%02d:%02d.%03ld] ",
+	       local ? "!" : "",
+	       tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+	       tm.tm_hour, tm.tm_min, tm.tm_sec, ms);
+}
+
+static void bbdd_c_monitor_print_ts(struct json_object *ts_obj)
+{
+	uint64_t ts_ms = json_object_get_uint64(ts_obj);
+
+	bbdd_c_monitor_print_ts_fmt((time_t)(ts_ms / 1000), ts_ms % 1000, false);
+}
+
 static void bbdd_c_monitor_print_timestamp(void)
 {
 	struct timespec ts;
-	struct tm tm;
 
 	clock_gettime(CLOCK_REALTIME, &ts);
-	localtime_r(&ts.tv_sec, &tm);
-	printf("[%04d-%02d-%02dT%02d:%02d:%02d.%03ld] ",
-	       tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-	       tm.tm_hour, tm.tm_min, tm.tm_sec,
-	       ts.tv_nsec / 1000000);
+	bbdd_c_monitor_print_ts_fmt(ts.tv_sec, ts.tv_nsec / 1000000, true);
 }
 
 static void bbdd_c_monitor_handle_notif(const char *method,
 					struct json_object *params)
 {
-	char *error;
 	enum bbdd_c_monitor_print_rc rc = BBDD_C_MONITOR_PRINT_UNHANDLED;
+	struct json_object *ts_obj = NULL;
+	char *error;
 
-	if (bbdd_env.timestamp)
-		bbdd_c_monitor_print_timestamp();
+	json_object_object_get_ex(params, "ts", &ts_obj);
+
+	if (bbdd_env.timestamp) {
+		if (ts_obj != NULL)
+			bbdd_c_monitor_print_ts(ts_obj);
+		else
+			bbdd_c_monitor_print_timestamp();
+	}
 
 	printf("%-20s: ", method);
 

@@ -1197,61 +1197,51 @@ oom:
 	return NULL;
 }
 
-static struct json_object *
+static int
 bbdd_bpf_rb_format_tx_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
-			       char **error)
+			       struct bbdd_mon_message *mon_msg, char **error)
 {
 	struct json_object *addr_obj;
 	struct json_object *params;
-	struct json_object *obj;
-
-	obj = bbdd_jrpc_new_notif("ringbuf:tx-no-neigh");
-	if (obj == NULL)
-		goto err;
 
 	addr_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->addr, error);
 	if (addr_obj == NULL)
-		goto put_obj;
+		return -1;
 
 	params = json_object_new_object();
 	if (params == NULL)
 		goto put_addr_obj;
 
 	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
-	    bbdd_jrpc_append_obj(params, "addr", &addr_obj) ||
-	    bbdd_jrpc_append_obj(obj, "params", &params))
+	    bbdd_jrpc_append_obj(params, "addr", &addr_obj))
 		goto put_params;
 
-	return obj;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "ringbuf:tx-no-neigh",
+		.params = params,
+	};
+	return 0;
 
 put_params:
 	json_object_put(params);
 put_addr_obj:
 	json_object_put(addr_obj);
-put_obj:
-	json_object_put(obj);
-err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-static struct json_object *
-bbdd_bpf_rb_format_rx_discr_0(
-	const struct bbdd_bpf_rb_elem_rx_discr_0 *elem, char **error)
+static int
+bbdd_bpf_rb_format_rx_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
+			      struct bbdd_mon_message *mon_msg, char **error)
 {
 	struct json_object *src_obj;
 	struct json_object *dst_obj;
 	struct json_object *pkt_obj;
 	struct json_object *params;
-	struct json_object *obj;
-
-	obj = bbdd_jrpc_new_notif("ringbuf:rx-discr-0");
-	if (obj == NULL)
-		goto err;
 
 	src_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->saddr, error);
 	if (src_obj == NULL)
-		goto put_obj;
+		return -1;
 
 	dst_obj = bbdd_bpf_jrpc_addr_obj(elem->ethtype, &elem->daddr, error);
 	if (dst_obj == NULL)
@@ -1271,11 +1261,14 @@ bbdd_bpf_rb_format_rx_discr_0(
 	    bbdd_jrpc_append_bool(params, "multihop", elem->multihop) ||
 	    bbdd_jrpc_append_obj(params, "src", &src_obj) ||
 	    bbdd_jrpc_append_obj(params, "dst", &dst_obj) ||
-	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj) ||
-	    bbdd_jrpc_append_obj(obj, "params", &params))
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj))
 		goto put_params;
 
-	return obj;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "ringbuf:rx-discr-0",
+		.params = params,
+	};
+	return 0;
 
 put_params:
 	json_object_put(params);
@@ -1285,28 +1278,20 @@ put_dst_obj:
 	json_object_put(dst_obj);
 put_src_obj:
 	json_object_put(src_obj);
-put_obj:
-	json_object_put(obj);
-err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-static struct json_object *
+static int
 bbdd_bpf_rb_format_rx_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
-			      char **error)
+			      struct bbdd_mon_message *mon_msg, char **error)
 {
 	struct json_object *params;
 	struct json_object *pkt_obj;
-	struct json_object *obj;
-
-	obj = bbdd_jrpc_new_notif("ringbuf:rx-unx-pkt");
-	if (obj == NULL)
-		return NULL;
 
 	pkt_obj = bbdd_bpf_rb_format_bfd_pkt(&elem->packet, error);
 	if (pkt_obj == NULL)
-		goto put_obj;
+		return -1;
 
 	params = json_object_new_object();
 	if (params == NULL)
@@ -1314,90 +1299,113 @@ bbdd_bpf_rb_format_rx_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
 
 	if (bbdd_jrpc_append_int(params, "skb-len", elem->skb_len) ||
 	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
-	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj) ||
-	    bbdd_jrpc_append_obj(obj, "params", &params))
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj))
 		goto put_params;
 
-	return obj;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "ringbuf:rx-unx-pkt",
+		.params = params,
+	};
+	return 0;
 
 put_params:
 	json_object_put(params);
 put_pkt_obj:
 	json_object_put(pkt_obj);
-put_obj:
-	json_object_put(obj);
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-static struct json_object *
-bbdd_bpf_rb_format_rx_timeout(
-	const struct bbdd_bpf_rb_elem_rx_timeout *elem, char **error)
+static int
+bbdd_bpf_rb_format_rx_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
+			      struct bbdd_mon_message *mon_msg, char **error)
 {
 	struct json_object *params;
-	struct json_object *obj;
-
-	obj = bbdd_jrpc_new_notif("ringbuf:rx-timeout");
-	if (obj == NULL)
-		return NULL;
 
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_obj;
+		goto err;
 
-	if (bbdd_jrpc_append_int(params, "discr", elem->discr) ||
-	    bbdd_jrpc_append_obj(obj, "params", &params))
+	if (bbdd_jrpc_append_int(params, "discr", elem->discr) != 0)
 		goto put_params;
 
-	return obj;
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "ringbuf:rx-timeout",
+		.params = params,
+	};
+	return 0;
 
 put_params:
 	json_object_put(params);
-put_obj:
-	json_object_put(obj);
+err:
 	bbdd_util_fmterr(error, "%m");
-	return NULL;
+	return -1;
 }
 
-static struct json_object *
-bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head, char **error)
+static int
+bbdd_bpf_rb_format_unknown(enum bbdd_bpf_rb_elem_type type,
+			   struct bbdd_mon_message *mon_msg, char **error)
+{
+	struct json_object *params;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto err;
+
+	if (bbdd_jrpc_append_int(params, "type", type) != 0)
+		goto put_params;
+
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = "ringbuf:unknown",
+		.params = params,
+	};
+	return 0;
+
+put_params:
+	json_object_put(params);
+err:
+	bbdd_util_fmterr(error, "%m");
+	return -1;
+}
+
+static int
+bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head,
+			struct bbdd_mon_message *mon_msg, char **error)
 {
 	const void *data = head;
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGH:
-		return bbdd_bpf_rb_format_tx_no_neigh(data, error);
+		return bbdd_bpf_rb_format_tx_no_neigh(data, mon_msg, error);
 	case BBDD_BPF_RB_ELEM_RX_DISCR_0:
-		return bbdd_bpf_rb_format_rx_discr_0(data, error);
+		return bbdd_bpf_rb_format_rx_discr_0(data, mon_msg, error);
 	case BBDD_BPF_RB_ELEM_RX_UNX_PKT:
-		return bbdd_bpf_rb_format_rx_unx_pkt(data, error);
+		return bbdd_bpf_rb_format_rx_unx_pkt(data, mon_msg, error);
 	case BBDD_BPF_RB_ELEM_RX_TIMEOUT:
-		return bbdd_bpf_rb_format_rx_timeout(data, error);
+		return bbdd_bpf_rb_format_rx_timeout(data, mon_msg, error);
+	default:
+		return bbdd_bpf_rb_format_unknown(head->type, mon_msg, error);
 	}
-
-	bbdd_util_fmterr(error, "Unknown ring buffer element type %d",
-			 head->type);
-	return NULL;
 }
 
 static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf, struct bbdd_mon *mon,
 				 const struct bbdd_bpf_rb_elem_head *head)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_ringbuf;
-	struct json_object *msg;
+	struct bbdd_mon_message mon_msg;
 	char *error;
+	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	msg = bbdd_bpf_rb_format_jrpc(head, &error);
-	if (msg == NULL) {
+	rc = bbdd_bpf_rb_format_jrpc(head, &mon_msg, &error);
+	if (rc != 0) {
 		bbdd_mon_senderr(mon, &error, "Failed to format monitor message");
 		return;
 	}
 
-	bbdd_mon_send(mon, msg, topic);
-	json_object_put(msg);
+	bbdd_mon_send(mon, &mon_msg, topic);
 }
 
 static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)

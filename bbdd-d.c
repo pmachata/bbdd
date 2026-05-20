@@ -1076,9 +1076,9 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 					 struct bbdd_bfdd *bfdd)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
+	struct bbdd_mon_message mon_msg;
 	struct json_object *sess_obj;
 	struct json_object *params;
-	struct json_object *msg;
 	char *error = NULL;
 	int rc = -1;
 
@@ -1092,13 +1092,9 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	msg = bbdd_jrpc_new_notif("session:change");
-	if (msg == NULL)
-		return;
-
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_msg;
+		goto err;
 
 	sess_obj = bbdd_d_session_json(bpf, dsess, &error);
 	if (sess_obj != NULL) {
@@ -1112,17 +1108,16 @@ no_session:
 			goto put_params;
 	}
 
-	if (bbdd_jrpc_append_obj(msg, "params", &params))
-		goto put_params;
-
-	bbdd_mon_send(mon, msg, topic);
-	rc = 0;
+	mon_msg = (struct bbdd_mon_message) {
+		.method = "session:change",
+		.params = params,
+	};
+	bbdd_mon_send(mon, &mon_msg, topic);
+	return;
 
 put_params:
 	json_object_put(params);
-put_msg:
-	json_object_put(msg);
-
+err:
 	if (rc != 0)
 		bbdd_mon_senderr(mon, &error, "session %u: failed to format notification",
 				 dsess->local.discr);
@@ -2274,19 +2269,18 @@ static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
 void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon, const struct bfddp_message *msg)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_bfdd;
-	struct json_object *jmsg;
+	struct bbdd_mon_message mon_msg;
 	char *error;
+	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	jmsg = bbdd_bfdd_msg_format_mon(msg, &error);
-	if (jmsg == NULL)
-		return bbdd_mon_senderr(mon, &error,
-					"Failed to format bfdd monitor message");
+	rc = bbdd_bfdd_msg_format_mon(msg, &mon_msg, &error);
+	if (rc != 0)
+		return bbdd_mon_senderr(mon, &error, "Failed to format bfdd monitor message");
 
-	bbdd_mon_send(mon, jmsg, topic);
-	json_object_put(jmsg);
+	bbdd_mon_send(mon, &mon_msg, topic);
 }
 
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,

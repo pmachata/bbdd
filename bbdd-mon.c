@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <utlist.h>
 
 #include "bbdd.h"
@@ -162,39 +163,69 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 	}
 }
 
-void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+void bbdd_mon_send(struct bbdd_mon *mon, struct bbdd_mon_message *mon_msg,
 		   enum bbdd_mon_topic topic)
 {
-	__bbdd_mon_send(mon, msg, topic);
+	struct json_object *notif;
+	struct timespec ts;
+	uint64_t ts_ms;
+
+	/* We need some object anyway to attach the timestamp to, so just force
+	 * everyone to allocate at least empty params. */
+	assert(mon_msg->params != NULL);
+	assert(mon_msg->method != NULL);
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts_ms = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+	bbdd_jrpc_append_uint64(mon_msg->params, "ts", ts_ms); /* ignore failure */
+
+	notif = bbdd_jrpc_new_notif(mon_msg->method);
+	if (notif == NULL)
+		goto put_params;
+
+	if (bbdd_jrpc_append_obj(notif, "params", &mon_msg->params) != 0)
+		goto put_notif;
+
+	__bbdd_mon_send(mon, notif, topic);
+
+put_notif:
+	json_object_put(notif);
+put_params:
+	json_object_put(mon_msg->params);
+
+	mon_msg->params = bbdd_poison;
 }
 
-static void bbdd_mon_send_msg(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
-			      const char *method, const char *msg)
+static void bbdd_mon_send_str(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
+			      const char *method, const char *str)
 {
+	struct bbdd_mon_message mon_msg = {
+		.method = method,
+	};
 	struct json_object *params;
-	struct json_object *obj;
+	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	obj = bbdd_jrpc_new_notif(method);
-	if (obj == NULL)
-		return;
-
 	params = json_object_new_object();
 	if (params == NULL)
-		goto put_obj;
+		return;
 
-	if (bbdd_jrpc_append_str(params, "msg", msg) ||
-	    bbdd_jrpc_append_obj(obj, "params", &params))
-		goto put_params;
+	if (str != NULL) {
+		rc = bbdd_jrpc_append_str(params, "msg", str);
+		if (rc != 0)
+			goto put_params;
+	}
 
-	__bbdd_mon_send(mon, obj, topic);
+	mon_msg = (struct bbdd_mon_message) {
+		.method = method,
+		.params = params,
+	};
+	return bbdd_mon_send(mon, &mon_msg, topic);
 
 put_params:
 	json_object_put(params);
-put_obj:
-	json_object_put(obj);
 }
 
 static void bbdd_mon_send_vfmt(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
@@ -210,7 +241,7 @@ static void bbdd_mon_send_vfmt(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 	if (rc < 0)
 		return;
 
-	bbdd_mon_send_msg(mon, topic, method, msg);
+	bbdd_mon_send_str(mon, topic, method, msg);
 	free(msg);
 }
 
@@ -241,7 +272,7 @@ void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
 	va_end(ap);
 
 	if (rc < 0) {
-		bbdd_mon_send_msg(mon, topic, method, errmsg);
+		bbdd_mon_send_str(mon, topic, method, errmsg);
 		goto out;
 	}
 
@@ -249,7 +280,7 @@ void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
 		/* str is unchanged if the formatting fails. */
 		bbdd_util_wraperr(&str, "%s: %s", str, *error);
 
-	bbdd_mon_send_msg(mon, topic, method, str);
+	bbdd_mon_send_str(mon, topic, method, str);
 
 out:
 	free(str);
@@ -259,13 +290,5 @@ out:
 
 void bbdd_mon_send_monitor_end(struct bbdd_mon *mon)
 {
-	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_monitor;
-	struct json_object *notif;
-
-	notif = bbdd_jrpc_new_notif("monitor-end");
-	if (notif == NULL)
-		return;
-
-	__bbdd_mon_send(mon, notif, topic);
-	json_object_put(notif);
+	bbdd_mon_send_str(mon, BBDD_MON_TOPIC_monitor, "monitor-end", NULL);
 }

@@ -33,11 +33,17 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error);
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
-			  void (*cb)(struct json_object *, void *), void *data,
-			  struct bbdd_mon_topics topics, char **error);
+			  void (*cb)(struct json_object *, void *),
+			  void *data, struct bbdd_mon_topics topics,
+			  char **error);
 
 bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic);
-void bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
+
+struct bbdd_mon_message {
+	const char *method;
+	struct json_object *params;
+};
+void bbdd_mon_send(struct bbdd_mon *mon, struct bbdd_mon_message *mon_msg,
 		   enum bbdd_mon_topic topic);
 
 __attribute__((format(printf, 2, 3)))

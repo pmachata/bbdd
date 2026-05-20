@@ -43,7 +43,10 @@ struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error)
 		bbdd_util_fmterr(error, "Failed to allocate poll context: %m");
 		return NULL;
 	}
-	*pctx = (struct bbdd_poll_ctx){ .sig_fd = -1 };
+	*pctx = (struct bbdd_poll_ctx){
+		.mon = mon,
+		.sig_fd = -1,
+	};
 	return pctx;
 }
 

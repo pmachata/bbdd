@@ -85,7 +85,7 @@ int main(int argc, char **argv)
 		{ "debug",	required_argument, NULL, opt_debug },
 		{ NULL, 0, NULL, 0 }
 	};
-	struct bbdd_mon_topics topics;
+	struct bbdd_mon_topics topics = {};
 	int verbosity = 0;
 	int opt;
 	int rc;

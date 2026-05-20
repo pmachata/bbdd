@@ -3,3 +3,4 @@
 
 struct bbdd_mon;
 struct bbdd_mon_topics;
+struct bbdd_mon_message;

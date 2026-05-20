@@ -70,8 +70,9 @@ int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,
 			       char **error);
 
-struct json_object *bbdd_bfdd_format_state_change(const char *method,
-						  const struct bfddp_message *msg,
-						  char **error);
-struct json_object *bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
-					     char **error);
+int bbdd_bfdd_format_state_change(const struct bfddp_state_change *sc,
+				  const char *method,
+				  struct bbdd_mon_message *mon_msg,
+				  char **error);
+int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
+			     struct bbdd_mon_message *mon_msg, char **error);

@@ -505,8 +505,9 @@ bbdd_br_bfdd_handle_state_change(struct bbdd_br *br,
 				 const struct bfddp_message *msg)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
-	struct json_object *jmsg;
+	struct bbdd_mon_message mon_msg;
 	char *error;
+	int rc;
 
 	/* For session change messages, we don't really have good options
 	 * besides sending as a monitor message in case anyone is watching. This
@@ -519,13 +520,12 @@ bbdd_br_bfdd_handle_state_change(struct bbdd_br *br,
 	if (!bbdd_mon_topic_active(br->mon, topic))
 		return;
 
-	jmsg = bbdd_bfdd_format_state_change("session:change", msg, &error);
-	if (jmsg == NULL)
-		return bbdd_mon_senderr(br->mon, &error,
-					"Failed to forward BFD_STATE_CHANGE message");
+	rc = bbdd_bfdd_format_state_change(&msg->data.state, "session:change",
+					   &mon_msg, &error);
+	if (rc != 0)
+		return bbdd_mon_senderr(br->mon, &error, "Failed to forward BFD_STATE_CHANGE message");
 
-	bbdd_mon_send(br->mon, jmsg, topic);
-	json_object_put(jmsg);
+	bbdd_mon_send(br->mon, &mon_msg, topic);
 }
 
 static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
