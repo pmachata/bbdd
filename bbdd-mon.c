@@ -166,32 +166,40 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 void bbdd_mon_send(struct bbdd_mon *mon, struct bbdd_mon_message *mon_msg,
 		   enum bbdd_mon_topic topic)
 {
+	struct json_object *outer_params;
 	struct json_object *notif;
 	struct timespec ts;
 	uint64_t ts_ms;
 
-	/* We need some object anyway to attach the timestamp to, so just force
-	 * everyone to allocate at least empty params. */
-	assert(mon_msg->params != NULL);
 	assert(mon_msg->method != NULL);
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts_ms = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-	bbdd_jrpc_append_uint64(mon_msg->params, "ts", ts_ms); /* ignore failure */
+
+	outer_params = json_object_new_object();
+	if (outer_params == NULL)
+		goto put_params;
+
+	bbdd_jrpc_append_uint64(outer_params, "ts", ts_ms); /* ignore failure */
+
+	if (bbdd_jrpc_append_obj(outer_params, "params", &mon_msg->params) != 0)
+		goto put_outer;
 
 	notif = bbdd_jrpc_new_notif(mon_msg->method);
 	if (notif == NULL)
-		goto put_params;
+		goto put_outer;
 
-	if (bbdd_jrpc_append_obj(notif, "params", &mon_msg->params) != 0)
+	if (bbdd_jrpc_append_obj(notif, "params", &outer_params) != 0)
 		goto put_notif;
 
 	__bbdd_mon_send(mon, notif, topic);
 
 put_notif:
 	json_object_put(notif);
+put_outer:
+	json_object_put(outer_params);
 put_params:
-	json_object_put(mon_msg->params);
+	json_object_put(mon_msg->params); /* NULL-safe after successful append_obj */
 
 	mon_msg->params = bbdd_poison;
 }
@@ -199,20 +207,18 @@ put_params:
 static void bbdd_mon_send_str(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 			      const char *method, const char *str)
 {
-	struct bbdd_mon_message mon_msg = {
-		.method = method,
-	};
-	struct json_object *params;
+	struct json_object *params = NULL;
+	struct bbdd_mon_message mon_msg;
 	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	params = json_object_new_object();
-	if (params == NULL)
-		return;
-
 	if (str != NULL) {
+		params = json_object_new_object();
+		if (params == NULL)
+			return;
+
 		rc = bbdd_jrpc_append_str(params, "msg", str);
 		if (rc != 0)
 			goto put_params;

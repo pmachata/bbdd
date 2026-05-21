@@ -2343,11 +2343,9 @@ static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_message(struct json_object *params, char **error)
 {
 	enum {
-		pol_ts,
 		pol_msg,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]   = { .key = "ts",   .type = json_type_int    },
 		[pol_msg]  = { .key = "msg",  .type = json_type_string },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -2375,7 +2373,6 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 					 char **error)
 {
 	enum {
-		pol_ts,
 		pol_ifindex,
 		pol_skb_len,
 		pol_ttl,
@@ -2385,7 +2382,6 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 		pol_bfd,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]       = { .key = "ts",       .type = json_type_int },
 		[pol_ifindex]  = { .key = "ifindex",  .type = json_type_int },
 		[pol_skb_len]  = { .key = "skb-len",  .type = json_type_int },
 		[pol_ttl]      = { .key = "ttl",      .type = json_type_int },
@@ -2471,13 +2467,11 @@ bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(struct json_object *params,
 					 char **error)
 {
 	enum {
-		pol_ts,
 		pol_skb_len,
 		pol_ttl,
 		pol_bfd,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_skb_len] = { .key = "skb-len", .type = json_type_int },
 		[pol_ttl]     = { .key = "ttl",     .type = json_type_int },
 		[pol_bfd]     = { .key = "bfd",     .type = json_type_object },
@@ -2525,11 +2519,9 @@ bbdd_c_monitor_handle_ringbuf_rx_timeout(struct json_object *params,
 					 char **error)
 {
 	enum {
-		pol_ts,
-		pol_discr
+		pol_discr,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]    = { .key = "ts",    .type = json_type_int },
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -2558,12 +2550,10 @@ bbdd_c_monitor_handle_ringbuf_tx_no_neigh(struct json_object *params,
 					  char **error)
 {
 	enum {
-		pol_ts,
 		pol_ifindex,
 		pol_addr,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_ifindex] = { .key = "ifindex", .type = json_type_int },
 		[pol_addr]    = { .key = "addr",    .type = json_type_object },
 	};
@@ -2604,12 +2594,10 @@ static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 {
 	enum {
-		pol_ts,
 		pol_discr,
 		pol_session,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]      = { .key = "ts",      .type = json_type_int },
 		[pol_discr]   = { .key = "discr",   .type = json_type_int },
 		[pol_session] = { .key = "session", .type = json_type_object },
 	};
@@ -2672,13 +2660,27 @@ static void bbdd_c_monitor_print_timestamp(void)
 }
 
 static void bbdd_c_monitor_handle_notif(const char *method,
-					struct json_object *params)
+					struct json_object *outer_params)
 {
 	enum bbdd_c_monitor_print_rc rc = BBDD_C_MONITOR_PRINT_UNHANDLED;
-	struct json_object *ts_obj = NULL;
+	enum {
+		pol_ts,
+		pol_params,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]     = { .key = "ts",     .type = json_type_int },
+		[pol_params] = { .key = "params", .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct json_object *ts_obj;
+	struct json_object *params;
 	char *error;
 
-	json_object_object_get_ex(params, "ts", &ts_obj);
+	bbdd_jrpc_dissect(outer_params, policy, seen, values,
+			  ARRAY_SIZE(policy), NULL);
+	ts_obj = values[pol_ts];
+	params = values[pol_params];
 
 	if (bbdd_env.timestamp) {
 		if (ts_obj != NULL)
