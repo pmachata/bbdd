@@ -5,11 +5,13 @@
 #include "bbdd-mon.i"
 #include "bbdd-sock.i"
 
+/* The elements are (name, monitor-default), where the latter indicates whether
+ * it makes for 'bbdd monitor' to monitor the topic by default. */
 #define BBDD_MON_TOPICS(X)	\
 	X(ringbuf, true)	\
 	X(bfdd,    true)	\
 	X(session, true)	\
-	X(jrpc,    true)	\
+	X(jrpc,    false)	\
 	X(error,   true)	\
 	X(debug,   false)	\
 	/**/
