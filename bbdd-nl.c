@@ -28,7 +28,7 @@ static char *bbdd_nl_buf(struct bbdd_nl *nl)
 }
 
 struct bbdd_nl_cb {
-	char **error;
+	char *extack;
 };
 
 static int bbdd_mnl_cb_noop(const struct nlmsghdr *, void *)
@@ -41,7 +41,7 @@ static int bbdd_nl_extack_attr(const struct nlattr *attr, void *data)
 	struct bbdd_nl_cb *cb = data;
 
 	if (mnl_attr_get_type(attr) == NLMSGERR_ATTR_MSG)
-		bbdd_util_fmterr(cb->error, "%s", mnl_attr_get_str(attr));
+		bbdd_util_fmterr(&cb->extack, "%s", mnl_attr_get_str(attr));
 	return MNL_CB_OK;
 }
 
@@ -202,6 +202,7 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 		     char **error)
 {
 	struct nlattr *linkinfo, *infodata, *peer_attr;
+	struct bbdd_nl_cb nlcb = {};
 	struct nlmsghdr *nlh;
 	struct ifinfomsg *ifi;
 	ssize_t rc;
@@ -241,11 +242,10 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 		return -1;
 	}
 
-	*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to get netlink response");
+		bbdd_util_xferr(error, &nlcb.extack);
+		bbdd_util_appenderr(error, "Failed to get netlink response");
 		return -1;
 	}
 
@@ -262,6 +262,7 @@ error:
 
 int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 {
+	struct bbdd_nl_cb nlcb = {};
 	struct nlmsghdr *nlh;
 	struct ifinfomsg *ifi;
 	ssize_t rc;
@@ -282,11 +283,9 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 		return -1;
 	}
 
-	if (error != NULL)
-		*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
+		bbdd_util_xferr(error, &nlcb.extack);
 		bbdd_util_appenderr(error, "Failed to delete interface `%s': %m",
 				    name);
 		return -1;
@@ -297,6 +296,7 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 
 int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 {
+	struct bbdd_nl_cb nlcb = {};
 	struct nlmsghdr *nlh;
 	struct ifinfomsg *ifi;
 	ssize_t rc;
@@ -318,13 +318,11 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 		return -1;
 	}
 
-	*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_wraperr(error,
-				  "Failed to bring up interface %u: %m, `%s'",
-				  ifindex, *error ?: "");
+		bbdd_util_xferr(error, &nlcb.extack);
+		bbdd_util_appenderr(error, "Failed to bring up interface %u: %m",
+				    ifindex);
 		return -1;
 	}
 
@@ -337,6 +335,7 @@ static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 			       void (*fill_ats_cb)(struct nlmsghdr *nlh),
 			       char **error)
 {
+	struct bbdd_nl_cb nlcb = {};
 	struct nlmsghdr *nlh;
 	struct tcmsg *tc;
 	ssize_t rc;
@@ -364,13 +363,11 @@ static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		return -1;
 	}
 
-	*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_wraperr(error,
-				  "Failed to create `%s' qdisc on ifindex %u: %m, `%s'",
-				  kind, ifindex, *error ?: "");
+		bbdd_util_xferr(error, &nlcb.extack);
+		bbdd_util_appenderr(error, "Failed to create `%s' qdisc on ifindex %u: %m",
+				    kind, ifindex);
 		return -1;
 	}
 
@@ -472,8 +469,7 @@ static int bbdd_nl_vrf_table_cb_fn(const struct nlmsghdr *nlh, void *data)
 int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
 		       struct bbdd_nl_ifinfo *info, char **error)
 {
-	struct bbdd_nl_vrf_table_cb cb = {
-		.base = { .error = error },
+	struct bbdd_nl_vrf_table_cb vrfcb = {
 		.info = info,
 	};
 	struct nlmsghdr *nlh;
@@ -497,13 +493,12 @@ int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
 		return -1;
 	}
 
-	*error = NULL;
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq,
-				  bbdd_nl_vrf_table_cb_fn, &cb);
+				  bbdd_nl_vrf_table_cb_fn, &vrfcb);
 	if (rc < 0) {
-		bbdd_util_wraperr(error,
-				  "Failed to get link info for ifindex %u: %m, `%s'",
-				  ifindex, *error ?: "");
+		bbdd_util_xferr(error, &vrfcb.base.extack);
+		bbdd_util_appenderr(error, "Failed to get link info for ifindex %u: %m",
+				    ifindex);
 		return -1;
 	}
 
@@ -569,6 +564,7 @@ int bbdd_nl_get_l3_master(struct bbdd_nl *nl, uint32_t ifindex,
 int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			  const struct bbdd_sockaddr *addr, char **error)
 {
+	struct bbdd_nl_cb nlcb = {};
 	struct nlmsghdr *nlh;
 	struct ndmsg *ndm;
 	const void *raw_addr;
@@ -598,17 +594,14 @@ int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 		return -errno;
 	}
 
-	*error = NULL;
-	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
-				 &(struct bbdd_nl_cb){ .error = error });
+	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
 		if (errno == EEXIST) {
-			free(*error);
-			*error = NULL;
+			free(nlcb.extack);
 			return 0;
 		}
-		bbdd_util_wraperr(error, "Failed to refresh neighbor: %m, `%s'",
-				  *error ?: "");
+		bbdd_util_xferr(error, &nlcb.extack);
+		bbdd_util_appenderr(error, "Failed to refresh neighbor: %m");
 		return -1;
 	}
 

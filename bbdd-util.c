@@ -72,6 +72,9 @@ int bbdd_util_appenderr(char **error, const char *fmt, ...)
 	va_list ap;
 	int rc;
 
+	if (error == NULL)
+		return 0;
+
 	va_start(ap, fmt);
 	rc = bbdd_util_vfmterr(&msg, fmt, ap);
 	va_end(ap);
@@ -130,6 +133,14 @@ int bbdd_util_pickerr(int rc1, char **error1, int rc2, char **error2)
 	}
 
 	return rc1;
+}
+
+void bbdd_util_xferr(char **error, char **src)
+{
+	if (error == NULL)
+		return;
+	*error = *src;
+	*src = NULL;
 }
 
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj)

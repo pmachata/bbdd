@@ -33,6 +33,7 @@ __attribute__((format(printf, 2, 3)))
 void bbdd_util_printerr(char **error, const char *fmt, ...);
 
 int bbdd_util_pickerr(int rc1, char **error1, int rc2, char **error2);
+void bbdd_util_xferr(char **error, char **src);
 
 /* JRPC helpers. */
 
