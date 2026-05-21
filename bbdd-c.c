@@ -437,6 +437,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 		pol_detect_mult,
 		pol_min_tx_us,
 		pol_min_rx_us,
+		pol_cpi,
 		polsize_full,
 	};
 	struct bbdd_jrpc_policy policy[] = {
@@ -452,6 +453,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 				    .type = json_type_int, .required = true },
 		[pol_min_rx_us] = { .key = "min_rx_us",
 				    .type = json_type_int, .required = true },
+		[pol_cpi] = { .key = "cpi", .type = json_type_boolean },
 	};
 	const size_t polsize = state_only ? polsize_state_only : polsize_full;
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
@@ -493,6 +495,8 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 	__DISSECT(detect_mult, timing.detect_mult, bbdd_jrpc_get_uint8);
 	DISSECT_U32(min_tx_us, timing.min_tx_us);
 	DISSECT_U32(min_rx_us, timing.min_rx_us);
+
+	data->flags.cpi = json_object_get_boolean(values[pol_cpi]);
 
 #undef DISSECT_U32
 #undef __DISSECT
@@ -849,6 +853,12 @@ bbdd_c_session_show_state_bpf(const struct bbdd_c_session_state_bpf *bstate)
 		printf("qd-timing %s ", bstate->qd_timing ? "yes" : "no");
 }
 
+static void bbdd_c_show_flag(const char *name, bool flag)
+{
+	if (flag || bbdd_env.verbosity > 0)
+		printf("%s%s ", flag ? "" : "no ", name);
+}
+
 static void
 bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 {
@@ -856,6 +866,7 @@ bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 	printf("detect-mult %u ", data->timing.detect_mult);
 	bbdd_c_show_time_us("min-tx", data->timing.min_tx_us);
 	bbdd_c_show_time_us("min-rx", data->timing.min_rx_us);
+	bbdd_c_show_flag("cpi", data->flags.cpi);
 	bbdd_c_session_show_state_end(&data->state);
 }
 

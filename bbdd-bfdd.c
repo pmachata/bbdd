@@ -436,6 +436,11 @@ int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
 				const struct bbdd_d_session *dsess,
 				char **error)
 {
+	uint32_t remote_flags = 0;
+
+	if (dsess->remote.flags.cpi)
+		remote_flags |= RBIT_CPI;
+
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
 		.header.type = bbdd_hton16(BFD_STATE_CHANGE),
@@ -445,6 +450,7 @@ int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
 		.data.state = {
 			.lid = bbdd_hton32(dsess->local.discr),
 			.rid = bbdd_hton32(dsess->remote.discr),
+			.remote_flags = bbdd_hton32(remote_flags),
 			.desired_tx = bbdd_hton32(dsess->remote.timing.min_tx_us),
 			.required_rx = bbdd_hton32(dsess->remote.timing.min_rx_us),
 			.state = dsess->remote.state.state,

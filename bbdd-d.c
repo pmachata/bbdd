@@ -860,6 +860,7 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	 *     "detect_mult": INT,
 	 *     "min_tx_us": INT,
 	 *     "min_rx_us": INT,
+	 *     "cpi": BOOL,
 	 * }
 	 */
 
@@ -879,6 +880,16 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	    bbdd_jrpc_append_int(entry_obj, "min_rx_us",
 				 remote->timing.min_rx_us) != 0)
 		goto put_entry_obj;
+
+#define BBDD_D_REMOTE_FLAG(NAME) do {					\
+		if (bbdd_jrpc_append_bool(entry_obj, #NAME,		\
+					  remote->flags.NAME) != 0)	\
+			goto put_entry_obj;				\
+	} while (0)
+
+	BBDD_D_REMOTE_FLAG(cpi);
+
+#undef BBDD_D_REMOTE_FLAG
 
 	return entry_obj;
 

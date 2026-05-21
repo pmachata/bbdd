@@ -397,8 +397,11 @@ bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
 	remote_data->timing.min_rx_us = bbdd_ntoh32(packet->required_rx);
 	remote_data->timing.min_tx_us = bbdd_ntoh32(packet->desired_tx);
 	remote_data->timing.detect_mult = packet->detection_multiplier;
+
 	remote_data->state.state = state;
 	remote_data->state.diag = bbdd_bfd_pkt_diag(packet);
+
+	remote_data->flags.cpi = bits & BBDD_BFD_PKT_BIT_CPI;
 
 	*poll = bits & BBDD_BFD_PKT_BIT_POLL;
 	*final = bits & BBDD_BFD_PKT_BIT_FINAL;
