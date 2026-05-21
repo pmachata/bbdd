@@ -251,9 +251,13 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 
 	if (bbdd_nl_maybe_get_ifindex(ifindex, name, error) < 0 ||
 	    bbdd_nl_maybe_get_ifindex(peer_ifindex, peer_name, error) < 0)
-		return -1;
+		goto error;
 
 	return 0;
+
+error:
+	bbdd_nl_del_if(nl, name, NULL);
+	return -1;
 }
 
 int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
@@ -278,7 +282,8 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 		return -1;
 	}
 
-	*error = NULL;
+	if (error != NULL)
+		*error = NULL;
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL,
 				 &(struct bbdd_nl_cb){ .error = error });
 	if (rc < 0) {
