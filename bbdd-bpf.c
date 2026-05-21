@@ -696,7 +696,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * for a particular session until it has received a BFD packet for that
 	 * session, and thus has learned the remote system's discriminator
 	 * value. */
-	if (dsess->remote.discr != 0 || ! dsess->flags.passive) {
+	if (dsess->remote.discr != 0 || ! dsess->local.flags.passive) {
 		uint8_t bfd_flags;
 
 		bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);

@@ -54,6 +54,7 @@ struct bbdd_d_session_data_timing {
 };
 
 struct bbdd_d_session_data {
+	struct bbdd_d_session_flags flags;
 	uint32_t discr;
 	struct bbdd_d_session_data_timing timing;
 	struct bbdd_d_session_state_end state;
@@ -61,7 +62,6 @@ struct bbdd_d_session_data {
 
 struct bbdd_d_session {
 	/* Local session configuration. */
-	struct bbdd_d_session_flags flags;
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
 

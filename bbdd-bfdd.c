@@ -481,13 +481,13 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 
 	if (dsess.dst.sa.sa_family == AF_INET6)
 		flags |= SESSION_IPV6;
-	if (dsess.flags.multihop)
+	if (dsess.local.flags.multihop)
 		flags |= SESSION_MULTIHOP;
-	if (dsess.local.cpi)
+	if (dsess.local.flags.cpi)
 		flags |= SESSION_CBIT;
-	if (dsess.flags.passive)
+	if (dsess.local.flags.passive)
 		flags |= SESSION_PASSIVE;
-	if (dsess.flags.shutdown)
+	if (dsess.local.flags.shutdown)
 		flags |= SESSION_SHUTDOWN;
 
 	if (dsess.src.sa.sa_family != 0) {

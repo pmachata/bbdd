@@ -676,7 +676,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	for (int i = 0; i < bbdd_sess_nflags; i++)
 		/* Only mark as seen set flags. */
 		csess->flags.flags[i].seen = csess->flags.flags[i].value =
-			dsess->flags.flags[i];
+			dsess->local.flags.flags[i];
 
 	bbdd_d_session_to_c_addr(&csess->src, &dsess->src);
 	bbdd_d_session_to_c_addr(&csess->dst, &dsess->dst);
@@ -1146,7 +1146,7 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 		const struct bbdd_sockaddr *ss_src = &dsess->src;
 		const struct bbdd_sockaddr *ss_dst = &dsess->dst;
 
-		if (digest->multihop != dsess->flags.multihop)
+		if (digest->multihop != dsess->local.flags.multihop)
 			continue;
 
 		if (dsess->ifindex != 0 && dsess->ifindex != digest->ifindex)
@@ -1224,7 +1224,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	for (int i = 0; i < bbdd_sess_nflags; i++) {
 		struct bbdd_flag cflag = csess->flags.flags[i];
 		if (cflag.seen)
-			dsess->flags.flags[i] = cflag.value;
+			dsess->local.flags.flags[i] = cflag.value;
 	}
 
 	sport = bbdd_ntoh16(dsess->src.sin46.port);
@@ -1237,7 +1237,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	/* Preserve the source port. */
 	dsess->src.sin46.port = bbdd_hton16(sport);
 
-	if (dsess->flags.multihop)
+	if (dsess->local.flags.multihop)
 		dsess->dst.sin46.port = bbdd_hton16(BFD_MULTI_HOP_PORT);
 	else
 		dsess->dst.sin46.port = bbdd_hton16(BFD_SINGLE_HOP_PORT);
@@ -1277,7 +1277,7 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 #undef ASSIGN
 
-	if (dsess->flags.shutdown) {
+	if (dsess->local.flags.shutdown) {
 		/* RFC: 6.18.6: [Unless enabling session] Set bfd.SessionState
 		 * to AdminDown */
 		dsess->local.state.state = BBDD_BFD_PKT_STATE_ADMINDOWN;
@@ -1461,7 +1461,7 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 
 	for (int i = 0; i < bbdd_sess_nflags; i++)
 		if (query->flags.flags[i].seen &&
-		    query->flags.flags[i].value != dsess->flags.flags[i])
+		    query->flags.flags[i].value != dsess->local.flags.flags[i])
 			return 0;
 
 	rc = bbdd_d_session_addr_matches(&query->src, &dsess->src, error);
