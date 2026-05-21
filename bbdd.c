@@ -141,6 +141,7 @@ int main(int argc, char **argv)
 		topics.enabled[BBDD_MON_TOPIC_error] = true;
 	if (verbosity >= 1)
 		topics.enabled[BBDD_MON_TOPIC_debug] = true;
+	bbdd_env.verbosity = verbosity;
 
 	rc = bbdd_cmd(argc, argv, &topics);
 	if (rc != 0)
