@@ -57,9 +57,8 @@ struct bbdd_bpf_sockets {
 #undef SOCK
 
 struct bbdd_bpf {
-	/* Some of the conf information is not strictly necessary to keep around
-	 * or duplicated in the attachments, but it's easier to keep it all. */
-	struct bbdd_bpf_global_config conf;
+	__u32 veth_rx_ifindex;
+	__u32 veth_tx_ifindex;
 	struct bbdd_bpf_session *sdir;
 
 	struct bbdd_prog *skel;
@@ -677,7 +676,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		fwd_ifindex = dsess->ifindex;
 		fib_flags |= BPF_FIB_LOOKUP_OUTPUT;
 	} else {
-		fwd_ifindex = bpf->conf.veth_tx_ifindex;
+		fwd_ifindex = bpf->veth_tx_ifindex;
 	}
 
 	bool rearm_timer = !(down || admdown);
@@ -702,7 +701,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 		bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);
 		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-						 bpf->conf.veth_tx_ifindex,
+						 bpf->veth_tx_ifindex,
 						 bfd_flags, error);
 		if (rc != 0)
 			return rc;
@@ -712,7 +711,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
 				    dsess->local.discr);
 		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-						 bpf->conf.veth_rx_ifindex,
+						 bpf->veth_rx_ifindex,
 						 0, error);
 		if (rc != 0)
 			return rc;
@@ -958,7 +957,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting final packet",
 				    dsess->local.discr);
 		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
-						  bpf->conf.veth_tx_ifindex,
+						  bpf->veth_tx_ifindex,
 						  BBDD_BFD_PKT_BIT_FINAL,
 						  &error);
 		if (err != 0)
@@ -1781,7 +1780,8 @@ static void bbdd_bpf_sk_lookup_detach(struct bbdd_bpf *bpf)
 struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 				 struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
-				 struct bbdd_bpf_global_config *conf,
+				 uint32_t veth_rx_ifindex,
+				 uint32_t veth_tx_ifindex,
 				 struct bbdd_mon *mon,
 				 char **error)
 {
@@ -1794,7 +1794,8 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 		goto err;
 	}
 
-	bpf->conf = *conf;
+	bpf->veth_rx_ifindex = veth_rx_ifindex;
+	bpf->veth_tx_ifindex = veth_tx_ifindex;
 
 	libbpf_set_print(bbdd_bpf_print);
 
@@ -1809,13 +1810,13 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 		goto destroy_prog;
 	bpf->rb_ctx->bpf = bpf;
 
-	bpf->skel->bss->bbdd_veth_tx_ifindex = (int)conf->veth_tx_ifindex;
+	bpf->skel->bss->bbdd_veth_tx_ifindex = veth_tx_ifindex;
 
-	err = bbdd_bpf_hook_create(conf->veth_rx_ifindex, error);
+	err = bbdd_bpf_hook_create(veth_rx_ifindex, error);
 	if (err != 0)
 		goto free_rb_ctx;
 
-	err = bbdd_bpf_hook_create(conf->veth_tx_ifindex, error);
+	err = bbdd_bpf_hook_create(veth_tx_ifindex, error);
 	if (err != 0)
 		goto destroy_rx_hook;
 
@@ -1823,19 +1824,19 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	 * prepared. */
 
 	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx,
-			      conf->veth_rx_ifindex, BPF_TC_INGRESS,
+			      veth_rx_ifindex, BPF_TC_INGRESS,
 			      error);
 	if (err != 0)
 		goto destroy_tx_hook;
 
 	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
-			      conf->veth_rx_ifindex, BPF_TC_EGRESS,
+			      veth_rx_ifindex, BPF_TC_EGRESS,
 			      error);
 	if (err != 0)
 		goto detach_rx;
 
 	err = bbdd_bpf_attach(bpf->skel->progs.bbdd_xmit_veth_tx,
-			      conf->veth_tx_ifindex, BPF_TC_EGRESS,
+			      veth_tx_ifindex, BPF_TC_EGRESS,
 			      error);
 	if (err != 0)
 		goto detach_rx_xmit;
@@ -1860,17 +1861,17 @@ sockets_close:
 	bbdd_bpf_sockets_close(&bpf->sockets);
 detach_tx:
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
-			conf->veth_tx_ifindex, BPF_TC_EGRESS);
+			veth_tx_ifindex, BPF_TC_EGRESS);
 detach_rx_xmit:
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
-			conf->veth_rx_ifindex, BPF_TC_EGRESS);
+			veth_rx_ifindex, BPF_TC_EGRESS);
 detach_rx:
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
-			conf->veth_rx_ifindex, BPF_TC_INGRESS);
+			veth_rx_ifindex, BPF_TC_INGRESS);
 destroy_tx_hook:
-	bbdd_bpf_hook_destroy(conf->veth_tx_ifindex);
+	bbdd_bpf_hook_destroy(veth_tx_ifindex);
 destroy_rx_hook:
-	bbdd_bpf_hook_destroy(conf->veth_rx_ifindex);
+	bbdd_bpf_hook_destroy(veth_rx_ifindex);
 free_rb_ctx:
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 destroy_prog:
@@ -1907,14 +1908,14 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 	bbdd_bpf_sockets_close(&bpf->sockets);
 
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_tx,
-			bpf->conf.veth_tx_ifindex, BPF_TC_EGRESS);
+			bpf->veth_tx_ifindex, BPF_TC_EGRESS);
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx_xmit,
-			bpf->conf.veth_rx_ifindex, BPF_TC_EGRESS);
+			bpf->veth_rx_ifindex, BPF_TC_EGRESS);
 	bbdd_bpf_detach(bpf->skel->progs.bbdd_xmit_veth_rx,
-			bpf->conf.veth_rx_ifindex, BPF_TC_INGRESS);
+			bpf->veth_rx_ifindex, BPF_TC_INGRESS);
 
-	bbdd_bpf_hook_destroy(bpf->conf.veth_tx_ifindex);
-	bbdd_bpf_hook_destroy(bpf->conf.veth_rx_ifindex);
+	bbdd_bpf_hook_destroy(bpf->veth_tx_ifindex);
+	bbdd_bpf_hook_destroy(bpf->veth_rx_ifindex);
 
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
@@ -2249,8 +2250,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	sock_fd = bbdd_d_session_open_sock(dsess, bpf->conf.veth_tx_ifindex,
-					   error);
+	sock_fd = bbdd_d_session_open_sock(dsess, bpf->veth_tx_ifindex, error);
 	if (sock_fd < 0) {
 		err = sock_fd;
 		goto free_bsess;

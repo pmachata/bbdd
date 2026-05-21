@@ -2915,7 +2915,6 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	};
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
-	struct bbdd_bpf_global_config bpf_conf;
 	bool failed = true;
 	char *error;
 	int err;
@@ -2953,13 +2952,8 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (err)
 		goto sess_dir_destroy;
 
-	bpf_conf = (struct bbdd_bpf_global_config) {
-		.veth_rx_ifindex = veth_rx_ifindex,
-		.veth_tx_ifindex = veth_tx_ifindex,
-	};
-
-	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, &bpf_conf, d.mon,
-				&error);
+	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, veth_rx_ifindex,
+				veth_tx_ifindex, d.mon, &error);
 	if (d.bpf == NULL)
 		goto fini_veth;
 

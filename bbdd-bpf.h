@@ -41,7 +41,8 @@ struct bbdd_bpf_cbs {
 struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 				 struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
-				 struct bbdd_bpf_global_config *conf,
+				 uint32_t veth_rx_ifindex,
+				 uint32_t veth_tx_ifindex,
 				 struct bbdd_mon *mon,
 				 char **error);
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf);

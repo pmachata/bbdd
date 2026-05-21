@@ -54,11 +54,6 @@ enum {
 };
 #undef BBDD_PROG_SOCK_P1
 
-struct bbdd_bpf_global_config {
-	__u32 veth_rx_ifindex;
-	__u32 veth_tx_ifindex;
-};
-
 enum bbdd_bpf_rb_elem_type {
 	BBDD_BPF_RB_ELEM_TX_NO_NEIGH,
 	BBDD_BPF_RB_ELEM_RX_DISCR_0,
