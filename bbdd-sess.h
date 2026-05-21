@@ -9,7 +9,7 @@
 
 #define BBDD_SESS_FLAGS(X)		\
 	X(MULTIHOP, multihop)		\
-	X(CBIT, cbit)			\
+	X(CPI, cpi)			\
 	X(PASSIVE, passive)		\
 	X(SHUTDOWN, shutdown)		\
 	/**/

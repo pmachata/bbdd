@@ -483,7 +483,7 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 		flags |= SESSION_IPV6;
 	if (dsess.flags.multihop)
 		flags |= SESSION_MULTIHOP;
-	if (dsess.flags.cbit)
+	if (dsess.local.cpi)
 		flags |= SESSION_CBIT;
 	if (dsess.flags.passive)
 		flags |= SESSION_PASSIVE;
@@ -631,7 +631,7 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 		csess->flags.name.value = !!(flags & (FLAG));		\
 	} while (0)
 	SET_FLAG(multihop, SESSION_MULTIHOP);
-	SET_FLAG(cbit,     SESSION_CBIT);
+	SET_FLAG(cpi,      SESSION_CBIT);
 	SET_FLAG(passive,  SESSION_PASSIVE);
 	SET_FLAG(shutdown, SESSION_SHUTDOWN);
 #undef SET_FLAG

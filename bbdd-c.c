@@ -1870,8 +1870,8 @@ int bbdd_c_session(int argc, char **argv)
 
 		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "multihop",
 					       &csess->flags.multihop)) ||
-		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cbit",
-					       &csess->flags.cbit)) ||
+		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "cpi",
+					       &csess->flags.cpi)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "passive",
 					       &csess->flags.passive)) ||
 		    (rc = bbdd_c_parse_kw_flag(&argc, &argv, "shutdown",
