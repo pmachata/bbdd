@@ -409,7 +409,8 @@ bbdd_bpf_parse_packet(struct bbdd_bpf *bpf,
 	return 0;
 }
 
-static uint8_t bbdd_bpf_get_rx_expect_bfd_flags(enum bbdd_bpf_session_state bstate)
+static uint8_t
+bbdd_bpf_get_rx_expect_bfd_flags_bstate(enum bbdd_bpf_session_state bstate)
 {
 	switch (bstate) {
 	case BBDD_BPF_SESSION_STATE_ON_HOLD:
@@ -431,7 +432,27 @@ static uint8_t bbdd_bpf_get_rx_expect_bfd_flags(enum bbdd_bpf_session_state bsta
 	__builtin_unreachable();
 }
 
-static uint8_t bbdd_bpf_get_inject_bfd_flags(enum bbdd_bpf_session_state bstate)
+static uint8_t
+bbdd_bpf_get_bfd_session_flags(const struct bbdd_d_session_data *data)
+{
+	uint8_t flags = 0;
+
+	if (data->flags.cpi)
+		flags |= BBDD_BFD_PKT_BIT_CPI;
+
+	return flags;
+}
+
+static uint8_t
+bbdd_bpf_get_rx_expect_bfd_flags(const struct bbdd_d_session *dsess,
+				 const struct bbdd_bpf_session *bsess)
+{
+	return bbdd_bpf_get_rx_expect_bfd_flags_bstate(bsess->bstate) |
+	       bbdd_bpf_get_bfd_session_flags(&dsess->remote);
+}
+
+static uint8_t
+bbdd_bpf_get_inject_bfd_flags_bstate(enum bbdd_bpf_session_state bstate)
 {
 	switch (bstate) {
 	case BBDD_BPF_SESSION_STATE_ON_HOLD:
@@ -452,6 +473,14 @@ static uint8_t bbdd_bpf_get_inject_bfd_flags(enum bbdd_bpf_session_state bstate)
 	__builtin_unreachable();
 }
 
+static uint8_t
+bbdd_bpf_get_inject_bfd_flags(const struct bbdd_d_session *dsess,
+			      const struct bbdd_bpf_session *bsess)
+{
+	return bbdd_bpf_get_inject_bfd_flags_bstate(bsess->bstate) |
+	       bbdd_bpf_get_bfd_session_flags(&dsess->local);
+}
+
 static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					const struct bbdd_d_session *dsess,
 					struct bbdd_bpf_session *bsess,
@@ -466,7 +495,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 {
 	bool admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
 
-	uint8_t bfd_flags = bbdd_bpf_get_rx_expect_bfd_flags(bsess->bstate);
+	uint8_t bfd_flags = bbdd_bpf_get_rx_expect_bfd_flags(dsess, bsess);
 	const struct bbdd_sockaddr *src = &dsess->src;
 	const struct bbdd_sockaddr *dst = &dsess->dst;
 	int af = src->sa.sa_family ?: dst->sa.sa_family;
@@ -702,7 +731,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	if (dsess->remote.discr != 0 || ! dsess->local.flags.passive) {
 		uint8_t bfd_flags;
 
-		bfd_flags = bbdd_bpf_get_inject_bfd_flags(bsess->bstate);
+		bfd_flags = bbdd_bpf_get_inject_bfd_flags(dsess, bsess);
 		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
 						 bpf->veth_tx_ifindex,
 						 bfd_flags, error);
