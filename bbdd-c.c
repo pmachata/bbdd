@@ -2633,6 +2633,103 @@ try_discr:
 	return BBDD_C_MONITOR_PRINT_NOTHING;
 }
 
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_bfdd_sess_add(struct json_object *params, char **error)
+{
+	enum {
+		pol_session,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_session] = { .key = "session", .type = json_type_object },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct bbdd_c_session_state state = {};
+	struct bbdd_c_session csess = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_session]) {
+		rc = bbdd_c_jrpc_dissect_session_elem(values[pol_session],
+						      &csess, &state, error);
+		if (rc != 0)
+			return BBDD_C_MONITOR_PRINT_ERROR;
+		bbdd_c_session_show_one(&csess, &state);
+		return BBDD_C_MONITOR_PRINT_OK;
+	}
+
+	return BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_bfdd_lid_msg(struct json_object *params, char **error)
+{
+	enum {
+		pol_lid,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_lid] = { .key = "lid", .type = json_type_int },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_lid]) {
+		printf("lid %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_lid]));
+		return BBDD_C_MONITOR_PRINT_OK;
+	}
+
+	return BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_bfdd_empty(struct json_object *params, char **error)
+{
+	if (params != NULL) {
+		bbdd_util_fmterr(error, "parameters expected to be nil");
+		return BBDD_C_MONITOR_PRINT_ERROR;
+	}
+
+	return BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
+static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_bfdd_unknown(struct json_object *params, char **error)
+{
+	enum {
+		pol_type,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_type] = { .key = "type", .type = json_type_int },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_type]) {
+		printf("type %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_type]));
+		return BBDD_C_MONITOR_PRINT_OK;
+	}
+
+	return BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
 static void bbdd_c_monitor_print_ts_fmt(time_t sec, long ms, bool local)
 {
 	struct tm tm;
@@ -2708,6 +2805,17 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		rc = bbdd_c_monitor_handle_ringbuf_tx_no_neigh(params, &error);
 	else if (strcmp(method, "session:change") == 0)
 		rc = bbdd_c_monitor_handle_session_change(params, &error);
+	else if (strcmp(method, "bfdd:sess-add") == 0)
+		rc = bbdd_c_monitor_handle_bfdd_sess_add(params, &error);
+	else if (strcmp(method, "bfdd:sess-del") == 0 ||
+		 strcmp(method, "bfdd:sess-cnt-req") == 0)
+		rc = bbdd_c_monitor_handle_bfdd_lid_msg(params, &error);
+	else if (strcmp(method, "bfdd:echo-req") == 0 ||
+		 strcmp(method, "bfdd:echo-rep") == 0 ||
+		 strcmp(method, "bfdd:sess-cnt-rep") == 0)
+		rc = bbdd_c_monitor_handle_bfdd_empty(params, &error);
+	else if (strcmp(method, "bfdd:unknown") == 0)
+		rc = bbdd_c_monitor_handle_bfdd_unknown(params, &error);
 
 	switch (rc) {
 	case BBDD_C_MONITOR_PRINT_ERROR:
