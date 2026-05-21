@@ -101,7 +101,7 @@ static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 			   void *data, char **)
 {
 	struct bbdd_bfdd *bfdd = data;
-	short events = POLLIN;
+	short events = POLLIN | POLLHUP;
 	char *error;
 	int rc;
 
@@ -168,7 +168,7 @@ static int bbdd_bfdd_connected(struct bbdd_poll_ctx *pctx, short,
 		goto error;
 	}
 
-	rv = bbdd_poll_set_fd(pctx, bfdd->fd, POLLOUT,
+	rv = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLHUP,
 			      bbdd_bfdd_event, bfdd, &error);
 	if (rv < 0)
 		goto error;
@@ -281,7 +281,7 @@ struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 		.cbs = *cbs,
 	};
 
-	rc = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLOUT | POLLHUP,
+	rc = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLHUP,
 			      bbdd_bfdd_event, bfdd, error);
 	if (rc < 0)
 		goto free_bfdd;
