@@ -3,6 +3,7 @@ CLANG ?= clang
 LLVM_STRIP ?= llvm-strip
 LIBBPF ?= -lbpf
 LIBMNL ?= -lmnl
+COVERAGE ?= 0
 
 ifeq ($(V),1)
 	Q =
@@ -23,6 +24,11 @@ INCLUDES := -I $(OUTPUT)
 
 WARN_CFLAGS = -Wall -Wunused
 CFLAGS := -g $(WARN_CFLAGS)
+
+ifeq ($(COVERAGE),1)
+	CFLAGS += --coverage
+	LDFLAGS += --coverage
+endif
 
 APPS := bbdd
 bbdd-OBJECTS :=					\
@@ -109,11 +115,11 @@ install: $(BUILT)
 	$(call msg,MKDIR,$@)
 	$(Q)mkdir -p $@
 
-$(OUTPUT)/bbdd: CFLAGS += $(shell pkgconf --libs libelf json-c libsystemd \
+$(OUTPUT)/bbdd: LDFLAGS += $(shell pkgconf --libs libelf json-c libsystemd \
 				libnl-3.0 libnl-genl-3.0)
 $(OUTPUT)/bbdd: $(bbdd-OBJECTS) $(LIBBPF) $(LIBMNL)
 	$(call msg,BINARY,$@)
-	$(Q)$(CC) $^ $(CFLAGS) -lz -o $@
+	$(Q)$(CC) $^ $(LDFLAGS) -lz -o $@
 
 $(OUTPUT)/%.o: %.c | $(OUTPUT_DIRS)
 	$(call msg,CC,$@)
@@ -146,5 +152,10 @@ $(MAN_PAGES): $(OUTPUT)/%: %.md | $(OUTPUT_DIRS)
 
 test: $(BUILT)
 	tests/run.sh
+
+ifeq ($(COVERAGE),1)
+coverage: $(OUTPUT)/coverage/ | $(OUTPUT_DIRS)
+	gcovr --html-nested --output $(OUTPUT)/coverage/bbdd.html
+endif
 
 -include $(ALL_DEPS)
