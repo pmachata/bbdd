@@ -879,27 +879,24 @@ vrf_destroy()
 	Ip link del dev $vrf_name
 }
 
-ping_do()
+adf_vrf_create()
 {
-	local if_name=$1
-	local dip=$2
+	local vrf_name=$1
 
-	$(nspfx) $(vrfpfx) \
-		$PING -c "$PING_COUNT" -i 0.1 \
-		      -w "$PING_TIMEOUT" "$dip" &> /dev/null
+	vrf_create "$vrf_name" && \
+		Defer vrf_destroy "$vrf_name"
+}
+
+Ping()
+{
+	$(nspfx) $(vrfpfx) $PING "$@"
 }
 
 ping_test()
 {
-	local if_name=$1; shift
 	local dip=$1; shift
 
-	local vrf_name=$(master_name_get $if_name)
-
-	RET=0
-
-	in_vrf "$vrf_name" \
-	       ping_do "$if_name" "$dip"
+	Ping -c "$PING_COUNT" -i 0.1 -w "$PING_TIMEOUT" "$dip" &> /dev/null
 	check_err $?
 	log_test "$IN_NS $IN_VRF: ping $dip"
 }

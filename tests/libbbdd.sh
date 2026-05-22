@@ -17,13 +17,21 @@ Env()
 		defer rm -Rf "${sockdir}"
 	fi
 
-	BBDD_ENV="$NS" BBDD_SOCKDIR="${sockdir}" in_ns "$NS" "$@"
+	# If Env() is to affect global settings when it's given without
+	# commands, then the values need to be set one after another. Otherwise
+	# the in_ns command serves as a command to make the earlier settings
+	# command-local.
+	if (($# == 0)); then
+		BBDD_ENV="$NS"
+		BBDD_SOCKDIR="${sockdir}"
+		in_ns "$NS"
+	else
+		BBDD_ENV="$NS" BBDD_SOCKDIR="${sockdir}" in_ns "$NS" "$@"
+	fi
 }
 
 Bbdd()
 {
-	local ns=$IN_NS
-
 	$(nspfx) "${bin_dir}/bbdd" --sockdir "$BBDD_SOCKDIR" "$@"
 }
 
@@ -78,13 +86,6 @@ adf_Bbdd_start_or_die()
 	fi
 }
 
-master_name_get()
-{
-	local if_name=$1
-
-	$(nspfx) ip -j link show dev "$if_name" | jq -r '.[]["master"] // ""'
-}
-
 Bbdd_session_get()
 {
 	local key=$1; shift
@@ -99,10 +100,22 @@ Bbdd_session_remote_state()
 
 Bbdd_session_wait_up()
 {
-	slowwait 1 eq val up , Bbdd_session_remote_state
+	slowwait 1 eq val up , Bbdd_session_remote_state "$@"
 }
 
 Bbdd_session_wait_not_up()
 {
-	slowwait 1 not eq val up , Bbdd_session_remote_state
+	slowwait 1 not eq val up , Bbdd_session_remote_state "$@"
+}
+
+session_state_test()
+{
+	local check=$1; shift
+	local goal=$1; shift
+	local should_fail=$((!goal))
+
+	"Bbdd_session_wait_$check" "$@"
+	check_err_fail "$should_fail" $? "session up"
+
+	log_test "$BBDD_ENV: Session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
