@@ -49,6 +49,9 @@ static int bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 	} else if (strcmp(*argv, "ping") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_ping(argc, argv);
+	} else if (strcmp(*argv, "echo") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_echo(argc, argv);
 	} else if (strcmp(*argv, "session") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_session(argc, argv);

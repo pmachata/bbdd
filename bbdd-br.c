@@ -26,10 +26,9 @@
 #include "bfddp.h"
 #include "bfddp_packet.h"
 
-struct bbdd_br_ping {
+struct bbdd_br_echo {
 	struct bbdd_sock peer;
 	struct json_object *id;
-	struct json_object *params;
 };
 
 struct bbdd_br_stats {
@@ -46,43 +45,40 @@ struct bbdd_br {
 	struct bbdd_sock bfdd_server;
 	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
 
-	struct bbdd_br_ping *ping; /* non-NULL = ping awaiting ECHO_REPLY */
+	struct bbdd_br_echo *echo; /* non-NULL = echo awaiting ECHO_REPLY */
 	struct bbdd_br_stats *stats; /* non-NULL = session-stats awaiting
 				      * BFD_SESSION_COUNTERS */
 };
 
-static struct bbdd_br_ping *bbdd_br_ping_alloc(struct bbdd_sock *peer,
-					       struct json_object *params_obj,
+static struct bbdd_br_echo *bbdd_br_echo_alloc(struct bbdd_sock *peer,
 					       struct json_object *id,
 					       char **error)
 {
-	struct bbdd_br_ping *ping;
+	struct bbdd_br_echo *echo;
 
-	ping = malloc(sizeof(*ping));
-	if (ping == NULL) {
-		bbdd_util_fmterr(error, "Could allocate ping context: %m");
+	echo = malloc(sizeof(*echo));
+	if (echo == NULL) {
+		bbdd_util_fmterr(error, "Could not allocate echo context: %m");
 		return NULL;
 	}
 
-	*ping = (struct bbdd_br_ping) {
+	*echo = (struct bbdd_br_echo) {
 		.peer = *peer,
 		.id = json_object_get(id),
-		.params = json_object_get(params_obj),
 	};
-	return ping;
+	return echo;
 }
 
-static void bbdd_br_ping_free(struct bbdd_br_ping *ping)
+static void bbdd_br_echo_free(struct bbdd_br_echo *echo)
 {
-	json_object_put(ping->id);
-	json_object_put(ping->params);
-	free(ping);
+	json_object_put(echo->id);
+	free(echo);
 }
 
-static void bbdd_br_ping_close(struct bbdd_br_ping *ping, const char *msg)
+static void bbdd_br_echo_close(struct bbdd_br_echo *echo, const char *msg)
 {
-	bbdd_util_jrpc_respond_interr(&ping->peer, ping->id, msg);
-	bbdd_br_ping_free(ping);
+	bbdd_util_jrpc_respond_interr(&echo->peer, echo->id, msg);
+	bbdd_br_echo_free(echo);
 }
 
 static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
@@ -126,9 +122,9 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	bbdd_bfdd_close(br->bfdd);
 	br->bfdd = NULL;
 
-	if (br->ping != NULL) {
-		bbdd_br_ping_close(br->ping, "BFDD client disconnect");
-		br->ping = NULL;
+	if (br->echo != NULL) {
+		bbdd_br_echo_close(br->echo, "BFDD client disconnect");
+		br->echo = NULL;
 	}
 
 	if (br->stats != NULL) {
@@ -137,34 +133,47 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	}
 }
 
-static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br)
+static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
+					   const struct bfddp_message *msg)
 {
+	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
+	uint64_t reply_ts = bbdd_ntoh64(msg->data.echo.bfdd_time);
+	struct json_object *result;
 	struct json_object *resp;
 	int rc;
 
-	if (br->ping == NULL)
+	if (br->echo == NULL)
 		return;
 
-	resp = bbdd_jrpc_new_object(br->ping->id);
+	resp = bbdd_jrpc_new_object(br->echo->id);
 	if (resp == NULL)
 		goto err_memerr;
 
-	rc = bbdd_jrpc_append_obj(resp, "result", &br->ping->params);
-	if (rc != 0) {
-		json_object_put(resp);
-		goto err_memerr;
-	}
+	result = json_object_new_object();
+	if (result == NULL)
+		goto put_resp;
 
-	bbdd_util_jrpc_send(&br->ping->peer, resp);
+	if (bbdd_jrpc_append_uint64(result, "ts", dp_time) ||
+	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
+		goto put_result;
+
+	rc = bbdd_jrpc_append_obj(resp, "result", &result);
+	if (rc != 0)
+		goto put_result;
+
+	bbdd_util_jrpc_send(&br->echo->peer, resp);
 	json_object_put(resp);
-	bbdd_br_ping_free(br->ping);
-	br->ping = NULL;
-	return;
+	goto out;
 
+put_result:
+	json_object_put(result);
+put_resp:
+	json_object_put(resp);
 err_memerr:
-	bbdd_util_jrpc_respond_memerr(&br->ping->peer, br->ping->id);
-	bbdd_br_ping_free(br->ping);
-	br->ping = NULL;
+	bbdd_util_jrpc_respond_memerr(&br->echo->peer, br->echo->id);
+out:
+	bbdd_br_echo_free(br->echo);
+	br->echo = NULL;
 }
 
 static int bbdd_br_jrpc_dissect_select_discr(struct json_object *select_obj,
@@ -368,10 +377,19 @@ static void bbdd_br_handle_session_del(struct bbdd_br *br, struct bbdd_sock *pee
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
-static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
+static void bbdd_br_handle_echo(struct bbdd_br *br, struct bbdd_sock *peer,
 				struct json_object *params_obj,
 				struct json_object *id)
 {
+	enum {
+		pol_ts,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts] = { .key = "ts", .type = json_type_int, .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	uint64_t ts;
 	char *error;
 	int rc;
 
@@ -379,23 +397,30 @@ static void bbdd_br_handle_ping(struct bbdd_br *br, struct bbdd_sock *peer,
 		return bbdd_util_jrpc_respond_interr(peer, id,
 						     "No BFDD client connected");
 
-	if (br->ping != NULL)
+	if (br->echo != NULL)
 		return bbdd_util_jrpc_respond_interr(peer, id,
-						     "Ping already pending");
+						     "Echo already pending");
 
-	br->ping = bbdd_br_ping_alloc(peer, params_obj, id, &error);
-	if (br->ping == NULL)
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+
+	ts = json_object_get_uint64(values[pol_ts]);
+
+	br->echo = bbdd_br_echo_alloc(peer, id, &error);
+	if (br->echo == NULL)
 		goto err;
 
-	rc = bbdd_bfdd_send_echo(br->bfdd, 1, &error);
+	rc = bbdd_bfdd_send_echo(br->bfdd, 1, ts, &error);
 	if (rc != 0)
-		goto ping_free;
+		goto echo_free;
 
 	return;
 
-ping_free:
-	bbdd_br_ping_free(br->ping);
-	br->ping = NULL;
+echo_free:
+	bbdd_br_echo_free(br->echo);
+	br->echo = NULL;
 err:
 	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
@@ -471,7 +496,9 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 	if (strcmp(method, "stop") == 0)
 		bbdd_br_handle_stop(br, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
-		bbdd_br_handle_ping(br, peer, params_obj, id);
+		bbdd_d_handle_ping(peer, params_obj, id);
+	else if (strcmp(method, "echo") == 0)
+		bbdd_br_handle_echo(br, peer, params_obj, id);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_br_handle_session_add(br, peer, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)
@@ -546,7 +573,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {
 	case ECHO_REPLY:
-		return bbdd_br_bfdd_handle_echo_reply(br);
+		return bbdd_br_bfdd_handle_echo_reply(br, msg);
 	case BFD_SESSION_COUNTERS:
 		return bbdd_br_bfdd_handle_session_counters(br, msg);
 	case BFD_STATE_CHANGE:

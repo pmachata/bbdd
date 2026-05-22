@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include <json-c/json_tokener.h>
 
@@ -352,4 +353,12 @@ put_req_obj:
 	json_object_put(request_obj);
 free_req:
 	free(request);
+}
+
+uint64_t bbdd_util_now(void)
+{
+	struct timeval tv;
+
+	gettimeofday(&tv, NULL);
+	return ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
 }

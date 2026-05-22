@@ -92,6 +92,9 @@ int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 					 struct bbdd_nl *nl,
 					 char **error);
 
+void bbdd_d_handle_ping(struct bbdd_sock *peer,
+			struct json_object *params_obj,
+			struct json_object *id);
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 				     struct bbdd_sock *peer,
 				     struct json_object *params_obj,

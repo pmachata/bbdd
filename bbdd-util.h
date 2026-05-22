@@ -78,3 +78,5 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 				       struct json_object *id,
 				       void *data),
 			    void *data);
+
+uint64_t bbdd_util_now(void);

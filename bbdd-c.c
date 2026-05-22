@@ -279,6 +279,100 @@ int bbdd_c_ping(int argc, char **argv)
 	return bbdd_c_ping_jrpc();
 }
 
+static void bbdd_c_echo_help(void)
+{
+	fprintf(stderr,
+		"Usage: bbdd echo\n"
+		"\n"
+	);
+}
+
+static int bbdd_c_echo_jrpc(void)
+{
+	enum {
+		pol_ts,
+		pol_reply_ts,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts]       = { .key = "ts",       .type = json_type_int },
+		[pol_reply_ts] = { .key = "reply_ts", .type = json_type_int },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct json_object *response;
+	struct json_object *request;
+	struct json_object *params;
+	struct json_object *result;
+	uint64_t ts, rtt_us;
+	const int id = 1;
+	int err = -1;
+	char *error;
+	int rc;
+
+	ts = bbdd_util_now();
+
+	request = bbdd_jrpc_new_request(id, "echo");
+	if (request == NULL)
+		return -1;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto put_request;
+
+	if (bbdd_jrpc_append_uint64(params, "ts", ts))
+		goto put_params;
+
+	if (bbdd_jrpc_append_obj(request, "params", &params))
+		goto put_params;
+
+	response = bbdd_c_send_request(request);
+	if (response == NULL)
+		goto put_request;
+
+	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+					    &result))
+		goto put_response;
+
+	if (bbdd_c_result_show_json(result)) {
+		err = 0;
+		goto put_result;
+	}
+
+	rc = bbdd_jrpc_dissect(result, policy, seen, values,
+			       ARRAY_SIZE(policy), &error);
+	if (rc != 0) {
+		bbdd_util_fmterr(&error, "Invalid echo response");
+		goto put_result;
+	}
+
+	rtt_us = bbdd_util_now() - ts;
+
+	if (bbdd_env.verbosity > 0)
+		fprintf(stdout, "echo reply: rtt %" PRIu64 " us\n", rtt_us);
+	err = 0;
+
+put_result:
+	json_object_put(result);
+put_response:
+	json_object_put(response);
+put_params:
+	json_object_put(params);
+put_request:
+	json_object_put(request);
+	return err;
+}
+
+int bbdd_c_echo(int argc, char **argv)
+{
+	int err;
+
+	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_echo_help);
+	if (err != 0)
+		return err;
+
+	return bbdd_c_echo_jrpc();
+}
+
 static void bbdd_c_stop_help(void)
 {
 	fprintf(stderr,

@@ -6,7 +6,6 @@
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <sys/time.h>
 
 #include "bbdd.h"
 #include "bbdd-c.h"
@@ -349,25 +348,16 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-static uint64_t bbdd_bfdd_now(void)
+int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
+			 uint16_t msg_id,
+			 const struct bfddp_echo *in_echo, char **error)
 {
-	struct timeval tv;
-
-	gettimeofday(&tv, NULL);
-	return ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
-}
-
-static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
-				 enum bfddp_message_type bmt,
-				 uint16_t msg_id,
-				 const struct bfddp_echo *in_echo, char **error)
-{
-	uint64_t dp_time = bbdd_bfdd_now();
+	uint64_t dp_time = bbdd_util_now();
 	struct bfddp_message msg;
 
 	msg = (struct bfddp_message) {
 		.header.version = BFD_DP_VERSION,
-		.header.type = bbdd_hton16(bmt),
+		.header.type = bbdd_hton16(ECHO_REPLY),
 		.header.id = bbdd_hton16(msg_id),
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.echo)),
@@ -381,20 +371,21 @@ static int __bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
-int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id, char **error)
+int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
+			uint64_t dp_time_us, char **error)
 {
-	struct bfddp_echo echo = {
-		.bfdd_time = bbdd_hton64(bbdd_bfdd_now()),
+	struct bfddp_message msg = {
+		.header.version = BFD_DP_VERSION,
+		.header.type = bbdd_hton16(ECHO_REQUEST),
+		.header.id = bbdd_hton16(msg_id),
+		.header.length = bbdd_hton16(sizeof(msg.header) +
+					     sizeof(msg.data.echo)),
+		.data.echo = {
+			.dp_time = bbdd_hton64(dp_time_us),
+		},
 	};
 
-	return __bbdd_bfdd_send_echo(bfdd, ECHO_REQUEST, msg_id, &echo, error);
-}
-
-int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
-			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo, char **error)
-{
-	return __bbdd_bfdd_send_echo(bfdd, ECHO_REPLY, msg_id, in_echo, error);
+	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
 static int bbdd_bfdd_session_d_from_c(struct bbdd_nl *nl,

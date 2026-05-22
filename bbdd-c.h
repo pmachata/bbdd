@@ -46,6 +46,7 @@ struct bbdd_c_session {
 
 int bbdd_c_stop(int argc, char **argv);
 int bbdd_c_ping(int argc, char **argv);
+int bbdd_c_echo(int argc, char **argv);
 int bbdd_c_session(int argc, char **argv);
 int bbdd_c_global(int argc, char **argv);
 int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics);

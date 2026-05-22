@@ -91,9 +91,9 @@ struct bbdd_d {
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-static void bbdd_d_handle_ping(struct bbdd_sock *peer,
-			       struct json_object *params_obj,
-			       struct json_object *id)
+void bbdd_d_handle_ping(struct bbdd_sock *peer,
+			struct json_object *params_obj,
+			struct json_object *id)
 {
 	struct json_object *obj;
 	int rc;
@@ -113,6 +113,60 @@ static void bbdd_d_handle_ping(struct bbdd_sock *peer,
 
 put_obj:
 	json_object_put(obj);
+	bbdd_util_jrpc_respond_memerr(peer, id);
+}
+
+static void bbdd_d_handle_echo(struct bbdd_sock *peer,
+			       struct json_object *params_obj,
+			       struct json_object *id)
+{
+	enum {
+		pol_ts,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_ts] = { .key = "ts", .type = json_type_int, .required = true },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	struct json_object *result;
+	struct json_object *obj;
+	uint64_t reply_ts;
+	uint64_t ts;
+	char *error;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
+			       ARRAY_SIZE(policy), &error);
+	if (rc != 0)
+		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+
+	ts = json_object_get_uint64(values[pol_ts]);
+	reply_ts = bbdd_util_now();
+
+	result = json_object_new_object();
+	if (result == NULL)
+		goto memerr;
+
+	if (bbdd_jrpc_append_uint64(result, "ts", ts) ||
+	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
+		goto put_result;
+
+	obj = bbdd_jrpc_new_object(id);
+	if (obj == NULL)
+		goto put_result;
+
+	if (bbdd_jrpc_append_obj(obj, "result", &result) != 0)
+		goto put_obj;
+
+	bbdd_util_jrpc_send(peer, obj);
+	json_object_put(obj);
+	return;
+
+put_obj:
+	json_object_put(obj);
+put_result:
+	json_object_put(result);
+memerr:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
@@ -2660,6 +2714,8 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 		bbdd_d_handle_stop(d->pctx, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
+	else if (strcmp(method, "echo") == 0)
+		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(d, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
