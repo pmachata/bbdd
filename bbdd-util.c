@@ -95,6 +95,9 @@ int bbdd_util_appenderr(char **error, const char *fmt, ...)
 
 static void bbdd_util_vprinterr(char **error, const char *fmt, va_list ap)
 {
+	if (bbdd_env.verbosity < 0)
+		return;
+
 	if (fmt != NULL)
 		vfprintf(stderr, fmt, ap);
 

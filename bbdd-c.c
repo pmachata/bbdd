@@ -64,6 +64,9 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 		return;
 	}
 
+	if (bbdd_env.verbosity < 0)
+		return;
+
 	if (data != NULL)
 		fprintf(stderr, "Error %" PRId64 ": %s (%s)\n", code, message,
 			json_object_to_json_string(data));
