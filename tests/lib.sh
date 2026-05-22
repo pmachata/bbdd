@@ -558,28 +558,11 @@ xfail_on_veth()
 	fi
 }
 
-ip_ns_prefix()
-{
-	local ns=$1; shift
-
-	if [[ ! -z "$ns" ]]; then
-		echo "-n $ns"
-	fi
-}
-
-_ip()
-{
-	local ns=$1; shift
-
-	ip $(ip_ns_prefix "$ns") "$@"
-}
-
 mac_get()
 {
-	local ns=$1; shift
 	local if_name=$1
 
-	_ip "$ns" -j link show dev "$if_name" | jq -r '.[]["address"]'
+	Ip -j link show dev "$if_name" | jq -r '.[]["address"]'
 }
 
 kill_process()
@@ -613,87 +596,78 @@ adf_ip_link_add()
 {
 	local name=$1; shift
 
-	ip link add name "$name" "$@" && \
-		defer ip link del dev "$name"
+	Ip link add name "$name" "$@" && \
+		Defer Ip link del dev "$name"
 }
 
 adf_ip_link_set_master()
 {
-	local ns=$1; shift
 	local member=$1; shift
 	local master=$1; shift
 
-	_ip "$ns" link set dev "$member" master "$master" && \
-		defer _ip "$ns" link set dev "$member" nomaster
+	Ip link set dev "$member" master "$master" && \
+		Defer Ip link set dev "$member" nomaster
 }
 
 adf_ip_link_set_addr()
 {
-	local ns=$1; shift
 	local name=$1; shift
 	local addr=$1; shift
 
-	local old_addr=$(mac_get "$ns" "$name")
-	_ip "$ns" link set dev "$name" address "$addr" && \
-		defer ip "$ns" link set dev "$name" address "$old_addr"
+	local old_addr=$(mac_get "$name")
+	Ip link set dev "$name" address "$addr" && \
+		Defer Ip link set dev "$name" address "$old_addr"
 }
 
 ip_link_has_flag()
 {
-	local ns=$1; shift
 	local name=$1; shift
 	local flag=$1; shift
 
-	local state=$(_ip "$ns" -j link show "$name" |
+	local state=$(Ip -j link show "$name" |
 		      jq --arg flag "$flag" 'any(.[].flags[]; . == $flag)')
 	[[ $state == true ]]
 }
 
 ip_link_is_up()
 {
-	local ns=$1; shift
 	local name=$1; shift
 
-	ip_link_has_flag "$ns" "$name" UP
+	ip_link_has_flag "$name" UP
 }
 
 adf_ip_link_set_up()
 {
-	local ns=$1; shift
 	local name=$1; shift
 
-	if ! ip_link_is_up "$ns" "$name"; then
-		_ip "$ns" link set dev "$name" up && \
-			defer _ip "$ns" link set dev "$name" down
+	if ! ip_link_is_up "$name"; then
+		Ip link set dev "$name" up && \
+			Defer Ip link set dev "$name" down
 	fi
 }
 
 adf_ip_link_set_down()
 {
-	local ns=$1; shift
 	local name=$1; shift
 
-	if ip_link_is_up "$ns" "$name"; then
-		_ip "$ns" link set dev "$name" down && \
-			defer _ip "$ns" link set dev "$name" up
+	if ip_link_is_up "$name"; then
+		Ip link set dev "$name" down && \
+			Defer Ip link set dev "$name" up
 	fi
 }
 
 adf_ip_addr_add()
 {
-	local ns=$1; shift
 	local name=$1; shift
 
-	_ip "$ns" addr add dev "$name" "$@" && \
-		defer _ip "$ns" addr del dev "$name" "$@"
+	Ip addr add dev "$name" "$@" && \
+		Defer Ip addr del dev "$name" "$@"
 }
 
 adf_ip_route_add()
 {
-	local ns=$1; shift
-
-	_ip "$ns" route add "$@" && \
-		defer _ip "$ns" route del "$@"
+	Ip route add "$@" && \
+		Defer Ip route del "$@"
 }
 
 wait_local_port_listen()
@@ -741,33 +715,83 @@ cmd_jq()
 	[ ! -z "$output" ]
 }
 
-run_on()
+Ip()
 {
-	shift; "$@"
+	$(nspfx) ip "$@"
+}
+
+Sysctl()
+{
+	$(nspfx) sysctl "$@"
+}
+
+in_ns()
+{
+	local NS=$1; shift
+
+	IN_NS="${NS}" "$@"
+}
+
+Defer()
+{
+	local maybe_ns
+	local maybe_vrf
+
+	if [[ ! -z "$IN_NS" ]]; then
+		maybe_ns="in_ns $IN_NS"
+	fi
+	if [[ ! -z "$IN_VRF" ]]; then
+		maybe_vrf="in_vrf $IN_VRF"
+	fi
+
+	defer $maybe_ns $maybe_vrf "$@"
+}
+
+in_vrf()
+{
+	local VRF=$1; shift
+
+	IN_VRF="$VRF" "$@"
+}
+
+nspfx()
+{
+	if [[ ! -z "$IN_NS" ]]; then
+		echo "ip netns exec ${!IN_NS}"
+	fi
+}
+
+vrfpfx()
+{
+	if [[ ! -z "$IN_VRF" ]]; then
+		echo "ip vrf exec $IN_VRF"
+	fi
 }
 
 declare -A SYSCTL_ORIG
 sysctl_save()
 {
-	local key=$1; shift
+	local sysctl=$1; shift
+	local key=$IN_NS,$sysctl
 
-	SYSCTL_ORIG[$key]=$(sysctl -n $key)
+	SYSCTL_ORIG[$key]=$(Sysctl -n $sysctl)
 }
 
 sysctl_set()
 {
-	local key=$1; shift
+	local sysctl=$1; shift
 	local value=$1; shift
 
-	sysctl_save "$key"
-	sysctl -qw $key="$value"
+	sysctl_save "$sysctl"
+	Sysctl -qw $sysctl="$value"
 }
 
 sysctl_restore()
 {
-	local key=$1; shift
+	local sysctl=$1; shift
+	local key=$IN_NS,$sysctl
 
-	sysctl -qw $key="${SYSCTL_ORIG[$key]}"
+	Sysctl -qw $sysctl="${SYSCTL_ORIG[$key]}"
 }
 
 forwarding_enable()
@@ -785,33 +809,97 @@ forwarding_restore()
 adf_forwarding_enable()
 {
 	forwarding_enable
-	defer forwarding_restore
+	Defer forwarding_restore
 }
 
-in_ns()
+vrf_prepare()
 {
-	local NS=$1; shift
-
-	IN_NS="${!NS}" "$@"
+	Ip -4 rule add pref 32765 table local
+	Ip -4 rule del pref 0
+	Ip -6 rule add pref 32765 table local
+	Ip -6 rule del pref 0
 }
 
-in_vrf()
+vrf_cleanup()
 {
-	local VRF=$1; shift
-
-	IN_VRF="$VRF" "$@"
+	Ip -6 rule add pref 0 table local
+	Ip -6 rule del pref 32765
+	Ip -4 rule add pref 0 table local
+	Ip -4 rule del pref 32765
 }
 
-nspfx()
+adf_vrf_prepare()
 {
-	if [[ ! -z "$IN_NS" ]]; then
-		echo "ip netns exec $IN_NS"
-	fi
+	vrf_prepare
+	defer in_ns ${IN_NS} vrf_cleanup
 }
 
-vrfpfx()
+__last_tb_id=0
+declare -A __TB_IDS
+
+__vrf_td_id_assign()
 {
-	if [[ ! -z "$IN_VRF" ]]; then
-		echo "ip vrf exec $IN_VRF"
-	fi
+	local vrf_name=$1
+
+	__last_tb_id=$((__last_tb_id + 1))
+	__TB_IDS[$vrf_name]=$__last_tb_id
+	return $__last_tb_id
+}
+
+__vrf_td_id_lookup()
+{
+	local vrf_name=$1
+
+	return ${__TB_IDS[$vrf_name]}
+}
+
+vrf_create()
+{
+	local vrf_name=$1
+	local tb_id
+
+	__vrf_td_id_assign $vrf_name
+	tb_id=$?
+
+	Ip link add dev $vrf_name type vrf table $tb_id
+	Ip -4 route add table $tb_id unreachable default metric 4278198272
+	Ip -6 route add table $tb_id unreachable default metric 4278198272
+}
+
+vrf_destroy()
+{
+	local vrf_name=$1
+	local tb_id
+
+	__vrf_td_id_lookup $vrf_name
+	tb_id=$?
+
+	Ip -6 route del table $tb_id unreachable default metric 4278198272
+	Ip -4 route del table $tb_id unreachable default metric 4278198272
+	Ip link del dev $vrf_name
+}
+
+ping_do()
+{
+	local if_name=$1
+	local dip=$2
+
+	$(nspfx) $(vrfpfx) \
+		$PING -c "$PING_COUNT" -i 0.1 \
+		      -w "$PING_TIMEOUT" "$dip" &> /dev/null
+}
+
+ping_test()
+{
+	local if_name=$1; shift
+	local dip=$1; shift
+
+	local vrf_name=$(master_name_get $if_name)
+
+	RET=0
+
+	in_vrf "$vrf_name" \
+	       ping_do "$if_name" "$dip"
+	check_err $?
+	log_test "$IN_NS $IN_VRF: ping $dip"
 }

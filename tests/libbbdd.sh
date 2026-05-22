@@ -106,28 +106,3 @@ Bbdd_session_wait_not_up()
 {
 	slowwait 1 not eq val up , Bbdd_session_remote_state
 }
-
-ping_do()
-{
-	local if_name=$1
-	local dip=$2
-
-	$(nspfx) $(vrfpfx) \
-		$PING -c "$PING_COUNT" -i 0.1 \
-		      -w "$PING_TIMEOUT" "$dip" &> /dev/null
-}
-
-ping_test()
-{
-	local if_name=$1; shift
-	local dip=$1; shift
-
-	local vrf_name=$(master_name_get $if_name)
-
-	RET=0
-
-	in_vrf "$vrf_name" \
-	       ping_do "$if_name" "$dip"
-	check_err $?
-	log_test "ping"
-}
