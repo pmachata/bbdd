@@ -2,6 +2,11 @@
 
 tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 
-for t in "$@"; do
-	${tests_dir}/run1.sh "$t"
+: "${TESTS:=
+	basic.sh
+}"
+
+for t in $TESTS; do
+	echo == $t ==
+	${tests_dir}/run1.sh "${tests_dir}/$t"
 done

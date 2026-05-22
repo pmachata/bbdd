@@ -144,4 +144,7 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o
 $(MAN_PAGES): $(OUTPUT)/%: %.md | $(OUTPUT_DIRS)
 	pandoc --standalone --to man $< -o $@
 
+test: $(BUILT)
+	tests/run.sh
+
 -include $(ALL_DEPS)

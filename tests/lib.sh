@@ -1,7 +1,4 @@
-#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
-
-source "${tests_dir}/defer.sh"
 
 ##############################################################################
 # Defines
@@ -106,6 +103,42 @@ slowwait()
 	local timeout_sec=$1; shift
 
 	loopy_wait "sleep 0.1" "$((timeout_sec * 1000))" "$@"
+}
+
+not()
+{
+	"$@"
+	[[ $? != 0 ]]
+}
+
+val()
+{
+	echo "$@"
+}
+
+binary_op()
+{
+	local op=$1; shift
+
+	local -a lhs=()
+	while [[ $# > 0 ]]; do
+		arg=$1; shift
+
+		if [[ "$arg" == -- ]]; then
+			break
+		fi
+
+		lhs[${#lhs[@]}]=$arg
+	done
+
+	local L=$("${lhs[@]}")
+	local R=$("$@")
+	[ "$L" "$op" "$R" ]
+}
+
+eq()
+{
+	binary_op == "$@"
 }
 
 until_counter_is()
@@ -403,6 +436,7 @@ log_test()
 {
 	local test_name=$1
 	local opt_str=$2
+	local ret
 
 	if [[ $# -eq 2 ]]; then
 		opt_str="($opt_str)"
@@ -419,7 +453,9 @@ log_test()
 	fi
 
 	EXIT_STATUS=$(ksft_exit_status_merge $EXIT_STATUS $RET)
-	return $RET
+	ret="$RET"
+	RET=0
+	return "$ret"
 }
 
 log_test_skip()
@@ -708,4 +744,46 @@ cmd_jq()
 run_on()
 {
 	shift; "$@"
+}
+
+declare -A SYSCTL_ORIG
+sysctl_save()
+{
+	local key=$1; shift
+
+	SYSCTL_ORIG[$key]=$(sysctl -n $key)
+}
+
+sysctl_set()
+{
+	local key=$1; shift
+	local value=$1; shift
+
+	sysctl_save "$key"
+	sysctl -qw $key="$value"
+}
+
+sysctl_restore()
+{
+	local key=$1; shift
+
+	sysctl -qw $key="${SYSCTL_ORIG[$key]}"
+}
+
+forwarding_enable()
+{
+	sysctl_set net.ipv4.conf.all.forwarding 1
+	sysctl_set net.ipv6.conf.all.forwarding 1
+}
+
+forwarding_restore()
+{
+	sysctl_restore net.ipv6.conf.all.forwarding
+	sysctl_restore net.ipv4.conf.all.forwarding
+}
+
+adf_forwarding_enable()
+{
+	forwarding_enable
+	defer forwarding_restore
 }

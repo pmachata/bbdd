@@ -1,4 +1,3 @@
-#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 
 # Whether to pause and allow debugging when an executed deferred command has a
