@@ -1,26 +1,9 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 
-setup_ns NS1 NS2
-defer cleanup_all_ns
-
-in_ns NS1 adf_forwarding_enable
-in_ns NS2 adf_forwarding_enable
-
-ip link add name L netns "$NS1" type veth peer name L netns "$NS2"
-defer in_ns NS1 Ip link del dev L
-
-in_ns NS1 adf_ip_link_set_up L
-in_ns NS2 adf_ip_link_set_up L
-
-in_ns NS1 adf_ip_addr_add L 192.0.2.1/28
-in_ns NS2 adf_ip_addr_add L 192.0.2.2/28
-
-in_ns NS1 ping_test 192.0.2.2
-in_ns NS2 ping_test 192.0.2.1
-
-Env NS1 adf_Bbdd_start_or_die
-Env NS2 adf_Bbdd_start_or_die
+Bbdd_setup_ns NS1 NS2
+Bbdd_connect_ns NS1 v1 192.0.2.1/28 \
+		NS2 v2 192.0.2.2/28
 
 check_nsessions()
 {

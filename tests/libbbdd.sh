@@ -119,3 +119,80 @@ session_state_test()
 
 	log_test "$BBDD_ENV: Session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
+
+Bbdd_setup_ns()
+{
+	local -a ns_names=("$@")
+	local ns_name
+
+	setup_ns "${ns_names[@]}"
+	defer cleanup_ns "${ns_names[@]}"
+
+	for ns_name in "${ns_names[@]}"; do
+		in_ns "$ns_name" adf_forwarding_enable
+		Env "$ns_name" adf_Bbdd_start_or_die
+	done
+}
+
+Bbdd_setup_vrf()
+{
+	local -a vrf_names=("$@")
+	local vrf_name
+
+	for vrf_name in "${vrf_names[@]}"; do
+		adf_vrf_create "$vrf_name"
+		adf_ip_link_set_up "$vrf_name"
+	done
+}
+
+Bbdd_connect_ns()
+{
+	while (($# > 0)); do
+		local ns1_name=$1; shift
+		local ns1_link=$1; shift
+		local ns1_addr=$1; shift
+
+		local ns2_name=$1; shift
+		local ns2_link=$1; shift
+		local ns2_addr=$1; shift
+
+		ip link add name "$ns1_link" netns "${!ns1_name}" type veth \
+		   peer name "$ns2_link" netns "${!ns2_name}"
+		defer in_ns "$ns1_name" Ip link del dev "$ns1_link"
+
+		in_ns "$ns1_name" adf_ip_link_set_up "$ns1_link"
+		in_ns "$ns2_name" adf_ip_link_set_up "$ns2_link"
+
+		in_ns "$ns1_name" adf_ip_addr_add "$ns1_link" "$ns1_addr"
+		in_ns "$ns2_name" adf_ip_addr_add "$ns2_link" "$ns2_addr"
+
+		in_ns "$ns1_name" ping_test "${ns2_addr%/*}"
+		in_ns "$ns2_name" ping_test "${ns1_addr%/*}"
+	done
+}
+
+Bbdd_connect_vrf()
+{
+	while (($# > 0)); do
+		local vrf1_name=$1; shift
+		local vrf1_link=$1; shift
+		local vrf1_addr=$1; shift
+
+		local vrf2_name=$1; shift
+		local vrf2_link=$1; shift
+		local vrf2_addr=$1; shift
+
+		adf_ip_link_add "$vrf1_link" master "$vrf1_name" type veth \
+				peer name "$vrf2_link"
+		adf_ip_link_set_up "$vrf1_link"
+
+		adf_ip_link_set_master "$vrf2_link" "$vrf2_name"
+		adf_ip_link_set_up "$vrf2_link"
+
+		adf_ip_addr_add "$vrf1_link" "$vrf1_addr"
+		adf_ip_addr_add "$vrf2_link" "$vrf2_addr"
+
+		in_vrf "$vrf1_name" ping_test "${vrf2_addr%/*}"
+		in_vrf "$vrf2_name" ping_test "${vrf1_addr%/*}"
+	done
+}
