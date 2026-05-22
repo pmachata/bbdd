@@ -2385,13 +2385,19 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	    dsess->local.timing.min_rx_us < timing->min_rx_us)
 		apply_imm = false;
 
+	/* For stable state, apply_imm changes the effective timing. Mid-poll we
+	 * we need to hold on to the effective timing until the poll sequence is
+	 * over. We can change poll_timing though. Then the timers sent in poll
+	 * sequence will be the changed timers (i.e. immediate change), but we
+	 * still use the old eff_timing to calculate timeouts etc. */
+	if (apply_imm)
+		*timing = dsess->local.timing;
+
 	switch (bsess->bstate) {
 	case BBDD_BPF_SESSION_STATE_ON_HOLD:
 		invalid_on_hold_abort(bsess);
 
 	case BBDD_BPF_SESSION_STATE_STABLE:
-		if (apply_imm)
-			bsess->eff_timing = dsess->local.timing;
 		if (need_poll) {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, await final",
 					    dsess->local.discr);
@@ -2402,8 +2408,6 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
 	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
-		/* We are already polling, just set the mark and don't touch any
-		 * configuration. */
 		if (need_poll) {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, queue timing",
 					    dsess->local.discr);
