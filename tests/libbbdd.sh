@@ -17,28 +17,12 @@ Env()
 		defer rm -Rf "${sockdir}"
 	fi
 
-	BBDD_ENV="$NS" BBDD_NS="${!NS}" BBDD_SOCKDIR="${sockdir}" "$@"
-}
-
-nspfx()
-{
-	if [[ ! -z "$BBDD_NS" ]]; then
-		echo "ip netns exec $BBDD_NS"
-	fi
-}
-
-vrfpfx()
-{
-	    local vrfname=$1; shift
-
-	    if [[ ! -z "$vrfname" ]]; then
-		    echo "ip vrf exec $vrf_name "
-	    fi
+	BBDD_ENV="$NS" BBDD_SOCKDIR="${sockdir}" in_ns "$NS" "$@"
 }
 
 Bbdd()
 {
-	local ns=$BBDD_NS
+	local ns=$IN_NS
 
 	$(nspfx) "${bin_dir}/bbdd" --sockdir "$BBDD_SOCKDIR" "$@"
 }
@@ -127,21 +111,23 @@ ping_do()
 {
 	local if_name=$1
 	local dip=$2
-	local args=$3
-	local vrf_name
 
-	vrf_name=$(master_name_get $if_name)
-
-	$(nspfx) $(vrfpfx "$vrf_name") \
-		$PING $args -c "$PING_COUNT" -i 0.1 \
+	$(nspfx) $(vrfpfx) \
+		$PING -c "$PING_COUNT" -i 0.1 \
 		      -w "$PING_TIMEOUT" "$dip" &> /dev/null
 }
 
 ping_test()
 {
+	local if_name=$1; shift
+	local dip=$1; shift
+
+	local vrf_name=$(master_name_get $if_name)
+
 	RET=0
 
-	ping_do $1 $2
+	in_vrf "$vrf_name" \
+	       ping_do "$if_name" "$dip"
 	check_err $?
-	log_test "ping$3"
+	log_test "ping"
 }

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
 
 setup_ns NS1 NS2
 defer cleanup_all_ns

@@ -787,3 +787,31 @@ adf_forwarding_enable()
 	forwarding_enable
 	defer forwarding_restore
 }
+
+in_ns()
+{
+	local NS=$1; shift
+
+	IN_NS="${!NS}" "$@"
+}
+
+in_vrf()
+{
+	local VRF=$1; shift
+
+	IN_VRF="$VRF" "$@"
+}
+
+nspfx()
+{
+	if [[ ! -z "$IN_NS" ]]; then
+		echo "ip netns exec $IN_NS"
+	fi
+}
+
+vrfpfx()
+{
+	if [[ ! -z "$IN_VRF" ]]; then
+		echo "ip vrf exec $IN_VRF"
+	fi
+}
