@@ -72,18 +72,6 @@ Bbdd_wait()
 	slowwait 5 Bbdd -q ping
 }
 
-Bbdd_session_get()
-{
-	local key=$1; shift
-
-	Bbdd --json session "$@" show | jq -r ".sessions.[]$key"
-}
-
-Bbdd_session_remote_state()
-{
-	Bbdd_session_get .state.local.state "$@"
-}
-
 adf_Bbdd_start()
 {
 	Bbdd start &
@@ -111,6 +99,28 @@ master_name_get()
 	local if_name=$1
 
 	$(nspfx) ip -j link show dev "$if_name" | jq -r '.[]["master"] // ""'
+}
+
+Bbdd_session_get()
+{
+	local key=$1; shift
+
+	Bbdd --json session "$@" show | jq -r ".sessions.[]$key"
+}
+
+Bbdd_session_remote_state()
+{
+	Bbdd_session_get .state.local.state "$@"
+}
+
+Bbdd_session_wait_up()
+{
+	slowwait 1 eq val up , Bbdd_session_remote_state
+}
+
+Bbdd_session_wait_not_up()
+{
+	slowwait 1 not eq val up , Bbdd_session_remote_state
 }
 
 ping_do()

@@ -124,7 +124,7 @@ binary_op()
 	while [[ $# > 0 ]]; do
 		arg=$1; shift
 
-		if [[ "$arg" == -- ]]; then
+		if [[ "$arg" == , ]]; then
 			break
 		fi
 
