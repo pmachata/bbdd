@@ -1,4 +1,3 @@
-#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0
 
 Bbdd_setup_ns NS1 NS2

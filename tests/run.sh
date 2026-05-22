@@ -3,7 +3,8 @@
 tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 
 : "${TESTS:=
-	basic.sh
+	ns-basic.sh
+	vrf-basic.sh
 }"
 
 for t in $TESTS; do
