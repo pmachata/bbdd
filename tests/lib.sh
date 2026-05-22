@@ -896,7 +896,7 @@ ping_test()
 {
 	local dip=$1; shift
 
-	Ping -c "$PING_COUNT" -i 0.1 -w "$PING_TIMEOUT" "$dip" &> /dev/null
+	Ping -c "$PING_COUNT" -i 0.01 -w "$PING_TIMEOUT" "$dip" &> /dev/null
 	check_err $?
 	log_test "$IN_NS $IN_VRF: ping $dip"
 }
