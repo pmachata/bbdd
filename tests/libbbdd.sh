@@ -7,32 +7,27 @@
 tmpdir=$(mktemp -d XXXXXX)
 defer rm -Rf "$tmpdir"
 
-Env()
+Bbdd_setup_sockdir()
 {
-	local NS=$1; shift
-	local sockdir="${tmpdir}/sock-$NS"
+	local sd_name
 
-	if [[ ! -e "${sockdir}" ]]; then
-		mkdir -p "${sockdir}"
-		defer rm -Rf "${sockdir}"
-	fi
+	for sd_name in "$@"; do
+		eval "${sd_name}=${tmpdir}/${sd_name,,}-$(mktemp -u XXXXXX)"
+		mkdir -p "${!sd_name}"
+		defer rm -Rf "${!sd_name}"
+	done
+}
 
-	# If Env() is to affect global settings when it's given without
-	# commands, then the values need to be set one after another. Otherwise
-	# the in_ns command serves as a command to make the earlier settings
-	# command-local.
-	if (($# == 0)); then
-		BBDD_ENV="$NS"
-		BBDD_SOCKDIR="${sockdir}"
-		in_ns "$NS"
-	else
-		BBDD_ENV="$NS" BBDD_SOCKDIR="${sockdir}" in_ns "$NS" "$@"
-	fi
+in_sockdir()
+{
+	local sd_name=$1; shift
+
+	BBDD_SOCKDIR="${sd_name}" "$@"
 }
 
 Bbdd()
 {
-	$(nspfx) "${bin_dir}/bbdd" --sockdir "$BBDD_SOCKDIR" "$@"
+	$(nspfx) "${bin_dir}/bbdd" --sockdir "${!BBDD_SOCKDIR}" "$@"
 }
 
 Bbdd_stop()
@@ -62,28 +57,34 @@ Bbdd_stop()
 Bbdd_wait()
 {
 	slowwait 5 Bbdd -q ping
+
+	if [[ $? != 0 ]]; then
+		echo "failed to start bbdd" >/dev/stderr
+		exit 1
+	fi
 }
 
 adf_Bbdd_start()
 {
 	Bbdd start &
-	defer Env "$BBDD_ENV" Bbdd_stop $!
+	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
 
 	Bbdd_wait
-	if [[ $? != 0 ]]; then
-		echo "failed to start bbdd" >/dev/stderr
-		return 1
-	fi
-
-	return 0
 }
 
-adf_Bbdd_start_or_die()
+adf_Bbdd_bridge_start()
 {
-	adf_Bbdd_start
-	if [[ $? != 0 ]]; then
-		exit 1
-	fi
+	Bbdd bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd.sock &
+	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
+
+	Bbdd_wait
+}
+
+Bbdd_bfdd_connect()
+{
+	local dst_sockdir=$1; shift
+
+	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd.sock
 }
 
 Bbdd_session_get()
@@ -108,6 +109,11 @@ Bbdd_session_wait_not_up()
 	slowwait 1 not eq val up , Bbdd_session_remote_state "$@"
 }
 
+Bbdd_describe_env()
+{
+	format_env $(collect_env) "$BBDD_SOCKDIR"
+}
+
 session_state_test()
 {
 	local check=$1; shift
@@ -117,7 +123,7 @@ session_state_test()
 	"Bbdd_session_wait_$check" "$@"
 	check_err_fail "$should_fail" $? "session up"
 
-	log_test "$BBDD_ENV: Session $(if ((should_fail)); then echo 'never '; fi)got $check"
+	log_test "$(Bbdd_describe_env)session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
 
 Bbdd_setup_ns()
@@ -125,12 +131,10 @@ Bbdd_setup_ns()
 	local -a ns_names=("$@")
 	local ns_name
 
-	setup_ns "${ns_names[@]}"
-	defer cleanup_ns "${ns_names[@]}"
-
 	for ns_name in "${ns_names[@]}"; do
+		setup_ns "$ns_name"
+		defer cleanup_ns "${!ns_name}"
 		in_ns "$ns_name" adf_forwarding_enable
-		Env "$ns_name" adf_Bbdd_start_or_die
 	done
 }
 

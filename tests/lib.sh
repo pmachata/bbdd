@@ -887,6 +887,29 @@ adf_vrf_create()
 		Defer vrf_destroy "$vrf_name"
 }
 
+collect_env()
+{
+	echo "$IN_NS" "$IN_VRF"
+}
+
+format_env()
+{
+	local -a items=("$@")
+	local str
+	local item
+
+	for item in "${items[@]}"; do
+		str="$str$item "
+	done
+
+	echo "${str% }${str:+: }"
+}
+
+describe_env()
+{
+	format_env $(collect_env)
+}
+
 Ping()
 {
 	$(nspfx) $(vrfpfx) $PING "$@"
@@ -898,5 +921,5 @@ ping_test()
 
 	Ping -c "$PING_COUNT" -i 0.01 -w "$PING_TIMEOUT" "$dip" &> /dev/null
 	check_err $?
-	log_test "$IN_NS $IN_VRF: ping $dip"
+	log_test "$(describe_env)ping $dip"
 }

@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: GPL-2.0
 
 Bbdd_setup_ns NS1
+in_ns NS1
 
-Env NS1
+Bbdd_setup_sockdir SD1
+in_sockdir SD1
+adf_Bbdd_start
 
 adf_vrf_prepare
 Bbdd_setup_vrf V1 V2
