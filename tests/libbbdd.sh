@@ -126,6 +126,26 @@ session_state_test()
 	log_test "$(Bbdd_describe_env)session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
 
+nsessions_test()
+{
+	local xN=$1; shift
+	local descr="$@"
+	local N
+	local pl
+
+	descr=${descr}${descr:+ }
+
+	if ((xN != 1)); then
+		pl=s
+	fi
+
+	N=$(Bbdd --json session "$@" show | jq -r '.sessions | length')
+	((N == xN))
+
+	check_err $? "$N sessions reported, $xN expected"
+	log_test "$(Bbdd_describe_env)$xN ${descr}session$pl reported"
+}
+
 Bbdd_setup_ns()
 {
 	local -a ns_names=("$@")
