@@ -28,4 +28,4 @@ in_sockdir SDb packet_size_test discr 2
 in_sockdir SDb Bbdd session discr 2 del
 in_sockdir SD2 nsessions_test 0
 
-in_sockdir SDb Bbdd -v echo
+in_sockdir SDb echo_test

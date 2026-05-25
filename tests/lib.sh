@@ -923,3 +923,8 @@ ping_test()
 	check_err $?
 	log_test "$(describe_env)ping $dip"
 }
+
+now()
+{
+	date +%s%6N
+}

@@ -141,9 +141,38 @@ nsessions_test()
 
 	N=$(Bbdd --json session "$@" show | jq -r '.sessions | length')
 	((N == xN))
-
 	check_err $? "$N sessions reported, $xN expected"
+
 	log_test "$(Bbdd_describe_env)$xN ${descr}session$pl reported"
+}
+
+echo_test()
+{
+	local t0
+	local t1
+	local rc
+	local reported_lat
+	local resp
+
+	t0=$(now)
+	resp=$(Bbdd --json echo)
+	rc=$?
+	t1=$(now)
+	check_err "$rc" "bbdd echo exit code is $rc, 0 expected"
+
+	reported_lat=$(echo "$resp" | jq '.reply_ts - .ts')
+	measured_lat=$((t1 - t0))
+
+	# This doesn't test much except that the value is not a complete
+	# nonsense. Whatever we measure in bash is going to be orders of
+	# magnitude worse than the actual thing. For the low limit, just
+	# invent an arbitrary can't-be-this-fast limit.
+	((reported_lat > 10))
+	check_err $? "reported latency ($reported_lat) suspiciously low (measured $measured_lat)"
+	((reported_lat < measured_lat / 2))
+	check_err $? "reported latency ($reported_lat) suspiciously high (measured $measured_lat)"
+
+	log_test "$(Bbdd_describe_env)echo ($reported_lat us)"
 }
 
 packet_size_test()
