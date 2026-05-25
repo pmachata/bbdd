@@ -47,7 +47,7 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
 
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t dp_time_us, char **error);
+			uint64_t bfdd_time_us, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error);

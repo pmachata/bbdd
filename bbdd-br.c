@@ -137,7 +137,7 @@ static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
 					   const struct bfddp_message *msg)
 {
 	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
-	uint64_t reply_ts = bbdd_ntoh64(msg->data.echo.bfdd_time);
+	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
 	struct json_object *result;
 	struct json_object *resp;
 	int rc;
@@ -153,8 +153,8 @@ static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
 	if (result == NULL)
 		goto put_resp;
 
-	if (bbdd_jrpc_append_uint64(result, "ts", dp_time) ||
-	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
+	if (bbdd_jrpc_append_uint64(result, "ts", bfdd_time) ||
+	    bbdd_jrpc_append_uint64(result, "reply_ts", dp_time))
 		goto put_result;
 
 	rc = bbdd_jrpc_append_obj(resp, "result", &result);
@@ -401,17 +401,21 @@ static void bbdd_br_handle_echo(struct bbdd_br *br, struct bbdd_sock *peer,
 		return bbdd_util_jrpc_respond_interr(peer, id,
 						     "Echo already pending");
 
+	/* Parse the request for validation's sake, but we ignore the timestamp
+	 * and use our own. The goal here is to measure latency from the bridge
+	 * to the daemon, not the overall latency of the CLI-bridge-daemon
+	 * system. Bridge performance is not interesting. */
+
 	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
 			       ARRAY_SIZE(policy), &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	ts = json_object_get_uint64(values[pol_ts]);
-
 	br->echo = bbdd_br_echo_alloc(peer, id, &error);
 	if (br->echo == NULL)
 		goto err;
 
+	ts = bbdd_util_now();
 	rc = bbdd_bfdd_send_echo(br->bfdd, 1, ts, &error);
 	if (rc != 0)
 		goto echo_free;

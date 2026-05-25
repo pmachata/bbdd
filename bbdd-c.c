@@ -294,8 +294,10 @@ static int bbdd_c_echo_jrpc(void)
 		pol_reply_ts,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts]       = { .key = "ts",       .type = json_type_int },
-		[pol_reply_ts] = { .key = "reply_ts", .type = json_type_int },
+		[pol_ts]       = { .key = "ts",       .type = json_type_int,
+				   .required = true },
+		[pol_reply_ts] = { .key = "reply_ts", .type = json_type_int,
+				   .required = true },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
@@ -303,13 +305,13 @@ static int bbdd_c_echo_jrpc(void)
 	struct json_object *request;
 	struct json_object *params;
 	struct json_object *result;
-	uint64_t ts, rtt_us;
+	uint64_t delay_us;
+	uint64_t reply_ts_us;
+	uint64_t ts_us;
 	const int id = 1;
 	int err = -1;
 	char *error;
 	int rc;
-
-	ts = bbdd_util_now();
 
 	request = bbdd_jrpc_new_request(id, "echo");
 	if (request == NULL)
@@ -319,7 +321,8 @@ static int bbdd_c_echo_jrpc(void)
 	if (params == NULL)
 		goto put_request;
 
-	if (bbdd_jrpc_append_uint64(params, "ts", ts))
+	ts_us = bbdd_util_now();
+	if (bbdd_jrpc_append_uint64(params, "ts", ts_us))
 		goto put_params;
 
 	if (bbdd_jrpc_append_obj(request, "params", &params))
@@ -345,12 +348,17 @@ static int bbdd_c_echo_jrpc(void)
 		goto put_result;
 	}
 
-	rtt_us = bbdd_util_now() - ts;
+	if (bbdd_env.verbosity <= 0)
+		goto done;
 
-	if (bbdd_env.verbosity > 0)
-		fprintf(stdout, "echo reply: rtt %" PRIu64 " us\n", rtt_us);
+	ts_us = json_object_get_uint64(values[pol_ts]);
+	reply_ts_us = json_object_get_uint64(values[pol_reply_ts]);
+	delay_us = reply_ts_us - ts_us;
+
+	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
+
+done:
 	err = 0;
-
 put_result:
 	json_object_put(result);
 put_response:

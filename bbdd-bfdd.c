@@ -373,7 +373,7 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 }
 
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t dp_time_us, char **error)
+			uint64_t bfdd_time_us, char **error)
 {
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
@@ -382,7 +382,7 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.echo)),
 		.data.echo = {
-			.dp_time = bbdd_hton64(dp_time_us),
+			.bfdd_time = bbdd_hton64(bfdd_time_us),
 		},
 	};
 
