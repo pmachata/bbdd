@@ -318,6 +318,7 @@ static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
 		return -1;
 	}
 
+	bbdd_bfdd_mon_send_o(bfdd->mon, msg);
 	return 0;
 }
 
@@ -750,6 +751,7 @@ int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 }
 
 static int bbdd_bfdd_format_add_session(const struct bfddp_message *msg,
+					const char *method,
 					struct bbdd_mon_message *mon_msg,
 					char **error)
 {
@@ -774,7 +776,7 @@ static int bbdd_bfdd_format_add_session(const struct bfddp_message *msg,
 		goto put_sess_obj;
 
 	*mon_msg = (struct bbdd_mon_message) {
-		.method = "bfdd:sess-add",
+		.method = method,
 		.params = params,
 	};
 	return 0;
@@ -956,42 +958,83 @@ err:
 	return -1;
 }
 
-int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
-			     struct bbdd_mon_message *mon_msg, char **error)
+#define BBDD_BFDD_I_O(IN, NAME) ((IN) ? ("bfddi:" NAME) : ("bfddo:" NAME))
+
+static int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
+				    struct bbdd_mon_message *mon_msg,
+				    bool in, char **error)
 {
 	enum bfddp_message_type bmt = bbdd_ntoh16(msg->header.type);
 
 	switch (bmt) {
+		const char *method;
 		uint32_t lid;
 
 	case DP_ADD_SESSION:
-		return bbdd_bfdd_format_add_session(msg, mon_msg, error);
+		method = BBDD_BFDD_I_O(in, "sess-add");
+		return bbdd_bfdd_format_add_session(msg, method, mon_msg, error);
 
 	case DP_DELETE_SESSION:
+		method = BBDD_BFDD_I_O(in, "sess-del");
 		lid = bbdd_ntoh32(msg->data.session.lid);
-		return bbdd_bfdd_format_lid_msg(lid, "bfdd:sess-del",
-						mon_msg, error);
+		return bbdd_bfdd_format_lid_msg(lid, method, mon_msg, error);
 
 	case DP_REQUEST_SESSION_COUNTERS:
+		method = BBDD_BFDD_I_O(in, "sess-cnt-req");
 		lid = bbdd_ntoh32(msg->data.counters_req.lid);
-		return bbdd_bfdd_format_lid_msg(lid, "bfdd:sess-cnt-req",
-						mon_msg, error);
+		return bbdd_bfdd_format_lid_msg(lid, method, mon_msg, error);
 
 	case BFD_STATE_CHANGE:
-		return bbdd_bfdd_format_state_change(&msg->data.state,
-						     "bfdd:state-change",
+		method = BBDD_BFDD_I_O(in, "state-change");
+		return bbdd_bfdd_format_state_change(&msg->data.state, method,
 						     mon_msg, error);
 
 	case ECHO_REQUEST:
-		return bbdd_bfdd_format_echo(&msg->data.echo, "bfdd:echo-req",
-					     mon_msg, error);
+		method = BBDD_BFDD_I_O(in, "echo-req");
+		return bbdd_bfdd_format_echo(&msg->data.echo, method, mon_msg,
+					     error);
 	case ECHO_REPLY:
-		return bbdd_bfdd_format_echo(&msg->data.echo, "bfdd:echo-rep",
-					     mon_msg, error);
+		method = BBDD_BFDD_I_O(in, "echo-rep");
+		return bbdd_bfdd_format_echo(&msg->data.echo, method, mon_msg,
+					     error);
 	case BFD_SESSION_COUNTERS:
-		return bbdd_bfdd_msg_format_bare("bfdd:sess-cnt-rep", mon_msg);
+		method = BBDD_BFDD_I_O(in, "sess-cnt-rep");
+		return bbdd_bfdd_msg_format_bare(method, mon_msg);
 
 	default:
 		return bbdd_bfdd_format_unknown(bmt, mon_msg, error);
 	}
+}
+
+static void bbdd_bfdd_mon_send(struct bbdd_mon *mon,
+			       const struct bfddp_message *msg, bool in)
+{
+	struct bbdd_mon_message mon_msg;
+	enum bbdd_mon_topic topic;
+	char *error;
+	int rc;
+
+	if (in)
+		topic = BBDD_MON_TOPIC_bfddi;
+	else
+		topic = BBDD_MON_TOPIC_bfddo;
+
+	if (!bbdd_mon_topic_active(mon, topic))
+		return;
+
+	rc = bbdd_bfdd_msg_format_mon(msg, &mon_msg, in, &error);
+	if (rc != 0)
+		return bbdd_mon_senderr(mon, &error, "Failed to format bfdd monitor message");
+
+	bbdd_mon_send(mon, &mon_msg, topic);
+}
+
+void bbdd_bfdd_mon_send_i(struct bbdd_mon *mon, const struct bfddp_message *msg)
+{
+	bbdd_bfdd_mon_send(mon, msg, true);
+}
+
+void bbdd_bfdd_mon_send_o(struct bbdd_mon *mon, const struct bfddp_message *msg)
+{
+	bbdd_bfdd_mon_send(mon, msg, false);
 }

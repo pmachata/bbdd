@@ -568,7 +568,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 		goto senderr;
 	}
 
-	bbdd_d_bfdd_mon_send(br->mon, msg);
+	bbdd_bfdd_mon_send_i(br->mon, msg);
 
 	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {

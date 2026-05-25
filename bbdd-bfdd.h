@@ -75,5 +75,6 @@ int bbdd_bfdd_format_state_change(const struct bfddp_state_change *sc,
 				  const char *method,
 				  struct bbdd_mon_message *mon_msg,
 				  char **error);
-int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
-			     struct bbdd_mon_message *mon_msg, char **error);
+
+void bbdd_bfdd_mon_send_i(struct bbdd_mon *mon, const struct bfddp_message *msg);
+void bbdd_bfdd_mon_send_o(struct bbdd_mon *mon, const struct bfddp_message *msg);

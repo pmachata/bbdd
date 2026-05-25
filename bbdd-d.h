@@ -99,8 +99,6 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 				     struct bbdd_sock *peer,
 				     struct json_object *params_obj,
 				     struct json_object *id);
-void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon,
-			  const struct bfddp_message *msg);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);

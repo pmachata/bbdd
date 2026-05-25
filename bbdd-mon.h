@@ -9,9 +9,10 @@
  * it makes for 'bbdd monitor' to monitor the topic by default. */
 #define BBDD_MON_TOPICS(X)	\
 	X(ringbuf, true)	\
-	X(bfdd,    true)	\
-	X(session, true)	\
+	X(bfddi,   true)	\
+	X(bfddo,   true)	\
 	X(jrpc,    false)	\
+	X(session, true)	\
 	X(error,   true)	\
 	X(debug,   false)	\
 	/**/

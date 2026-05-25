@@ -59,8 +59,8 @@ void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
 
 __attribute__((format(printf, 3, 4)))
 void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
-				  struct json_object *id,
-				  const char *fmt, ...);
+				       struct json_object *id,
+				       const char *fmt, ...);
 
 void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
 				   struct json_object *id);

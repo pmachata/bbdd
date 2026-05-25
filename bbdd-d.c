@@ -2331,23 +2331,6 @@ static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
 				    &msg->data.echo, error);
 }
 
-void bbdd_d_bfdd_mon_send(struct bbdd_mon *mon, const struct bfddp_message *msg)
-{
-	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_bfdd;
-	struct bbdd_mon_message mon_msg;
-	char *error;
-	int rc;
-
-	if (!bbdd_mon_topic_active(mon, topic))
-		return;
-
-	rc = bbdd_bfdd_msg_format_mon(msg, &mon_msg, &error);
-	if (rc != 0)
-		return bbdd_mon_senderr(mon, &error, "Failed to format bfdd monitor message");
-
-	bbdd_mon_send(mon, &mon_msg, topic);
-}
-
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 				     struct bbdd_bfdd *bfdd,
 				     struct bfddp_message *msg)
@@ -2363,7 +2346,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		goto senderr;
 	}
 
-	bbdd_d_bfdd_mon_send(d->mon, msg);
+	bbdd_bfdd_mon_send_i(d->mon, msg);
 
 	/* This is called from bbdd-bfdd for individual bfdd messages. When we
 	 * return error, the sockerr callback is called and causes the socket to

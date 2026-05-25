@@ -2951,17 +2951,24 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		rc = bbdd_c_monitor_handle_ringbuf_tx_no_neigh(params, &error);
 	else if (strcmp(method, "session:change") == 0)
 		rc = bbdd_c_monitor_handle_session_change(params, &error);
-	else if (strcmp(method, "bfdd:sess-add") == 0)
+	else if (strcmp(method, "bfddi:sess-add") == 0 ||
+		 strcmp(method, "bfddo:sess-add") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_sess_add(params, &error);
-	else if (strcmp(method, "bfdd:sess-del") == 0 ||
-		 strcmp(method, "bfdd:sess-cnt-req") == 0)
+	else if (strcmp(method, "bfddi:sess-del") == 0 ||
+		 strcmp(method, "bfddo:sess-del") == 0 ||
+		 strcmp(method, "bfddi:sess-cnt-req") == 0 ||
+		 strcmp(method, "bfddo:sess-cnt-req") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_lid_msg(params, &error);
-	else if (strcmp(method, "bfdd:echo-req") == 0 ||
-		 strcmp(method, "bfdd:echo-rep") == 0)
+	else if (strcmp(method, "bfddi:echo-req") == 0 ||
+		 strcmp(method, "bfddo:echo-req") == 0 ||
+		 strcmp(method, "bfddi:echo-rep") == 0 ||
+		 strcmp(method, "bfddo:echo-rep") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_echo(params, &error);
-	else if (strcmp(method, "bfdd:sess-cnt-rep") == 0)
+	else if (strcmp(method, "bfddi:sess-cnt-rep") == 0 ||
+		 strcmp(method, "bfddo:sess-cnt-rep") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_empty(params, &error);
-	else if (strcmp(method, "bfdd:unknown") == 0)
+	else if (strcmp(method, "bfddi:unknown") == 0 ||
+		 strcmp(method, "bfddo:unknown") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_unknown(params, &error);
 
 	switch (rc) {
