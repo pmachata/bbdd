@@ -2805,6 +2805,40 @@ bbdd_c_monitor_handle_bfdd_lid_msg(struct json_object *params, char **error)
 }
 
 static enum bbdd_c_monitor_print_rc
+bbdd_c_monitor_handle_bfdd_echo(struct json_object *params, char **error)
+{
+	enum {
+		pol_dp_time,
+		pol_bfdd_time,
+	};
+	struct bbdd_jrpc_policy policy[] = {
+		[pol_dp_time]   = { .key = "dp-time",   .type = json_type_int },
+		[pol_bfdd_time] = { .key = "bfdd-time", .type = json_type_int },
+	};
+	struct json_object *values[ARRAY_SIZE(policy)] = {};
+	bool seen[ARRAY_SIZE(policy)] = {};
+	int rc;
+
+	rc = bbdd_jrpc_dissect(params, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return BBDD_C_MONITOR_PRINT_ERROR;
+
+	if (seen[pol_dp_time]) {
+		printf("dp-time %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_dp_time]));
+		rc = 1;
+	}
+	if (seen[pol_bfdd_time]) {
+		printf("bfdd-time %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_bfdd_time]));
+		rc = 1;
+	}
+
+	return rc ? BBDD_C_MONITOR_PRINT_OK : BBDD_C_MONITOR_PRINT_NOTHING;
+}
+
+static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_bfdd_empty(struct json_object *params, char **error)
 {
 	if (params != NULL) {
@@ -2923,8 +2957,9 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 		 strcmp(method, "bfdd:sess-cnt-req") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_lid_msg(params, &error);
 	else if (strcmp(method, "bfdd:echo-req") == 0 ||
-		 strcmp(method, "bfdd:echo-rep") == 0 ||
-		 strcmp(method, "bfdd:sess-cnt-rep") == 0)
+		 strcmp(method, "bfdd:echo-rep") == 0)
+		rc = bbdd_c_monitor_handle_bfdd_echo(params, &error);
+	else if (strcmp(method, "bfdd:sess-cnt-rep") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_empty(params, &error);
 	else if (strcmp(method, "bfdd:unknown") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_unknown(params, &error);

@@ -893,6 +893,35 @@ err:
 }
 
 static int
+bbdd_bfdd_format_echo(const struct bfddp_echo *echo, const char *method,
+		      struct bbdd_mon_message *mon_msg, char **error)
+{
+	struct json_object *params;
+
+	params = json_object_new_object();
+	if (params == NULL)
+		goto err;
+
+	if (bbdd_jrpc_append_uint64(params, "dp-time",
+				    bbdd_ntoh64(echo->dp_time)) ||
+	    bbdd_jrpc_append_uint64(params, "bfdd-time",
+				    bbdd_ntoh64(echo->bfdd_time)))
+		goto put_params;
+
+	*mon_msg = (struct bbdd_mon_message) {
+		.method = method,
+		.params = params,
+	};
+	return 0;
+
+put_params:
+	json_object_put(params);
+err:
+	bbdd_util_fmterr(error, "%m");
+	return -1;
+}
+
+static int
 bbdd_bfdd_msg_format_bare(const char *method, struct bbdd_mon_message *mon_msg)
 {
 	*mon_msg = (struct bbdd_mon_message) {
@@ -954,9 +983,11 @@ int bbdd_bfdd_msg_format_mon(const struct bfddp_message *msg,
 						     mon_msg, error);
 
 	case ECHO_REQUEST:
-		return bbdd_bfdd_msg_format_bare("bfdd:echo-req", mon_msg);
+		return bbdd_bfdd_format_echo(&msg->data.echo, "bfdd:echo-req",
+					     mon_msg, error);
 	case ECHO_REPLY:
-		return bbdd_bfdd_msg_format_bare("bfdd:echo-rep", mon_msg);
+		return bbdd_bfdd_format_echo(&msg->data.echo, "bfdd:echo-rep",
+					     mon_msg, error);
 	case BFD_SESSION_COUNTERS:
 		return bbdd_bfdd_msg_format_bare("bfdd:sess-cnt-rep", mon_msg);
 
