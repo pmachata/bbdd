@@ -114,6 +114,11 @@ Bbdd_describe_env()
 	format_env $(collect_env) "$BBDD_SOCKDIR"
 }
 
+Bbdd_log_test()
+{
+	log_test "$(Bbdd_describe_env)$1"
+}
+
 session_state_check()
 {
 	local check=$1; shift
@@ -130,7 +135,7 @@ session_state_test()
 	local goal=$1; shift
 
 	session_state_check "$check" "$goal" "$@"
-	log_test "$(Bbdd_describe_env)session $(if ((should_fail)); then echo 'never '; fi)got $check"
+	Bbdd_log_test "session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
 
 nsessions_test()
@@ -150,7 +155,7 @@ nsessions_test()
 	((N == xN))
 	check_err $? "$N sessions reported, $xN expected"
 
-	log_test "$(Bbdd_describe_env)$xN ${descr}session$pl reported"
+	Bbdd_log_test "$xN ${descr}session$pl reported"
 }
 
 echo_test()
@@ -179,7 +184,7 @@ echo_test()
 	((reported_lat < measured_lat / 2))
 	check_err $? "reported latency ($reported_lat) suspiciously high (measured $measured_lat)"
 
-	log_test "$(Bbdd_describe_env)echo ($reported_lat us)"
+	Bbdd_log_test "echo ($reported_lat us)"
 }
 
 packet_size_test()
@@ -213,7 +218,7 @@ packet_size_test()
 	((rx_pksize <= 86))
 	check_err $? "packet size suspiciously high $rx_pksize"
 
-	log_test "$(Bbdd_describe_env)Counters indicate reasonable packet size"
+	Bbdd_log_test "Counters indicate reasonable packet size"
 }
 
 hold_time_test()
@@ -229,7 +234,7 @@ hold_time_test()
 
 	session_state_test up 1 "$@"
 
-	log_test "$(Bbdd_describe_env)Hold time delays session creation"
+	Bbdd_log_test "Hold time delays session creation"
 }
 
 Bbdd_setup_ns()
