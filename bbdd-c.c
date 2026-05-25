@@ -2482,7 +2482,7 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 {
 	enum {
 		pol_ifindex,
-		pol_skb_len,
+		pol_wire_len,
 		pol_ttl,
 		pol_multihop,
 		pol_src,
@@ -2491,7 +2491,7 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 	};
 	struct bbdd_jrpc_policy policy[] = {
 		[pol_ifindex]  = { .key = "ifindex",  .type = json_type_int },
-		[pol_skb_len]  = { .key = "skb-len",  .type = json_type_int },
+		[pol_wire_len] = { .key = "wire-len", .type = json_type_int },
 		[pol_ttl]      = { .key = "ttl",      .type = json_type_int },
 		[pol_multihop] = { .key = "multihop", .type = json_type_boolean },
 		[pol_src]      = { .key = "src",      .type = json_type_object },
@@ -2538,9 +2538,9 @@ bbdd_c_monitor_handle_ringbuf_rx_discr_0(struct json_object *params,
 		       json_object_get_uint64(values[pol_ifindex]));
 		rc = 1;
 	}
-	if (seen[pol_skb_len]) {
-		printf("skb-len %" PRIu64 " ",
-		       json_object_get_uint64(values[pol_skb_len]));
+	if (seen[pol_wire_len]) {
+		printf("wire-len %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_wire_len]));
 		rc = 1;
 	}
 	if (seen[pol_src]) {
@@ -2575,12 +2575,12 @@ bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(struct json_object *params,
 					 char **error)
 {
 	enum {
-		pol_skb_len,
+		pol_wire_len,
 		pol_ttl,
 		pol_bfd,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_skb_len] = { .key = "skb-len", .type = json_type_int },
+		[pol_wire_len] = { .key = "wire-len", .type = json_type_int },
 		[pol_ttl]     = { .key = "ttl",     .type = json_type_int },
 		[pol_bfd]     = { .key = "bfd",     .type = json_type_object },
 	};
@@ -2603,9 +2603,9 @@ bbdd_c_monitor_handle_ringbuf_rx_unx_pkt(struct json_object *params,
 
 	assert(rc == 0);
 
-	if (seen[pol_skb_len]) {
-		printf("skb-len %" PRIu64 " ",
-		       json_object_get_uint64(values[pol_skb_len]));
+	if (seen[pol_wire_len]) {
+		printf("wire-len %" PRIu64 " ",
+		       json_object_get_uint64(values[pol_wire_len]));
 		rc = 1;
 	}
 	if (seen[pol_ttl]) {

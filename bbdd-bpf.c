@@ -861,7 +861,7 @@ static void
 bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		       struct bbdd_d_session *dsess,
 		       const struct bbdd_bfd_pkt *packet,
-		       uint16_t skb_len, uint8_t ttl)
+		       uint32_t wire_len, uint8_t ttl)
 {
 	struct bbdd_d_session_data old_local;
 	struct bbdd_d_session_data old_remote;
@@ -893,7 +893,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	}
 
 	++bsess->stats.rx_packets;
-	bsess->stats.rx_bytes += skb_len;
+	bsess->stats.rx_bytes += wire_len;
 
 	/* For admin down sessions where your_disc is given, we don't even get
 	 * to see these packets, because BPF shoots them down. But when
@@ -1062,7 +1062,7 @@ bbdd_bpf_rb_handle_discr_0(struct bbdd_bpf *bpf,
 	}
 
 	assert(dsess != NULL);
-	return bbdd_bpf_handle_packet(bpf, dsess, &elem->packet, elem->skb_len,
+	return bbdd_bpf_handle_packet(bpf, dsess, &elem->packet, elem->wire_len,
 				      elem->ttl);
 
 error:
@@ -1079,7 +1079,7 @@ bbdd_bpf_rb_handle_unx_pkt(struct bbdd_bpf *bpf,
 
 	dsess = cbs->find_session(local_discr, cbs->data);
 	bbdd_bpf_handle_packet(bpf, dsess, &elem->packet,
-			       elem->skb_len, elem->ttl);
+			       elem->wire_len, elem->ttl);
 }
 
 static void
@@ -1287,7 +1287,7 @@ bbdd_bpf_rb_format_rx_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 		goto put_pkt_obj;
 
 	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
-	    bbdd_jrpc_append_int(params, "skb-len", elem->skb_len) ||
+	    bbdd_jrpc_append_int(params, "wire-len", elem->wire_len) ||
 	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
 	    bbdd_jrpc_append_bool(params, "multihop", elem->multihop) ||
 	    bbdd_jrpc_append_obj(params, "src", &src_obj) ||
@@ -1328,7 +1328,7 @@ bbdd_bpf_rb_format_rx_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
 	if (params == NULL)
 		goto put_pkt_obj;
 
-	if (bbdd_jrpc_append_int(params, "skb-len", elem->skb_len) ||
+	if (bbdd_jrpc_append_int(params, "wire-len", elem->wire_len) ||
 	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
 	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj))
 		goto put_params;

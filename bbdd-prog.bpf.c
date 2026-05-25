@@ -116,7 +116,7 @@ static void bbdd_rx_notify_timeout(__u32 discr)
 static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 				   const struct bbdd_bpf_addr *saddr,
 				   const struct bbdd_bpf_addr *daddr,
-				   u8 ttl, u8 multihop,
+				   u8 ttl, u8 multihop, u32 wire_len,
 				   struct bbdd_bfd_pkt *packet)
 {
 	struct bbdd_bpf_rb_elem_rx_discr_0 *elem;
@@ -127,7 +127,7 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 	elem->ethtype = bpf_ntohs(skb->protocol);
 	elem->saddr = *saddr;
 	elem->daddr = *daddr;
-	elem->skb_len = skb->len;
+	elem->wire_len = wire_len;
 	elem->ttl = ttl;
 	elem->multihop = multihop;
 	elem->packet = *packet;
@@ -136,15 +136,14 @@ static void bbdd_rx_notify_discr_0(struct __sk_buff *skb,
 }
 
 static void
-bbdd_rx_notify_unx_pkt(struct __sk_buff *skb,
-		       const struct bbdd_bfd_pkt *packet, u8 ttl)
+bbdd_rx_notify_unx_pkt(const struct bbdd_bfd_pkt *packet, u8 ttl, u32 wire_len)
 {
 	struct bbdd_bpf_rb_elem_rx_unx_pkt *elem;
 
 	BBDD_NOTIFY_ELEM_INIT(elem);
 
 	elem->packet = *packet;
-	elem->skb_len = skb->len;
+	elem->wire_len = wire_len;
 	elem->ttl = ttl;
 
 	bpf_ringbuf_submit(elem, 0);
@@ -153,6 +152,7 @@ bbdd_rx_notify_unx_pkt(struct __sk_buff *skb,
 struct bbdd_bfd_rx_pkt_digest {
 	u8 ttl;
 	u8 multihop;
+	u32 wire_len;
 	struct bbdd_bpf_addr saddr;
 	struct bbdd_bpf_addr daddr;
 };
@@ -596,6 +596,7 @@ static bool bbdd_recv_parse_ipv4(struct __sk_buff *skb,
 		return false;
 
 	digest->ttl = iph.ttl;
+	digest->wire_len = sizeof(struct ethhdr) + bpf_ntohs(iph.tot_len);
 	__builtin_memcpy(&digest->saddr, &iph.saddr, sizeof(iph.saddr));
 	__builtin_memcpy(&digest->daddr, &iph.daddr, sizeof(iph.daddr));
 
@@ -614,6 +615,8 @@ static bool bbdd_recv_parse_ipv6(struct __sk_buff *skb,
 		return false;
 
 	digest->ttl = ip6h.hop_limit;
+	digest->wire_len = sizeof(struct ethhdr) + sizeof(struct ipv6hdr) +
+			   bpf_ntohs(ip6h.payload_len);
 	__builtin_memcpy(&digest->saddr, &ip6h.saddr, sizeof(ip6h.saddr));
 	__builtin_memcpy(&digest->daddr, &ip6h.daddr, sizeof(ip6h.daddr));
 
@@ -701,7 +704,8 @@ int bbdd_recv(struct __sk_buff *skb)
 		 * selected based on some combination of other fields [...] */
 		BUMP(bbdd_prog_global_diag_stats.rx_your_discr_0);
 		bbdd_rx_notify_discr_0(skb, &digest.saddr, &digest.daddr,
-				       digest.ttl, digest.multihop, bfd);
+				       digest.ttl, digest.multihop,
+				       digest.wire_len, bfd);
 		return TC_ACT_SHOT;
 	}
 
@@ -726,12 +730,12 @@ int bbdd_recv(struct __sk_buff *skb)
 
 	ret = __builtin_memcmp(bfd, &config->rx_expect, sizeof(*bfd));
 	if (ret != 0) {
-		bbdd_rx_notify_unx_pkt(skb, bfd, digest.ttl);
+		bbdd_rx_notify_unx_pkt(bfd, digest.ttl, digest.wire_len);
 		return TC_ACT_SHOT;
 	}
 
 	BUMP(data->stats.rx_packets);
-	__sync_fetch_and_add(&data->stats.rx_bytes, skb->len);
+	__sync_fetch_and_add(&data->stats.rx_bytes, digest.wire_len);
 
 	bbdd_recv_rearm_timer(discr, config, data);
 	return TC_ACT_SHOT;

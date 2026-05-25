@@ -79,8 +79,8 @@ struct bbdd_bpf_rb_elem_tx_no_neigh {
 struct bbdd_bpf_rb_elem_rx_discr_0 {
 	struct bbdd_bpf_rb_elem_head head;
 	__u32 ifindex;
+	__u32 wire_len;
 	__u16 ethtype;
-	__u16 skb_len;
 	__u8 ttl;
 	__u8 multihop;
 	struct bbdd_bpf_addr saddr;
@@ -90,7 +90,7 @@ struct bbdd_bpf_rb_elem_rx_discr_0 {
 
 struct bbdd_bpf_rb_elem_rx_unx_pkt {
 	struct bbdd_bpf_rb_elem_head head;
-	__u16 skb_len;
+	__u32 wire_len;
 	__u8 ttl;
 	struct bbdd_bfd_pkt packet;
 };
