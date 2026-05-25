@@ -2279,15 +2279,19 @@ int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 
 static void bbdd_c_monitor_help(void)
 {
+#define SHOW_TOPIC(NAME, DEFAULT) " | " #NAME
+
 	fprintf(stderr,
 		"Usage: bbdd monitor [ TOPICS ]\n"
 		"\n"
 		"where  TOPICS := TOPIC [ TOPICS ]\n"
-		"       TOPIC  := { all | ringbuf | session }\n"
+		"       TOPIC  := { all" BBDD_MON_TOPICS(SHOW_TOPIC) " }\n"
 		"\n"
 		"Subscribe to daemon monitoring topics and print received notifications.\n"
 		"When no TOPICS are given, all topics are subscribed.\n"
 	);
+
+#undef SHOW_TOPIC
 }
 
 static int bbdd_c_monitor_dissect_addr_str(struct json_object *obj,
