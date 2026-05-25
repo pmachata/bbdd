@@ -2920,6 +2920,9 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 	struct json_object *params;
 	char *error;
 
+	if (bbdd_c_result_show_json(outer_params))
+		return;
+
 	bbdd_jrpc_dissect(outer_params, policy, seen, values,
 			  ARRAY_SIZE(policy), NULL);
 	ts_obj = values[pol_ts];
@@ -2933,9 +2936,6 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 	}
 
 	printf("%-20s: ", method);
-
-	if (bbdd_c_result_show_json(params))
-		return;
 
 	if (strcmp(method, "debug") == 0)
 		rc = bbdd_c_monitor_handle_message(params, &error);
