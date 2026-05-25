@@ -11,8 +11,10 @@ in_sockdir SDb adf_Bbdd_bridge_start
 
 in_sockdir SD2 Bbdd_bfdd_connect SDb
 
-in_sockdir SD1 Bbdd session add dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
-in_sockdir SDb Bbdd session add discr 2 dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SD1 Bbdd session add \
+	   dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SDb Bbdd session add \
+	   discr 2 dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3
 
 in_sockdir SD1 nsessions_test 1
 in_sockdir SD2 nsessions_test 1

@@ -11,7 +11,8 @@ in_sockdir SD2 in_ns NS2 adf_Bbdd_start
 in_sockdir SD1 nsessions_test 0
 in_sockdir SD2 nsessions_test 0
 
-in_sockdir SD1 Bbdd session add dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SD1 Bbdd session add \
+	   dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
 
 in_sockdir SD1 nsessions_test 1
 
@@ -19,22 +20,28 @@ in_sockdir SD1 nsessions_test 1 dst 192.0.2.2
 in_sockdir SD1 nsessions_test 1 min-tx 200ms
 in_sockdir SD1 nsessions_test 1 min-rx 200ms
 in_sockdir SD1 nsessions_test 1 detect-mult 3
-in_sockdir SD1 nsessions_test 1 dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SD1 nsessions_test 1 \
+	   dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
 
 in_sockdir SD1 nsessions_test 0 dst 192.0.2.3
 in_sockdir SD1 nsessions_test 0 min-tx 300ms
 in_sockdir SD1 nsessions_test 0 min-rx 300ms
 in_sockdir SD1 nsessions_test 0 detect-mult 4
 
-in_sockdir SD1 nsessions_test 0 dst 192.0.2.3 min-tx 200ms min-rx 200ms detect-mult 3
-in_sockdir SD1 nsessions_test 0 dst 192.0.2.2 min-tx 300ms min-rx 200ms detect-mult 3
-in_sockdir SD1 nsessions_test 0 dst 192.0.2.2 min-tx 200ms min-rx 300ms detect-mult 3
-in_sockdir SD1 nsessions_test 0 dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 4
+in_sockdir SD1 nsessions_test 0 \
+	   dst 192.0.2.3 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SD1 nsessions_test 0 \
+	   dst 192.0.2.2 min-tx 300ms min-rx 200ms detect-mult 3
+in_sockdir SD1 nsessions_test 0 \
+	   dst 192.0.2.2 min-tx 200ms min-rx 300ms detect-mult 3
+in_sockdir SD1 nsessions_test 0 \
+	   dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 4
 
 # Check that it fails to reach up
 in_sockdir SD1 session_state_test up 0
 
-in_sockdir SD2 Bbdd session add dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3
+in_sockdir SD2 Bbdd session add \
+	   dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3
 in_sockdir SD2 nsessions_test 1
 
 # Check that they reach up
