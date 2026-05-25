@@ -146,6 +146,40 @@ nsessions_test()
 	log_test "$(Bbdd_describe_env)$xN ${descr}session$pl reported"
 }
 
+packet_size_test()
+{
+	local -a sel=("$@")
+
+	# This is actually racy, if we collect the stats after packets have been
+	# bumped, but before bytes have been bumped, we will get a non-integer
+	# value and it all breaks. Let's see if that ever comes up and rething
+	# when we do. The idea behind the test is to make a sanity check of the
+	# counters.
+	local pksizes=$(
+		Bbdd --json session "${sel[@]}" stats |
+			jq -j '.sessions[] | .stats |
+			       (.rx_bytes / .rx_packets, " ",
+				.tx_bytes / .tx_packets)'
+	)
+	local rx_pksize=${pksizes% *}
+	local tx_pksize=${pksizes#* }
+
+	((rx_pksize == tx_pksize))
+	check_err $? "RX ($rx_pksize) and TX ($tx_pksize) packet sizes expected to be the same"
+
+	# 14 bytes of Eth, 20+ bytes of IPv4, 8 bytes of UDP, 24 bytes BFD
+	((rx_pksize >= 66))
+	check_err $? "packet size suspiciously low $rx_pksize"
+
+	# The packet could be larger for IPv4 with options, or for VLANs, or for
+	# BFD authentication, but none of these should come up here. Only IPv6
+	# which is 40 bytes.
+	((rx_pksize <= 86))
+	check_err $? "packet size suspiciously high $rx_pksize"
+
+	log_test "$(Bbdd_describe_env)Counters indicate reasonable packet size"
+}
+
 Bbdd_setup_ns()
 {
 	local -a ns_names=("$@")

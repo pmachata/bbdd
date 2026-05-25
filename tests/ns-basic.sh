@@ -41,6 +41,11 @@ in_sockdir SD2 nsessions_test 1
 in_sockdir SD1 session_state_test up 1
 in_sockdir SD2 session_state_test up 1
 
+sleep 2 # Collect traffic.
+
+in_sockdir SD1 packet_size_test
+in_sockdir SD2 packet_size_test
+
 in_sockdir SD1 Bbdd session del
 in_sockdir SD1 nsessions_test 0
 
