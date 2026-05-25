@@ -114,7 +114,7 @@ Bbdd_describe_env()
 	format_env $(collect_env) "$BBDD_SOCKDIR"
 }
 
-session_state_test()
+session_state_check()
 {
 	local check=$1; shift
 	local goal=$1; shift
@@ -122,7 +122,14 @@ session_state_test()
 
 	"Bbdd_session_wait_$check" "$@"
 	check_err_fail "$should_fail" $? "session up"
+}
 
+session_state_test()
+{
+	local check=$1; shift
+	local goal=$1; shift
+
+	session_state_check "$check" "$goal" "$@"
 	log_test "$(Bbdd_describe_env)session $(if ((should_fail)); then echo 'never '; fi)got $check"
 }
 
@@ -207,6 +214,22 @@ packet_size_test()
 	check_err $? "packet size suspiciously high $rx_pksize"
 
 	log_test "$(Bbdd_describe_env)Counters indicate reasonable packet size"
+}
+
+hold_time_test()
+{
+	local timeout=$1; shift
+	local i
+
+	for ((i = 0; i < timeout - 1; i++)); do
+		session_state_check up 0 "$@"
+	done
+
+	sleep 2
+
+	session_state_test up 1 "$@"
+
+	log_test "$(Bbdd_describe_env)Hold time delays session creation"
 }
 
 Bbdd_setup_ns()
