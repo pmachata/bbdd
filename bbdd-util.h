@@ -37,7 +37,8 @@ void bbdd_util_xferr(char **error, char **src);
 
 /* JRPC helpers. */
 
-int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj);
+int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
+			char **error);
 
 void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj);
 

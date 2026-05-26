@@ -756,7 +756,7 @@ void bbdd_sock_close_udp(struct bbdd_sock *sock)
 }
 
 int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
-		   char **bufp)
+		   char **bufp, char **error)
 {
 	ssize_t msgsz;
 	char *buf;
@@ -773,29 +773,28 @@ int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
 	msgsz = recvfrom(sock->fd, NULL, 0, MSG_PEEK | MSG_TRUNC,
 			 (struct sockaddr *) &peer->sa, &peer->sa.len);
 	if (msgsz < 0) {
-		fprintf(stderr, "Failed to receive data on control socket: %m\n");
+		bbdd_util_fmterr(error, "recvfrom: %m");
 		return -1;
 	}
 
 	buf = calloc(1, (size_t)msgsz + 1);
 	if (buf == NULL) {
-		fprintf(stderr, "Failed to allocate control message buffer: %m\n");
+		bbdd_util_fmterr(error, "calloc: %m");
 		return -1;
 	}
 
 	n = recv(sock->fd, buf, (size_t)msgsz, 0);
 	if (n < 0) {
-		fprintf(stderr, "Failed to receive data on control socket: %m\n");
+		bbdd_util_fmterr(error, "recv: %m");
 		rc = -1;
-		goto out;
+		goto free_buf;
 	}
 	buf[n] = '\0';
 
 	*bufp = buf;
-	buf = NULL;
-	rc = 0;
+	return 0;
 
-out:
+free_buf:
 	free(buf);
 	return rc;
 }

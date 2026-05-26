@@ -140,6 +140,7 @@ static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
 	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
 	struct json_object *result;
 	struct json_object *resp;
+	char *error;
 	int rc;
 
 	if (br->echo == NULL)
@@ -161,7 +162,9 @@ static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
 	if (rc != 0)
 		goto put_result;
 
-	bbdd_util_jrpc_send(&br->echo->peer, resp);
+	rc = bbdd_util_jrpc_send(&br->echo->peer, resp, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to send ping response");
 	json_object_put(resp);
 	goto out;
 
@@ -230,6 +233,8 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 	struct json_object *array;
 	struct json_object *entry_obj;
 	struct json_object *stats_obj;
+	char *error;
+	int rc;
 
 	if (br->stats == NULL)
 		return;
@@ -279,7 +284,10 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 	    bbdd_jrpc_append_obj(resp, "result", &result_obj))
 		goto put_stats_obj;
 
-	bbdd_util_jrpc_send(&br->stats->peer, resp);
+	rc = bbdd_util_jrpc_send(&br->stats->peer, resp, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to send session counters response");
+
 	json_object_put(resp);
 	bbdd_br_stats_free(br->stats);
 	br->stats = NULL;

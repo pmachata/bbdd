@@ -115,6 +115,11 @@ void bbdd_util_printerr(char **error, const char *fmt, ...)
 {
 	va_list ap;
 
+	if (bbdd_env.verbosity < 0) {
+		free(*error);
+		return;
+	}
+
 	va_start(ap, fmt);
 	bbdd_util_vprinterr(error, fmt, ap);
 	va_end(ap);
@@ -148,30 +153,46 @@ void bbdd_util_xferr(char **error, char **src)
 	*src = NULL;
 }
 
-int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj)
+int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
+			char **error)
 {
 	const char *str;
 	size_t len;
 	ssize_t rc;
 
 	str = json_object_to_json_string(obj);
-	if (str == NULL)
+	if (str == NULL) {
+		bbdd_util_fmterr(error, "Failed to serialize JSON object");
 		return -1;
+	}
 
 	len = strlen(str);
 	rc = sendto(sock->fd, str, len, 0,
 		    (struct sockaddr *) &sock->sa, sock->sa.len);
-	if (rc < 0)
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "sendto: %m");
 		return -1;
-	return (size_t)rc == len ? 0 : -1;
+	}
+	if ((size_t)rc != len) {
+		bbdd_util_fmterr(error, "sendto: Failed to write the full message");
+		return -1;
+	}
+	return 0;
 }
 
 void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
-	if (obj != NULL) {
-		bbdd_util_jrpc_send(ctl, obj);
-		json_object_put(obj);
-	}
+	char *error;
+	int rc;
+
+	if (obj == NULL)
+		return;
+
+	rc = bbdd_util_jrpc_send(ctl, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to send response");
+
+	json_object_put(obj);
 }
 
 void bbdd_util_jrpc_respond_inv_params(struct bbdd_sock *ctl,
@@ -235,6 +256,8 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 				  struct json_object *id)
 {
 	struct json_object *obj;
+	char *error;
+	int rc;
 
 	obj = bbdd_jrpc_new_object(id);
 	if (obj == NULL)
@@ -243,7 +266,10 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 	if (json_object_object_add(obj, "result", NULL))
 		goto put_obj;
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to send empty response");
+
 	json_object_put(obj);
 	return;
 
@@ -323,9 +349,11 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 	char *error;
 	int err;
 
-	err = bbdd_sock_recv(ctl, &peer, &request);
-	if (err < 0)
+	err = bbdd_sock_recv(ctl, &peer, &request, &error);
+	if (err < 0) {
+		bbdd_util_printerr(&error, "Failed to receive response");
 		return;
+	}
 
 	request_obj = json_tokener_parse(request);
 

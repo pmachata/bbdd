@@ -152,7 +152,7 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 
 		switch (cli->kind) {
 		case BBDD_MON_CLI_KIND_SOCK:
-			if (bbdd_util_jrpc_send(&cli->sock, msg) != 0)
+			if (bbdd_util_jrpc_send(&cli->sock, msg, NULL) != 0)
 				bbdd_mon_unsubscribe(mon, cli);
 			break;
 

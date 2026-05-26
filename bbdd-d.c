@@ -96,6 +96,7 @@ void bbdd_d_handle_ping(struct bbdd_sock *peer,
 			struct json_object *id)
 {
 	struct json_object *obj;
+	char *error;
 	int rc;
 
 	obj = bbdd_jrpc_new_object(id);
@@ -107,7 +108,10 @@ void bbdd_d_handle_ping(struct bbdd_sock *peer,
 		goto put_obj;
 	json_object_get(params_obj);
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 	return;
 
@@ -158,7 +162,10 @@ static void bbdd_d_handle_echo(struct bbdd_sock *peer,
 	if (bbdd_jrpc_append_obj(obj, "result", &result) != 0)
 		goto put_obj;
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 	return;
 
@@ -250,7 +257,10 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	if (rc != 0)
 		goto put_obj;
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 	return;
 
@@ -1117,7 +1127,10 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	if (json_object_object_add(obj, "result", result_obj))
 		goto put_result_obj;
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 	return;
 
@@ -1947,6 +1960,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 	struct json_object *entry_obj;
 	struct json_object *stats_obj;
 	char *error = NULL;
+	int rc;
 
 	/* The response is as follows:
 	 *
@@ -2001,7 +2015,10 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 	    bbdd_jrpc_append_obj(obj, "result", &result_obj))
 		goto put_array;
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 	return;
 
@@ -2590,7 +2607,10 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 		return bbdd_util_jrpc_respond_memerr(peer, id);
 	}
 
-	bbdd_util_jrpc_send(peer, obj);
+	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (rc != 0)
+		bbdd_util_printerr(&error, "Failed to receive response");
+
 	json_object_put(obj);
 }
 

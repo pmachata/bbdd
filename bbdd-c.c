@@ -59,8 +59,7 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 	err = bbdd_jrpc_dissect_error(error_obj, &code, &message, &data,
 				      &error);
 	if (err != 0) {
-		fprintf(stderr, "Invalid error object: %s\n", error);
-		free(error);
+		bbdd_util_printerr(&error, "Invalid error object");
 		return;
 	}
 
@@ -87,14 +86,14 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 
 	err = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, &error);
 	if (err) {
-		fprintf(stderr, "Invalid response object: %s\n", error);
-		free(error);
+		bbdd_util_printerr(&error, "Invalid response object");
 		return false;
 	}
 
 	if (!bbdd_c_validate_id(id, expect_id)) {
-		fprintf(stderr, "Unknown response ID: %s\n",
-			json_object_to_json_string(id));
+		bbdd_util_fmterr(&error, "Unknown response ID: %s",
+				 json_object_to_json_string(id));
+		bbdd_util_printerr(&error, NULL);
 		return false;
 	}
 
@@ -104,9 +103,10 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 	}
 
 	if (json_object_get_type(result) != result_type) {
-		fprintf(stderr, "Unexpected result type: %s expected, got %s\n",
-			json_type_to_name(result_type),
-			json_type_to_name(json_object_get_type(result)));
+		bbdd_util_fmterr(&error, "Unexpected result type: %s expected, got %s",
+				 json_type_to_name(result_type),
+				 json_type_to_name(json_object_get_type(result)));
+		bbdd_util_printerr(&error, NULL);
 		return false;
 	}
 
@@ -138,23 +138,25 @@ static struct json_object *bbdd_c_send_request_on(struct json_object *request,
 {
 	struct json_object *response_obj = NULL;
 	char *response;
+	char *error;
 	int err;
 
-	err = bbdd_util_jrpc_send(peer, request);
+	err = bbdd_util_jrpc_send(peer, request, &error);
 	if (err < 0) {
-		fprintf(stderr, "Failed to send the RPC message: %m\n");
+		bbdd_util_printerr(&error, "Failed to send the RPC message");
 		return NULL;
 	}
 
-	err = bbdd_sock_recv(cli, peer, &response);
+	err = bbdd_sock_recv(cli, peer, &response, &error);
 	if (err < 0) {
-		fprintf(stderr, "Failed to receive an RPC response\n");
+		bbdd_util_printerr(&error, "Failed to receive an RPC response");
 		return NULL;
 	}
 
 	response_obj = json_tokener_parse(response);
 	if (response_obj == NULL) {
-		fprintf(stderr, "Failed to parse RPC response as JSON.\n");
+		bbdd_util_fmterr(&error, "Failed to parse RPC response as JSON.");
+		bbdd_util_printerr(&error, NULL);
 		goto free_response;
 	}
 
@@ -3013,8 +3015,9 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 	char *msg;
 	int err;
 
-	err = bbdd_sock_recv(&ctx->cli, &sender, &msg);
+	err = bbdd_sock_recv(&ctx->cli, &sender, &msg, &error);
 	if (err < 0) {
+		bbdd_util_printerr(&error, "Failed to receive monitor message");
 		bbdd_poll_request_quit(pctx);
 		return 0;
 	}

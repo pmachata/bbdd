@@ -90,5 +90,5 @@ void bbdd_sock_close_udp(struct bbdd_sock *sock);
 
 int bbdd_sock_recv(struct bbdd_sock *sock,
 		   struct bbdd_sock *peer,
-		   char **bufp);
+		   char **bufp, char **error);
 int bbdd_sock_sndbufsz(struct bbdd_sock *sock, size_t *p_sndbufsz);
