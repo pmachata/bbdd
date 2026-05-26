@@ -133,6 +133,7 @@ session_state_test()
 {
 	local check=$1; shift
 	local goal=$1; shift
+	local should_fail=$((!goal))
 
 	session_state_check "$check" "$goal" "$@"
 	Bbdd_log_test "session $(if ((should_fail)); then echo 'never '; fi)got $check"
