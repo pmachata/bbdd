@@ -53,11 +53,15 @@ in_sockdir SD2 echo_test
 
 sleep 2 # Collect traffic.
 
-in_sockdir SD1 packet_size_test
-in_sockdir SD2 packet_size_test
-
 in_sockdir SD1 Bbdd session del
 in_sockdir SD1 nsessions_test 0
 
 # Check that it reaches not-up
 in_sockdir SD2 session_state_test not_up 1
+
+in_sockdir SD2 Bbdd session set shutdown
+
+in_sockdir SD2 packet_size_test
+in_sockdir SD2 session_stats_consistency_test
+in_sockdir SD2 session_diag_stats_consistency_test
+in_sockdir SD2 global_diag_stats_consistency_test

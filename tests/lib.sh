@@ -656,6 +656,13 @@ adf_ip_link_set_down()
 	fi
 }
 
+ip_link_ifindex()
+{
+	local name=$1; shift
+
+	Ip -j link show dev "$name" | jq '.[].ifindex'
+}
+
 adf_ip_addr_add()
 {
 	local name=$1; shift

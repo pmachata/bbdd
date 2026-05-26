@@ -191,11 +191,9 @@ packet_size_test()
 {
 	local -a sel=("$@")
 
-	# This is actually racy, if we collect the stats after packets have been
-	# bumped, but before bytes have been bumped, we will get a non-integer
-	# value and it all breaks. Let's see if that ever comes up and rething
-	# when we do. The idea behind the test is to make a sanity check of the
-	# counters.
+	# In live sessions, this is racy: if we collect the stats after packets
+	# have been bumped, but before bytes have been bumped, we will get a
+	# non-integer value and it all breaks.
 	local pksizes=$(
 		Bbdd --json session "${sel[@]}" stats |
 			jq -j '.sessions[] | .stats |
@@ -235,6 +233,74 @@ hold_time_test()
 	session_state_test up 1 "$@"
 
 	Bbdd_log_test "Hold time delays session creation"
+}
+
+__stats_consistency_test()
+{
+	local jqq=$1; shift
+	local -a command=("$@")
+	local what="${command[@]}"
+	local found=0
+	local out1
+	local out2
+	local i
+
+	for ((i = 0; i < 10; i++)); do
+		out1=$(Bbdd --json "${command[@]}" |
+			       jq -r ".$jqq |"'
+				      to_entries[] |
+				      "\(.key): \(.value)"')
+		[[ ! -z "$out1" ]]
+		check_err "$?" "JSON output empty"
+
+		out2=$(Bbdd "${command[@]}" |
+			       sed '1d; s/^\t//')
+		[[ ! -z "$out2" ]]
+		check_err "$?" "non-JSON output empty"
+
+		if [[ "$out1" == "$out2" ]]; then
+			found=1
+			break
+		fi
+	done
+
+	((found == 1))
+	check_err $? "different counters in json vs. non-json: ${out1} vs. ${out2}"
+
+	Bbdd_log_test "$what: JSON & plain output consistent"
+}
+
+session_stats_consistency_test()
+{
+	__stats_consistency_test "sessions[].stats" session "$@" stats
+}
+
+session_diag_stats_consistency_test()
+{
+	__stats_consistency_test "sessions[].stats" session "$@" diag stats
+}
+
+global_diag_stats_consistency_test()
+{
+	__stats_consistency_test "" global diag stats
+}
+
+find_match()
+{
+	local out=$1; shift
+	local match=$1; shift
+
+	echo "$out" | grep -q -e "$match"
+	check_err "$?" "$match not found"
+}
+
+find_no_match()
+{
+	local out=$1; shift
+	local match=$1; shift
+
+	echo "$out" | grep -q -e "$match"
+	check_fail "$?" "$match found"
 }
 
 Bbdd_setup_ns()

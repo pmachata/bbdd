@@ -7,6 +7,7 @@ tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 	vrf-basic.sh
 	ns-bridge.sh
 	err.sh
+	cli.sh
 }"
 
 for t in $TESTS; do
