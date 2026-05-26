@@ -737,10 +737,10 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 {
 	*csess = (struct bbdd_c_session){};
 
-	for (int i = 0; i < bbdd_sess_nflags; i++)
-		/* Only mark as seen set flags. */
-		csess->flags.flags[i].seen = csess->flags.flags[i].value =
-			dsess->local.flags.flags[i];
+	for (int i = 0; i < bbdd_sess_nflags; i++) {
+		csess->flags.flags[i].seen = true;
+		csess->flags.flags[i].value = dsess->local.flags.flags[i];
+	}
 
 	bbdd_d_session_to_c_addr(&csess->src, &dsess->src);
 	bbdd_d_session_to_c_addr(&csess->dst, &dsess->dst);
