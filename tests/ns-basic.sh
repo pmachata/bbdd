@@ -12,7 +12,7 @@ in_sockdir SD1 nsessions_test 0
 in_sockdir SD2 nsessions_test 0
 
 in_sockdir SD1 Bbdd session add \
-	   dst $(Bbdd_IP 2) \
+	   discr 101 dst $(Bbdd_IP 2) \
 	   min-tx 200ms min-rx 200ms detect-mult 3 passive
 
 in_sockdir SD1 nsessions_test 1
@@ -50,21 +50,45 @@ passive_zero_test()
 }
 
 in_sockdir SD2 Bbdd session add \
-	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 passive
+	   discr 202 dst $(Bbdd_IP 1) \
+	   min-tx 200ms min-rx 200ms detect-mult 3 passive
 in_sockdir SD2 nsessions_test 1
 
-# passive-passive: Neither should reach up
+# passive-passive: Neither should reach up yet, since they are both passive.
 in_sockdir SD1 session_state_test up 0
 in_sockdir SD2 session_state_test up 0
 
 in_sockdir SD1 passive_zero_test
 in_sockdir SD2 passive_zero_test
 
-in_sockdir SD1 Bbdd session set no passive
+in_ns NS1 Ip -$IPV neigh del $(Bbdd_IP 2) dev v1
 
-# Now that SD1 is not passive, check that they both reach up
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test up 1
+defer_scope_push
+	touch ${SD1}/monout
+	defer rm ${SD1}/monout
+
+	defer_scope_push
+		in_sockdir SD1 Bbdd_bground monitor ringbuf > ${SD1}/monout
+		defer kill_process $!
+
+		in_sockdir SD1 Bbdd session set no passive
+
+		# SD1 is not passive anymore and both should now reach up.
+		in_sockdir SD1 session_state_test up 1
+		in_sockdir SD2 session_state_test up 1
+	defer_scope_pop
+
+	OUT=$(cat ${SD1}/monout)
+defer_scope_pop
+
+find_match "$OUT" "ringbuf:tx-no-neigh *: ifindex .* addr $(Bbdd_IP 2)"
+Bbdd_log_test "Monitor tx-no-neigh"
+
+find_match "$OUT" 'ringbuf:rx-unx-pkt *: wire-len .* ttl 255.*state init\b.*\bmy-disc 202 your-disc 101'
+Bbdd_log_test "Monitor rx-unx-pkt init"
+
+find_match "$OUT" 'ringbuf:rx-unx-pkt *: wire-len .* ttl 255.* state up\b.*\bmy-disc 202 your-disc 101'
+Bbdd_log_test "Monitor rx-unx-pkt up"
 
 in_sockdir SD1 echo_test
 in_sockdir SD2 echo_test

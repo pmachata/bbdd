@@ -26,6 +26,11 @@ Bbdd()
 	$(nspfx) "${bin_dir}/bbdd" --sockdir "${!BBDD_SOCKDIR}" "$@"
 }
 
+Bbdd_bground()
+{
+	$(nspfx) "${bin_dir}/bbdd" --sockdir "${!BBDD_SOCKDIR}" "$@" &
+}
+
 Bbdd_stop()
 {
 	local pid=$1; shift
