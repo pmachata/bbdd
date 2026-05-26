@@ -909,7 +909,8 @@ format_env()
 		str="$str$item "
 	done
 
-	echo "${str% }${str:+: }"
+	str=${str% }
+	echo "${str}${str:+: }"
 }
 
 describe_env()

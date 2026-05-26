@@ -158,6 +158,17 @@ nsessions_test()
 	Bbdd_log_test "$xN ${descr}session$pl reported"
 }
 
+session_value_check()
+{
+	local key=$1; shift
+	local value=$1; shift
+	local out
+
+	out=$(Bbdd --json session show | jq -r ".sessions[]$key")
+	[[ "$out" == "$value" ]]
+	check_err $? "$(Bbdd_describe_env)session value $key is $out, expected $value"
+}
+
 echo_test()
 {
 	local t0
