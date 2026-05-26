@@ -177,10 +177,10 @@ memerr:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
-static void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
-			       struct bbdd_sock *peer,
-			       struct json_object *params_obj,
-			       struct json_object *id)
+void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
+			struct bbdd_sock *peer,
+			struct json_object *params_obj,
+			struct json_object *id)
 {
 	char *error;
 	int rc;

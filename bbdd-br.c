@@ -475,21 +475,6 @@ err:
 	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
-static void bbdd_br_handle_stop(struct bbdd_br *br, struct bbdd_sock *peer,
-				struct json_object *params_obj,
-				struct json_object *id)
-{
-	char *error;
-	int rc;
-
-	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
-	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
-
-	bbdd_poll_request_quit(br->pctx);
-	bbdd_util_jrpc_respond_empty(peer, id);
-}
-
 static void bbdd_br_handle_unhandled(struct bbdd_sock *peer,
 				     const char *method,
 				     struct json_object *id)
@@ -506,7 +491,7 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 	struct bbdd_br *br = data;
 
 	if (strcmp(method, "stop") == 0)
-		bbdd_br_handle_stop(br, peer, params_obj, id);
+		bbdd_d_handle_stop(br->pctx, peer, params_obj, id);
 	else if (strcmp(method, "ping") == 0)
 		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
