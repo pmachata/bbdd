@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 
 Bbdd_setup_ns NS1 NS2
-Bbdd_connect_ns NS1 v1 192.0.2.1/28 \
-		NS2 v2 192.0.2.2/28
+Bbdd_connect_ns NS1 v1 $(Bbdd_IP_mask 1) \
+		NS2 v2 $(Bbdd_IP_mask 2)
 
 Bbdd_setup_sockdir SD1 SD2 SDb
 in_sockdir SD1 in_ns NS1 adf_Bbdd_start
@@ -12,11 +12,11 @@ in_sockdir SDb adf_Bbdd_bridge_start
 in_sockdir SD2 Bbdd_bfdd_connect SDb
 
 in_sockdir SD1 Bbdd session add \
-	   dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3
+	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3
 in_sockdir SD1 nsessions_test 1
 
 in_sockdir SDb Bbdd session add \
-	   dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3 \
+	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
 	   discr 2 hold-time 5s
 in_sockdir SD1 hold_time_test 5
 
@@ -32,7 +32,7 @@ cpi_test()
 
 	# This also tests session parameter change via bridge.
 	in_sockdir SDb Bbdd session add \
-		   dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3 \
+		   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
 		   discr 2 cpi
 	sleep 1
 

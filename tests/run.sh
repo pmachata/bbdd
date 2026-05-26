@@ -3,9 +3,12 @@
 tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 
 : "${TESTS:=
-	ns-basic.sh
-	vrf-basic.sh
-	ns-bridge.sh
+	ns-basic4.sh
+	ns-basic6.sh
+	vrf-basic4.sh
+	vrf-basic6.sh
+	ns-bridge4.sh
+	ns-bridge6.sh
 	err.sh
 	cli.sh
 }"

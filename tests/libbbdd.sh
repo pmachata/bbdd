@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
 
-: "${PING:=ping}"
-: "${PING_COUNT:=10}"
-: "${PING_TIMEOUT:=5}"
-
 tmpdir=$(mktemp -d XXXXXX)
 defer rm -Rf "$tmpdir"
 
@@ -359,6 +355,7 @@ Bbdd_connect_ns()
 		in_ns "$ns1_name" adf_ip_addr_add "$ns1_link" "$ns1_addr"
 		in_ns "$ns2_name" adf_ip_addr_add "$ns2_link" "$ns2_addr"
 
+		sleep 2
 		in_ns "$ns1_name" ping_test "${ns2_addr%/*}"
 		in_ns "$ns2_name" ping_test "${ns1_addr%/*}"
 	done
@@ -385,7 +382,46 @@ Bbdd_connect_vrf()
 		adf_ip_addr_add "$vrf1_link" "$vrf1_addr"
 		adf_ip_addr_add "$vrf2_link" "$vrf2_addr"
 
+		sleep 2
 		in_vrf "$vrf1_name" ping_test "${vrf2_addr%/*}"
 		in_vrf "$vrf2_name" ping_test "${vrf1_addr%/*}"
 	done
+}
+
+__Bbdd_IP4()
+{
+	local n=$1; shift
+
+	echo "192.0.2.$n"
+}
+
+__Bbdd_IP4_mask()
+{
+	local n=$1; shift
+
+	echo $(__Bbdd_IP4 "$n")/28
+}
+
+__Bbdd_IP6()
+{
+	local n=$1; shift
+
+	echo "2001:db8:1::$n"
+}
+
+__Bbdd_IP6_mask()
+{
+	local n=$1; shift
+
+	echo $(__Bbdd_IP6 "$n")/64
+}
+
+Bbdd_IP()
+{
+	__Bbdd_IP"$IPV" "$@"
+}
+
+Bbdd_IP_mask()
+{
+	__Bbdd_IP"$IPV"_mask "$@"
 }

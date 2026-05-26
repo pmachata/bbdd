@@ -8,6 +8,16 @@
 # Whether to pause on after a failure.
 : "${PAUSE_ON_FAIL:=no}"
 
+: "${PING:=ping}"
+: "${PING6:=ping6}"	# Some distros just use ping.
+
+# Constants for ping tests:
+# How many packets should be sent.
+: "${PING_COUNT:=10}"
+# Timeout (in seconds) before ping exits regardless of how many packets have
+# been sent or received
+: "${PING_TIMEOUT:=5}"
+
 BUSYWAIT_TIMEOUT=$((WAIT_TIMEOUT * 1000)) # ms
 
 # Kselftest framework constants.
@@ -920,16 +930,28 @@ describe_env()
 
 Ping()
 {
-	$(nspfx) $(vrfpfx) $PING "$@"
+	$(nspfx) $(vrfpfx) "$PING" "$@"
+}
+
+Ping6()
+{
+	$(nspfx) $(vrfpfx) "$PING6" "$@"
 }
 
 ping_test()
 {
 	local dip=$1; shift
+	local tool
 
-	Ping -c "$PING_COUNT" -i 0.01 -w "$PING_TIMEOUT" "$dip" &> /dev/null
+	if [[ $dip = *:* ]]; then
+		tool=Ping6
+	else
+		tool=Ping
+	fi
+
+	"$tool" -c "$PING_COUNT" -i 0.01 -w "$PING_TIMEOUT" "$dip" &> /dev/null
 	check_err $?
-	log_test "$(describe_env)ping $dip"
+	log_test "$(describe_env)$tool $dip"
 }
 
 now()
