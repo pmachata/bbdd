@@ -15,15 +15,26 @@ in_sockdir SDb in_ns NS2 adf_Bbdd_bridge_start
 in_sockdir SD2 Bbdd_bfdd_connect SDb
 
 in_sockdir SD1 Bbdd session add \
-	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3
+	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3 \
+	   passive
 in_sockdir SD1 nsessions_test 1
 
 in_sockdir SDb Bbdd session add \
 	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
-	   discr 2 hold-time 5s
-in_sockdir SD1 hold_time_test 5
-
+	   discr 2 passive
 in_sockdir SD2 nsessions_test 1
+
+in_sockdir SD1 session_state_test up 0
+in_sockdir SD2 session_state_test up 0
+
+in_sockdir SDb Bbdd session discr 2 del
+in_sockdir SD2 nsessions_test 0
+
+in_sockdir SDb Bbdd session add \
+	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
+	   discr 2 hold-time 5s
+
+in_sockdir SD1 hold_time_test 5
 in_sockdir SD2 session_state_test up 1
 
 cpi_test()
@@ -53,8 +64,4 @@ cpi_test
 sleep 1 # Collect some more traffic -- the CPI test already slept 1s
 
 in_sockdir SDb packet_size_test discr 2
-
-in_sockdir SDb Bbdd session discr 2 del
-in_sockdir SD2 nsessions_test 0
-
 in_sockdir SDb echo_test
