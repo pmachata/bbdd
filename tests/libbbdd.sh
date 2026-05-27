@@ -67,7 +67,7 @@ Bbdd_wait()
 
 adf_Bbdd_start()
 {
-	Bbdd start &
+	Bbdd --debug=mon-eager start &
 	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
 
 	Bbdd_wait
@@ -75,7 +75,8 @@ adf_Bbdd_start()
 
 adf_Bbdd_bridge_start()
 {
-	Bbdd bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd.sock &
+	Bbdd --debug=mon-eager \
+	     bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd.sock &
 	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
 
 	Bbdd_wait
