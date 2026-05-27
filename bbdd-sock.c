@@ -646,57 +646,6 @@ void bbdd_sock_close_c(struct bbdd_sock *cli)
 	bbdd_sock_close(cli);
 }
 
-int bbdd_sock_open_raw(sa_family_t family,
-		       struct bbdd_sock *sock,
-		       char **error)
-{
-	uint16_t ethtype;
-	int one = 1;
-	int fd;
-	int rc;
-
-	switch (family) {
-	case AF_INET:
-		ethtype = ETH_P_IP;
-		break;
-	case AF_INET6:
-		ethtype = ETH_P_IPV6;
-		break;
-	default:
-		bbdd_util_fmterr(error, "bbdd_sock_open_raw: family `%d' not supported",
-				 family);
-		return -1;
-	}
-
-	fd = socket(AF_PACKET, SOCK_RAW, htons(ethtype));
-	if (fd < 0) {
-		bbdd_util_fmterr(error, "socket(AF_PACKET, SOCK_RAW): %s",
-				 strerror(errno));
-		return -1;
-	}
-
-	rc = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "SO_REUSEADDR: %s", strerror(errno));
-		goto close_fd;
-	}
-
-	*sock = (struct bbdd_sock) {
-		.fd = fd,
-		.sa.sa.sa_family = family,
-	};
-	return 0;
-
-close_fd:
-	close(fd);
-	return -1;
-}
-
-void bbdd_sock_close_raw(struct bbdd_sock *sock)
-{
-	close(sock->fd);
-}
-
 int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		       struct bbdd_sock *sock,
 		       char **error)
@@ -797,19 +746,4 @@ int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
 free_buf:
 	free(buf);
 	return rc;
-}
-
-int bbdd_sock_sndbufsz(struct bbdd_sock *sock, size_t *p_sndbufsz)
-{
-	unsigned int sndbufsz = 0;
-	socklen_t optlen;
-	int rc;
-
-	optlen = sizeof(sndbufsz);
-	rc = getsockopt(sock->fd, SOL_SOCKET, SO_SNDBUF, &sndbufsz, &optlen);
-	if (rc != 0)
-		return rc;
-
-	*p_sndbufsz = sndbufsz;
-	return 0;
 }
