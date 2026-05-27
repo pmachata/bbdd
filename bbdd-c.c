@@ -1065,6 +1065,9 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 	if (!seen)
 		printf("(session without data)");
 
+	if (state == NULL)
+		return;
+
 	if (state->local_seen) {
 		printf("| local ");
 		bbdd_c_session_show_state_end(&state->local);
@@ -2766,7 +2769,6 @@ bbdd_c_monitor_handle_bfdd_sess_add(struct json_object *params, char **error)
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	struct bbdd_c_session_state state = {};
 	struct bbdd_c_session csess = {};
 	int rc;
 
@@ -2776,11 +2778,11 @@ bbdd_c_monitor_handle_bfdd_sess_add(struct json_object *params, char **error)
 		return BBDD_C_MONITOR_PRINT_ERROR;
 
 	if (seen[pol_session]) {
-		rc = bbdd_c_jrpc_dissect_session_elem(values[pol_session],
-						      &csess, &state, error);
+		rc = bbdd_d_jrpc_dissect_session_one(values[pol_session],
+						     &csess, error);
 		if (rc != 0)
 			return BBDD_C_MONITOR_PRINT_ERROR;
-		bbdd_c_session_show_one(&csess, &state);
+		bbdd_c_session_show_one(&csess, NULL);
 		return BBDD_C_MONITOR_PRINT_OK;
 	}
 
