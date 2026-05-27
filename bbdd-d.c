@@ -2178,6 +2178,13 @@ static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 			goto invalid;
 	}
 
+	if (csess->vrf.table_seen ||
+	    csess->vrf.netif.ifindex_seen || csess->vrf.netif.name_seen) {
+		rc = bbdd_d_session_validate_vrf(&csess->vrf, d->nl, error);
+		if (rc != 0)
+			goto invalid;
+	}
+
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
 		rc = bbdd_d_session_add(d, csess, error);
