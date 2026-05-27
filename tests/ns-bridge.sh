@@ -7,7 +7,10 @@ Bbdd_connect_ns NS1 v1 $(Bbdd_IP_mask 1) \
 Bbdd_setup_sockdir SD1 SD2 SDb
 in_sockdir SD1 in_ns NS1 adf_Bbdd_start
 in_sockdir SD2 in_ns NS2 adf_Bbdd_start
-in_sockdir SDb adf_Bbdd_bridge_start
+
+# This has to run in the same namespace as the daemon it forwards to, so that
+# netif name translation works.
+in_sockdir SDb in_ns NS2 adf_Bbdd_bridge_start
 
 in_sockdir SD2 Bbdd_bfdd_connect SDb
 

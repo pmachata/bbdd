@@ -9,6 +9,8 @@ tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 	vrf-basic6.sh
 	ns-bridge4.sh
 	ns-bridge6.sh
+	vrf-bridge4.sh
+	vrf-bridge6.sh
 	err.sh
 	cli.sh
 }"
