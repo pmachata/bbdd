@@ -649,10 +649,10 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 	/* There's no reliable way to roll back everything, and e.g. rolling
 	 * back the mark is pointless. Unless everything lines up just right,
-	 * the session is broken. Even if the standard allowed to do something
-	 * like add a new session with new id and then remove the old one, when
-	 * the removal fails, we've got two sessions and it's broken. So we just
-	 * treat errors by basically shrugging and bailing out early. */
+	 * the session is broken. Even if we added a new session with new
+	 * discrimator and then remove the old one, when the removal fails,
+	 * we've got two sessions and it's broken. So we just treat errors by
+	 * basically shrugging and bailing out early. */
 
 	bsess->gen_id++;
 
