@@ -960,10 +960,13 @@ bbdd_c_session_show_state_bpf(const struct bbdd_c_session_state_bpf *bstate)
 		printf("qd-timing %s ", bstate->qd_timing ? "yes" : "no");
 }
 
-static void bbdd_c_show_flag(const char *name, bool flag)
+static void bbdd_c_show_flag(const char *name, bool flag, bool *seen)
 {
-	if (flag || bbdd_env.verbosity > 0)
+	if (flag || bbdd_env.verbosity > 0) {
 		printf("%s%s ", flag ? "" : "no ", name);
+		if (seen != NULL)
+			*seen = true;
+	}
 }
 
 static void
@@ -973,7 +976,7 @@ bbdd_c_session_show_data(const struct bbdd_d_session_data *data)
 	printf("detect-mult %u ", data->timing.detect_mult);
 	bbdd_c_show_time_us("min-tx", data->timing.min_tx_us);
 	bbdd_c_show_time_us("min-rx", data->timing.min_rx_us);
-	bbdd_c_show_flag("cpi", data->flags.cpi);
+	bbdd_c_show_flag("cpi", data->flags.cpi, NULL);
 	bbdd_c_session_show_state_end(&data->state);
 }
 
@@ -1061,6 +1064,15 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 	}
 	if (seen_vrf)
 		seen = true;
+
+#define SHOW_FLAG(NAME, name, ...)					\
+		if (csess->flags.name.seen)				\
+			bbdd_c_show_flag(#name, csess->flags.name.value, \
+					 &seen);
+
+	BBDD_SESS_FLAGS(SHOW_FLAG);
+
+#undef SHOW_FLAG
 
 	if (!seen)
 		printf("(session without data)");
