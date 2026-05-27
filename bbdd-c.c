@@ -2964,6 +2964,9 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 	else if (strcmp(method, "bfddi:sess-add") == 0 ||
 		 strcmp(method, "bfddo:sess-add") == 0)
 		rc = bbdd_c_monitor_handle_bfdd_sess_add(params, &error);
+	else if (strcmp(method, "bfddi:state-change") == 0 ||
+		 strcmp(method, "bfddo:state-change") == 0)
+		rc = bbdd_c_monitor_handle_session_change(params, &error);
 	else if (strcmp(method, "bfddi:sess-del") == 0 ||
 		 strcmp(method, "bfddo:sess-del") == 0 ||
 		 strcmp(method, "bfddi:sess-cnt-req") == 0 ||
