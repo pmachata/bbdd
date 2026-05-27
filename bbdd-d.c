@@ -1227,7 +1227,8 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 		if (digest->multihop != dsess->local.flags.multihop)
 			continue;
 
-		if (dsess->ifindex != 0 && dsess->ifindex != digest->ifindex)
+		if (dsess->ifindex != 0 && digest->ifindex != 0 &&
+		    dsess->ifindex != digest->ifindex)
 			continue;
 
 		if (dsess->vrf_table != digest->table)

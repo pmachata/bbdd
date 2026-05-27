@@ -1028,13 +1028,21 @@ bbdd_bpf_rb_handle_discr_0(struct bbdd_bpf *bpf,
 		.multihop = elem->multihop,
 	};
 	struct bbdd_d_session *dsess = NULL;
+	struct bbdd_nl_ifinfo nlinfo;
 	int err;
 	unsigned int nmatch;
 	char *error;
 
-	err = bbdd_nl_get_l3_master(nl, elem->ifindex, &digest.table, &error);
+	/* For VRF scenarios, elem->ifindex references VRF. Drop it in those
+	 * cases so that the matcher doesn't try to compare it to the bound
+	 * netdevice. */
+	err = bbdd_nl_get_ifinfo(nl, elem->ifindex, &nlinfo, &error);
 	if (err != 0)
 		goto error;
+	if (nlinfo.table != 0) {
+		digest.table = nlinfo.table;
+		digest.ifindex = 0;
+	}
 
 	err = bbdd_bpf_addr_to_sockaddr(elem->ethtype, &elem->saddr,
 					&digest.src,

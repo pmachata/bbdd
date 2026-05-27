@@ -39,8 +39,5 @@ int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
 int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
 			  uint32_t *table, char **error);
 
-int bbdd_nl_get_l3_master(struct bbdd_nl *nl, uint32_t ifindex,
-			  uint32_t *table, char **error);
-
 int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			  const struct bbdd_sockaddr *addr, char **error);
