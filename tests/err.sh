@@ -10,6 +10,24 @@ in_sockdir SD1
 
 in_ns NS1 adf_Bbdd_start
 
+Bbdd session add add dst 1.2.3.4 2>/dev/null
+check_fail $? "add add"
+
+Bbdd session add set dst 1.2.3.4 2>/dev/null
+check_fail $? "add set"
+
+Bbdd session add del 2>/dev/null
+check_fail $? "add del"
+
+Bbdd session add show 2>/dev/null
+check_fail $? "add del"
+
+Bbdd session bulk add dst 1.2.3.4 2>/dev/null
+check_fail $? "bulk add"
+
+Bbdd session bulk show 2>/dev/null
+check_fail $? "bulk show"
+
 Bbdd session add dst 1.2.3.4 dst 1.2.3.4 2>/dev/null
 check_fail $? "duplicate dst"
 
