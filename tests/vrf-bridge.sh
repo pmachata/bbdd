@@ -26,3 +26,28 @@ in_sockdir SD1 nsessions_test 1 vrf V2
 
 in_sockdir SD1 session_state_test up 1 vrf V1
 in_sockdir SD1 session_state_test up 1 vrf V2
+
+in_sockdir SDb Bbdd -q session bulk del
+check_fail $? "bulk del against a bridge succeeded"
+Bbdd_log_test "bulk del fails against a bridge"
+
+in_sockdir SDb Bbdd session discr 101 del
+in_sockdir SDb Bbdd session discr 202 del
+
+sleep 1
+in_sockdir SD1 nsessions_test 0
+
+in_sockdir SDb Bbdd session add discr 101 vrf V1 dst $(Bbdd_IP 2) \
+				min-tx 200ms min-rx 200ms detect-mult 3 multihop
+
+in_sockdir SDb Bbdd session add discr 202 vrf V2 dst $(Bbdd_IP 1) \
+				min-tx 200ms min-rx 200ms detect-mult 3
+
+in_sockdir SD1 session_state_test up 0 vrf V1
+in_sockdir SD1 session_state_test up 0 vrf V2
+
+in_sockdir SDb Bbdd session add discr 202 vrf V2 dst $(Bbdd_IP 1) \
+				min-tx 200ms min-rx 200ms detect-mult 3 multihop
+
+in_sockdir SD1 session_state_test up 1 vrf V1
+in_sockdir SD1 session_state_test up 1 vrf V2

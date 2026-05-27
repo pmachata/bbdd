@@ -17,7 +17,23 @@ Bbdd session add vrf V1 src $(Bbdd_IP 1) dst $(Bbdd_IP 2) \
 
 Bbdd session add vrf V2 src $(Bbdd_IP 2) dst $(Bbdd_IP 1) \
 		 min-tx 200ms min-rx 200ms detect-mult 3 hold-time 5s
+
 hold_time_test 5 vrf V1
+session_state_test up 1 vrf V2
+
+Bbdd session bulk del
+nsessions_test 0
+
+Bbdd session add vrf V1 src $(Bbdd_IP 1) dst $(Bbdd_IP 2) \
+		 min-tx 200ms min-rx 200ms detect-mult 3 multihop
+
+Bbdd session add vrf V2 src $(Bbdd_IP 2) dst $(Bbdd_IP 1) \
+		 min-tx 200ms min-rx 200ms detect-mult 3
+
+session_state_test up 0 vrf V1
+session_state_test up 0 vrf V2
+
+Bbdd session vrf V2 set multihop
 
 session_state_test up 1 vrf V1
 session_state_test up 1 vrf V2
