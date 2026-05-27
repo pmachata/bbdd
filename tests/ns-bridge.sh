@@ -30,10 +30,11 @@ cpi_test()
 	in_sockdir SD2 session_value_check '.data.cpi' false
 	in_sockdir SD2 session_value_check '.state.remote.cpi' false
 
-	# This also tests session parameter change via bridge.
-	in_sockdir SDb Bbdd session add \
-		   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
-		   discr 2 cpi
+	# This also tests session parameter change via bridge, and exercises
+	# code for setting src address across the bridge.
+	in_sockdir SDb Bbdd session add dst $(Bbdd_IP 1) \
+		   min-tx 200ms min-rx 200ms detect-mult 3 \
+		   src $(Bbdd_IP 2) netif v2 discr 2 cpi
 	sleep 1
 
 	in_sockdir SD1 session_value_check '.data.cpi' false
