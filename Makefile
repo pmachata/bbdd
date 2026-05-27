@@ -156,6 +156,9 @@ test: $(BUILT)
 ifeq ($(COVERAGE),1)
 coverage: $(OUTPUT)/coverage/ | $(OUTPUT_DIRS)
 	gcovr --html-nested --output $(OUTPUT)/coverage/bbdd.html
+
+coverage-clean:
+	rm -f $(OUTPUT)/*.gcda
 endif
 
 -include $(ALL_DEPS)
