@@ -3086,7 +3086,7 @@ closelog:
 int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
-		fprintf(stderr, "Usage: bbdd start [monitor [topics...]]\n");
+		fprintf(stderr, "Usage: bbdd start\n");
 		return 0;
 	}
 

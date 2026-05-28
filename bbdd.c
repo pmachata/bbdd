@@ -30,7 +30,10 @@ static int bbdd_help(void)
 	     "                    -N | -t | --timestamp ]\n"
 	     "	     COMMAND := { start | stop | ping | session | global | bfdd | monitor }\n"
 	     "\n"
+	     "  --json         show JSON result object instead of formatting it\n"
 	     "  -N             suppress human-readable unit conversion (show raw microseconds)\n"
+	     "  --sockdir      the directory to use to put socket files\n"
+	     "                 defaults to " BBDD_DEFAULT_SOCKDIR "\n"
 	     "  -t/--timestamp prefix monitor notifications with a timestamp\n"
 	     );
 	return 0;
