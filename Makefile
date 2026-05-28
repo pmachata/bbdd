@@ -93,6 +93,8 @@ VAR_SUBSTITUTIONS = 				\
 	s|@BINDIR@|$(BINDIR)|g;			\
 	s|@SYSCONFDIR@|$(SYSCONFDIR)|g;		\
 	s|@RUNSTATEDIR@|$(RUNSTATEDIR)|g;	\
+	s|@DEFAULT_SOCKDIR@|$(RUNSTATEDIR)|g;	\
+	#
 
 .PHONY: all
 all: $(BUILT)
