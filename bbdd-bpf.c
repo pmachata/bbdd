@@ -833,6 +833,82 @@ static void bbdd_bpf_handle_packet_got_final(struct bbdd_bpf *bpf,
 	bbdd_bpf_session_call_update(bpf, dsess, bsess);
 }
 
+static void bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
+					  const struct bbdd_d_session *dsess,
+					  struct bbdd_bpf_session *bsess)
+{
+	struct bbdd_d_session_data_timing *timing;
+	bool need_poll = false;
+	bool apply_imm = true;
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
+
+	/* Below, we want to compare w/ the configuration being polled
+	 * currently, or, if none, the effective configuration. */
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		timing = &bsess->eff_timing;
+		break;
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		timing = &bsess->poll_timing;
+		break;
+	}
+
+	/* If either DesiredMinTxInterval is changed or RequiredMinRxInterval is
+	 * changed, a Poll Sequence MUST be initiated. */
+	if (dsess->local.timing.min_tx_us != timing->min_tx_us ||
+	    dsess->local.timing.min_rx_us != timing->min_rx_us)
+		need_poll = true;
+
+	/* If bfd.DesiredMinTxInterval is increased and bfd.SessionState is Up,
+	 * the actual transmission interval used MUST NOT change until the Poll
+	 * Sequence has terminated. */
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
+	    dsess->local.timing.min_tx_us > timing->min_tx_us)
+		apply_imm = false;
+
+	/* If bfd.RequiredMinRxInterval is reduced and bfd.SessionState is Up,
+	 * the previous value of bfd.RequiredMinRxInterval MUST be used when
+	 * calculating the Detection Time for the remote system until the Poll
+	 * Sequence has terminated. */
+	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
+	    dsess->local.timing.min_rx_us < timing->min_rx_us)
+		apply_imm = false;
+
+	/* For stable state, apply_imm changes the effective timing. Mid-poll we
+	 * we need to hold on to the effective timing until the poll sequence is
+	 * over. We can change poll_timing though. Then the timers sent in poll
+	 * sequence will be the changed timers (i.e. immediate change), but we
+	 * still use the old eff_timing to calculate timeouts etc. */
+	if (apply_imm)
+		*timing = dsess->local.timing;
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
+
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		if (need_poll) {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, await final",
+					    dsess->local.discr);
+			bsess->poll_timing = dsess->local.timing;
+			bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
+		}
+		break;
+
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		if (need_poll) {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, queue timing",
+					    dsess->local.discr);
+			bsess->qd_timing = &dsess->local.timing;
+		}
+		break;
+	}
+}
+
 static void bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
 						 struct bbdd_d_session *dsess,
 						 struct bbdd_bpf_session *bsess)
@@ -841,17 +917,15 @@ static void bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
 	 * there's another state to poll. */
 
 	bsess->eff_timing = bsess->poll_timing;
+	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
 
 	if (bsess->qd_timing == NULL) {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: stable",
 				    dsess->local.discr);
-		bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
 	} else {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: queued timing, await final",
 				    dsess->local.discr);
-		bsess->poll_timing = *bsess->qd_timing;
-		bsess->qd_timing = NULL;
-		bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
+		bbdd_bpf_handle_session_update(bpf, dsess, bsess);
 	}
 
 	bbdd_bpf_session_call_update(bpf, dsess, bsess);
@@ -2344,11 +2418,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    const struct bbdd_d_session *dsess,
 			    char **error)
 {
-	struct bbdd_d_session_data_timing *timing;
 	uint32_t discr = dsess->local.discr;
 	struct bbdd_bpf_session *bsess;
-	bool need_poll = false;
-	bool apply_imm = true;
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
@@ -2357,73 +2428,7 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	switch (bsess->bstate) {
-	case BBDD_BPF_SESSION_STATE_ON_HOLD:
-		invalid_on_hold_abort(bsess);
-
-	/* Below, we want to compare w/ the configuration being polled
-	 * currently, or, if none, the effective configuration. */
-	case BBDD_BPF_SESSION_STATE_STABLE:
-		timing = &bsess->eff_timing;
-		break;
-	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
-	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
-		timing = &bsess->poll_timing;
-		break;
-	}
-
-	/* If either DesiredMinTxInterval is changed or RequiredMinRxInterval is
-	 * changed, a Poll Sequence MUST be initiated. */
-	if (dsess->local.timing.min_tx_us != timing->min_tx_us ||
-	    dsess->local.timing.min_rx_us != timing->min_rx_us)
-		need_poll = true;
-
-	/* If bfd.DesiredMinTxInterval is increased and bfd.SessionState is Up,
-	 * the actual transmission interval used MUST NOT change until the Poll
-	 * Sequence has terminated. */
-	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
-	    dsess->local.timing.min_tx_us > timing->min_tx_us)
-		apply_imm = false;
-
-	/* If bfd.RequiredMinRxInterval is reduced and bfd.SessionState is Up,
-	 * the previous value of bfd.RequiredMinRxInterval MUST be used when
-	 * calculating the Detection Time for the remote system until the Poll
-	 * Sequence has terminated. */
-	if (dsess->local.state.state == BBDD_BFD_PKT_STATE_UP &&
-	    dsess->local.timing.min_rx_us < timing->min_rx_us)
-		apply_imm = false;
-
-	/* For stable state, apply_imm changes the effective timing. Mid-poll we
-	 * we need to hold on to the effective timing until the poll sequence is
-	 * over. We can change poll_timing though. Then the timers sent in poll
-	 * sequence will be the changed timers (i.e. immediate change), but we
-	 * still use the old eff_timing to calculate timeouts etc. */
-	if (apply_imm)
-		*timing = dsess->local.timing;
-
-	switch (bsess->bstate) {
-	case BBDD_BPF_SESSION_STATE_ON_HOLD:
-		invalid_on_hold_abort(bsess);
-
-	case BBDD_BPF_SESSION_STATE_STABLE:
-		if (need_poll) {
-			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, await final",
-					    dsess->local.discr);
-			bsess->poll_timing = dsess->local.timing;
-			bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
-		}
-		break;
-
-	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
-	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
-		if (need_poll) {
-			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: change, queue timing",
-					    dsess->local.discr);
-			bsess->qd_timing = &dsess->local.timing;
-		}
-		break;
-	}
-
+	bbdd_bpf_handle_session_update(bpf, dsess, bsess);
 	return __bbdd_bpf_session_update(bpf, dsess, bsess, error);
 }
 
