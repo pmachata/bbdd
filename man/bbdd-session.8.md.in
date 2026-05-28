@@ -1,0 +1,260 @@
+% bbdd-session(8) | Linux
+
+NAME
+====
+
+`bbdd session` - manage BFD sessions
+
+SYNOPSIS
+========
+
+```
+bbdd session add [ SET-PARAMS ]
+bbdd session [ QUERY-PARAMS ] [bulk] set [ SET-PARAMS ]
+bbdd session [ QUERY-PARAMS ] [bulk] del
+bbdd session [ QUERY-PARAMS ] show
+bbdd session [ QUERY-PARAMS ] [diag] stats
+```
+
+DESCRIPTION
+===========
+
+The `session` command manages BFD sessions. Each invocation has up to two
+independent sets of parameters:
+
+`QUERY-PARAMS`
+: Select which sessions the command operates on.
+
+`SET-PARAMS`
+: Describe the configuration to apply.
+
+Whether an operation is permitted to affect more than one session at a
+time is controlled by the `bulk` modifier. The individual subcommands
+interpret these inputs as follows:
+
+`add`
+: No query parameters are accepted. The `SET-PARAMS` describe the
+  configuration of the newly created session. `bulk` is not applicable;
+  at most one session is created per invocation.
+
+`set`
+: The `QUERY-PARAMS` select the sessions to modify. The `SET-PARAMS`
+  describe the changes to apply. Without `bulk`, matching more than one
+  session is an error.
+
+`del`
+: The `QUERY-PARAMS` select the sessions to delete. No `SET-PARAMS` are
+  accepted. Without `bulk`, matching more than one session is an error.
+
+`show`
+: The `QUERY-PARAMS` select the sessions to display. No `SET-PARAMS`
+  are accepted. Always operates in bulk.
+
+`stats`
+: The `QUERY-PARAMS` select the sessions whose counters to display. The
+  `diag` modifier selects diagnostic counters instead of operational
+  ones. Always operates in bulk.
+
+PARAMETERS
+==========
+
+All parameters are usable as both `QUERY-PARAMS` and `SET-PARAMS` unless
+noted otherwise.
+
+`discr U32`
+
+: Session discriminator. A 32-bit unsigned integer uniquely identifying the
+  session within `bbdd`. When not given for a new session, is chosen
+  randomly and uniquely.
+
+`src ADDR`, `no src`
+
+: Source address of BFD control packets. When not configured, the source
+  address is determined by the kernel routing lookup for each transmitted
+  packet. `no src` clears the setting on an existing session.
+
+`dst ADDR`
+
+: Destination address of BFD control packets.
+
+`min-tx TIME`
+
+: Desired minimum transmit interval. The actual transmit interval is
+  negotiated with the peer and may be longer than this value.
+
+`min-rx TIME`
+
+: Required minimum receive interval. The peer is expected to transmit at
+  least this frequently; intervals below this are treated as a detection
+  failure.
+
+`detect-mult U8`
+
+: Detection time multiplier. The detection time is this value multiplied by
+  the negotiated receive interval. When no packet arrives within the
+  detection time, the session is declared down.
+
+`ttl U8`
+
+: Minimum acceptable IP TTL for received packets. The default is 255.
+  Single-hop sessions should use the default; multi-hop sessions typically
+  use a lower value reflecting the expected hop count.
+
+`netif IFNAME`, `netif-index U32`, `no netif`
+
+: Network interface by name or index, respectively. Either or both may be
+  given; the daemon resolves missing parts automatically. `no netif` clears
+  the interface association on an existing session.
+
+`vrf IFNAME`, `vrf-index U32`, `vrf-table U32`, `no vrf`
+
+: VRF for packet forwarding, specified by interface name, interface index,
+  or routing table ID, respectively. Any combination of the three forms is
+  accepted.
+
+  When the VRF name or index is given, the daemon can derive the routing
+  table ID automatically. The reverse is not possible: the mapping from
+  table IDs to VRF interfaces is not unique, so the daemon does not attempt
+  to fill in the name or index when only `vrf-table` is given.
+
+  `no vrf` clears both the VRF interface setting and the VRF table. `no vrf
+  vrf-table U32` clears the VRF interface but sets a specific table for
+  forwarding.
+
+`hold-time TIME`
+
+: Time to wait before activating a newly created session. During the hold
+  period, the session exists in the daemon's data model but does not yet
+  transmit or receive packets. Only meaningful as a `SET-PARAM` on `add`.
+
+FLAGS
+=====
+
+Session flags may be set or cleared using `[no] FLAG` syntax. Without
+`no`, the flag is set; with `no`, it is cleared.
+
+`[no] multihop`
+
+: Multi-hop session. Multi-hop sessions use UDP port 4784 instead of
+  3784 and are not constrained to a single IP hop.
+
+`[no] cpi`
+
+: Control-Plane Independent. When set, the C bit is included in
+  transmitted BFD packets, indicating that the forwarding plane
+  continues to operate independently of the control plane.
+
+`[no] passive`
+
+: Passive mode. A passive session does not initiate the BFD handshake;
+  it waits for the peer to send the first packet before responding.
+
+`[no] shutdown`
+
+: Administratively down.
+
+PARAMETER TYPES
+===============
+
+`U8`, `U32`
+
+: An 8-bit or 32-bit non-negative integral value.
+
+`IFNAME`
+
+: An interface name given as a string, e.g. `eth0`.
+
+`ADDR`
+
+: An IPv4 or IPv6 address notation. E.g. `192.0.2.1` or `2001:db8:1::1`.
+
+`TIME`
+
+: A time duration expressed either as a raw `U32` number of microseconds, or
+  human readable notation such as `100us`, `10ms` or `1s`.
+
+OUTPUT FORMAT
+=============
+
+## show
+
+Each session is printed on one line. The configuration fields appear
+first, followed by state sections separated by `|`.
+
+The `local` section shows the daemon's own BFD state and diagnostic
+code. The `remote` section shows the last-received values from the peer:
+discriminator, detection multiplier, negotiated intervals, C bit, and
+the peer's state and diagnostic code.
+
+BFD states are: `admindown`, `down`, `init`, `up`.
+
+```
+# bbdd session show
+discr 1 dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3 netif veth1 vrf vrf1 | local state up diag nothing | remote discr 2 detect-mult 3 min-tx 200ms min-rx 200ms state up diag nothing
+discr 2 dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3 netif veth2 vrf vrf2 | local state up diag nothing | remote discr 1 detect-mult 3 min-tx 200ms min-rx 200ms state up diag nothing
+```
+
+With `-v` (`--verbose`), additional BPF-level state is shown in a `bpf`
+section: the BPF session state (`bstate`), the effective negotiated
+timing parameters (`eff-timing`), the timing parameters used during a
+poll sequence (`poll-timing`), and whether timing is being queued for a
+deferred update (`qd-timing`).
+
+With `-v`, fields that have no value set (e.g. `no src`, `no netif`)
+are also shown explicitly.
+
+```
+# bbdd -v session show
+discr 1 no src dst 192.0.2.2 min-tx 200ms min-rx 200ms detect-mult 3 netif veth1 netif-index 171 vrf vrf1 vrf-index 2 vrf-table 1000 no multihop no cpi no passive no shutdown | local state up diag nothing | remote discr 2 detect-mult 3 min-tx 200ms min-rx 200ms no cpi state up diag nothing | bpf state stable eff-timing detect-mult 3 min-tx 200ms min-rx 200ms poll-timing detect-mult 0 min-tx 0s min-rx 0s 
+discr 2 no src dst 192.0.2.1 min-tx 200ms min-rx 200ms detect-mult 3 netif veth2 netif-index 170 vrf vrf2 vrf-index 3 vrf-table 2000 no multihop no cpi no passive no shutdown | local state up diag nothing | remote discr 1 detect-mult 3 min-tx 200ms min-rx 200ms no cpi state up diag nothing | bpf state stable eff-timing detect-mult 3 min-tx 200ms min-rx 200ms poll-timing detect-mult 0 min-tx 0s min-rx 0s 
+```
+
+## stats
+
+Each session's counters are printed with the discriminator on a heading
+line, followed by the counter values. Operational counters include
+received and transmitted packet and byte counts. Diagnostic counters
+(`diag stats`) report internal exception event counts.
+
+```
+# bbdd session discr 1 stats
+discr 1:
+	rx_bytes: 8698140
+	rx_packets: 131790
+	tx_bytes: 8700450
+	tx_packets: 131825
+```
+
+EXAMPLES
+========
+
+Create two sessions in different VRFs:
+
+```
+bbdd session add dst 192.0.2.1 vrf V1 min-tx 200ms min-rx 200ms detect-mult 3
+bbdd session add dst 192.0.2.2 vrf V2 min-tx 200ms min-rx 200ms detect-mult 3
+```
+
+Raise the transmit and receive intervals on all sessions at once:
+
+```
+bbdd session bulk set min-tx 300ms min-rx 300ms
+```
+
+Delete all sessions in VRF V1:
+
+```
+bbdd session vrf V1 bulk del
+```
+
+Show operational and diagnostic counters for a specific session:
+
+```
+bbdd session dst 192.0.2.1 stats
+bbdd session dst 192.0.2.1 diag stats
+```
+
+SEE ALSO
+========
+
+bbdd(8), bbdd-bfdd(8)

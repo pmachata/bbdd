@@ -1,0 +1,169 @@
+% bbdd(8) | Linux
+
+NAME
+====
+
+`bbdd` - BPF-based BFD dataplane daemon
+
+SYNOPSIS
+========
+
+`bbdd -V`
+
+`bbdd [-v | -q] [-N] [-t | --timestamp] [--json] [--sockdir <PATH>]
+{start | stop | ping | echo | session | global | bfdd | monitor | help}`
+
+DESCRIPTION
+===========
+
+`bbdd` is a daemon that implements the BFD (Bidirectional Forwarding
+Detection, [RFC 5880][]) dataplane in-kernel using the Linux BPF subsystem.
+
+The daemon can be controlled by one of two ways:
+
+  - through a [JSON RPC][] based protocol, by `bbdd` CLI interface.
+    In this role `bbdd` serves as a fully independent BFD service.
+
+  - through the FRR BFD daemon wire protocol. In that role, `bbdd` serves as
+    a BFD datapath daemon.
+
+    The `bfdd` suite of command manages the BFD daemon connection. See
+    COMMANDS below.
+
+## Method of Operation
+
+The daemon manages BFD sessions, each of which monitors the bidirectional
+forwarding path between two endpoints.
+
+To transmit BFD packets, `bbdd` creates a pair of VETH netdevices
+configured with `mq` and `fq` qdiscs. By looping BFD packets from TX end of
+the VETH pair back to the RX end, and setting an appropriate timestamp at
+the SKB, sending packets in regular intervals is effected.
+
+To manage receive side, `bbdd` maintains a per-session timer that is reset
+regularly as packets for that session arrive.
+
+This way the full BFD receive and transmit cycle is offloaded to the
+kernel. `bbdd` userspace daemon then takes care of managing exceptional
+states: timeouts, user-issued configuration changes, session state machine
+and other more complex details. Meanwhile the regular, stable state is
+handled by the in-kernel BPF programs.
+
+OPTIONS
+=======
+
+`-v, --verbose, -q, --quiet`
+
+: Be more or less verbose, these options compensate each other. When just
+  `-q` is given, show no output (beyond command line parsing), not even
+  error messages. When `-v` show debug messages in addition to error
+  messages.
+
+`-N`
+
+: Suppress human-readable unit conversion. Intervals and times are
+  shown as raw microseconds rather than formatted strings such as
+  `100ms`.
+
+`-t, --timestamp`
+
+: Prefix monitor notifications with a timestamp.
+
+`--sockdir <PATH>`
+
+: Location of the directory where Unix sockets used to communicate with the
+  daemon are put.
+
+  By default, `bbdd` places the socket in a directory @DEFAULT_SOCKDIR@.
+  The `--sockdir` option overrides the compiled-in default.
+
+`--json`
+
+: Instead of formatting the daemon's response in a human-readable way,
+  print the raw JSON result object. Errors are still printed to
+  standard error as usual.
+
+COMMANDS
+========
+
+`start`
+
+: Start the daemon.
+
+`stop`
+
+: Stop the running daemon.
+
+`ping`
+
+: Check the liveness of the daemon.
+
+`echo`
+
+: Measure one-way latency to the daemon. This is the amount of time it
+  takes to accept the echo request over the socket, parse it, dispatch it
+  and act on it.
+
+`session`
+
+: Manage BFD sessions. See `bbdd-session(8)` for further details.
+
+`bfdd`
+
+: Manage the connection to a BFD daemon (BFDD). See `bbdd-bfdd(8)` for
+  further details.
+
+`global diag stats`
+
+: Show global dagnostic statistics. There are currently no global
+  statistics besides diagnostic ones.
+
+`monitor`
+
+: Subscribe to daemon monitoring topics and print received notifications.
+  Available topics:
+
+    `ringbuf`
+    : Shows incoming BPF ring buffer events
+
+    `bfddi`, `bfddo`
+    : Respectively incoming and outgoing BFD daemon wire protocol messages
+
+    `jrpc`
+    : Incoming JSON RPC requests
+
+    `session`
+    : Session state change events
+
+    `error`, `debug`
+    : Runtime errors and debug messages emitted by the daemon. Even in a
+      `-q` mode, errors and debug messages are still emitted through the
+      monitor and can be observed that way.
+
+    `all`
+    : A special keyword that selects all topics.
+
+  When no topics are given, the default is all topics except of `debug`.
+
+SEE ALSO
+========
+
+bbdd-session(8), bbdd-bfdd(8)
+
+SEE ALSO
+========
+
+[RFC 5880][] (BFD)  
+[RFC 5881][] (BFD for IPv4 and IPv6 single-hop)  
+[RFC 5883][] (BFD for multi-hop paths)  
+[JSON RPC specification][JSON RPC]  
+
+REPORTING ISSUES
+================
+
+To report issues please send an email to: mlxsw@nvidia.com.
+
+[JSON RPC]: https://www.jsonrpc.org/specification
+[RFC 5880]: https://www.rfc-editor.org/rfc/rfc5880
+[RFC 5881]: https://www.rfc-editor.org/rfc/rfc5881
+[RFC 5883]: https://www.rfc-editor.org/rfc/rfc5883

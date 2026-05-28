@@ -1,0 +1,113 @@
+% bbdd-bfdd(8) | Linux
+
+NAME
+====
+
+`bbdd bfdd` - manage the connection to a BFD daemon
+
+SYNOPSIS
+========
+
+```
+bbdd bfdd connect [TYPE:ADDRESS[:PORT]]
+bbdd bfdd disconnect
+bbdd bfdd connected
+bbdd bfdd bridge start [TYPE:ADDRESS[:PORT]]
+```
+
+DESCRIPTION
+===========
+
+The `bfdd` command manages the connection between `bbdd` and a BFD
+control-plane daemon (BFDD). The BFDD is responsible for session
+lifecycle management and redistribution of BFD session state to routing
+protocols. `bbdd` can operate without a connected BFDD, but state
+changes will not be visible to routing protocols in that case.
+
+There are two connection modes:
+
+**Outbound** (`connect`)
+: `bbdd` connects to a BFDD instance that is already listening. This is
+  the common case when running alongside FRR, where the BFD daemon
+  opens the dataplane socket and waits for the dataplane to connect.
+
+**Inbound** (`bridge start`)
+: `bbdd` listens for the BFDD to connect to it and then operates as translation
+  layer between the `bbdd` JSON RPC protocol and the BFDD wire protocol.
+
+COMMANDS
+========
+
+`connect [TYPE:ADDRESS[:PORT]]`
+
+: Instruct the running `bbdd` daemon to connect to a BFDD at the given
+  address. The address format is `TYPE:ADDRESS` for socket types that
+  carry the address implicitly, or `TYPE:ADDRESS:PORT` for TCP-based
+  types.
+
+  Only `TYPE` of `unix` is currently supported. `ADDRESS` is the filesystem path
+  of the socket. No `PORT` is accepted.
+
+  When no address is given, the default `unix:/var/run/frr/bfdd_dplane.sock`
+  is used.
+
+  The response to this command is sent once connection has been established, but
+  before the BFDD protocol handshake completes. Use `connected` to check the
+  final connection state.
+
+`disconnect`
+
+: Instruct the running `bbdd` daemon to close the current BFDD
+  connection. Has no effect if no BFDD is connected.
+
+`connected`
+
+: Report whether a BFDD instance is currently connected to `bbdd`.
+  Exits with status 0 if connected, 1 if not. With `-v`, also prints a
+  human-readable `connected: yes` or `connected: no` message.
+
+`bridge start [TYPE:ADDRESS[:PORT]]`
+
+: Start a BFDD bridge. The bridge is a separate process that listens on the
+  given address for an inbound connection from a datapath daemon such as `bbdd`.
+  The address format and defaults are the same as for `connect`.
+
+  Once connected, the bridge translates between the `bbdd` JSON RPC interface
+  and the bfddp wire protocol, forwarding session state changes, echo requests,
+  and counter queries between the two sides.
+
+  `bbdd` client is used to control the `bbdd` bridge in the same way as the
+  `bbdd` main daemon. It is also possible to attach to the bridge using the
+  `bbdd monitor` command and thus observe e.g. session status updates. The
+  commands that the bridge accepts have their limitations compared to the
+  daemon:
+
+  `stop`, `ping`
+  : Stop the bridge or probe its liveness.
+
+  `echo`
+  : Translated to `ECHO_REQUEST`, `ECHO_REPLY` and used to measure the wire
+    protocol one-way latency.
+
+  `session add`
+
+  : Translated to `DP_ADD_SESSION`, which can be used to both add a new session
+    and edit an existing one, using the discriminator as the key.
+
+  `session del`, `session stats`
+  : Require that exactly a sole discr parameter be given as query and are
+    translated to, respectively, `DP_DELETE_SESSION` and
+    `DP_REQUEST_SESSION_COUNTERS`. The session statistics received through
+    `BFD_SESSION_COUNTERS` are then translated back to the JRPC response.
+
+  `monitor`
+  : Allows observation of the bridge in exactly the same way as the main daemon.
+    The `ringbuf` topic produces no messages, otherwise the other topic publish
+    as expected.
+
+  No other commands are supported by the bridge.
+
+SEE ALSO
+========
+
+bbdd(8), bbdd-session(8)

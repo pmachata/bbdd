@@ -52,6 +52,9 @@ SYSTEMD_UNITS :=				\
 	$(OUTPUT)/bbdd.service			\
 	#
 MAN_PAGES :=					\
+	$(OUTPUT)/man/bbdd.8			\
+	$(OUTPUT)/man/bbdd-session.8		\
+	$(OUTPUT)/man/bbdd-bfdd.8		\
 	#
 EXTRA_CLEAN :=					\
 	$(OUTPUT)/config.h			\
@@ -72,7 +75,7 @@ DEP_DEPS :=					\
 # N.B. sort also makes the list unique.
 ALL_OBJECTS := $(sort $(foreach app,$(APPS),$($(app)-OBJECTS)) $(EXTRA_DEPS))
 ALL_DEPS := $(ALL_OBJECTS:%.o=%.dep)
-OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS)))
+OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS))) $(OUTPUT)/man/
 
 BUILT := $(APPS) $(SYSTEMD_UNITS) $(MAN_PAGES)
 
@@ -149,8 +152,9 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o
 	$(call msg,GEN-SKEL,$@)
 	$(Q)$(BPFTOOL) gen skeleton $< name bbdd_prog > $@
 
-$(MAN_PAGES): $(OUTPUT)/%: %.md | $(OUTPUT_DIRS)
-	pandoc --standalone --to man $< -o $@
+$(MAN_PAGES): $(OUTPUT)/%: $(OUTPUT)/%.md | $(OUTPUT_DIRS)
+	$(call msg,MAN,$@)
+	$(Q)pandoc --standalone --to man $< -o $@
 
 test: $(BUILT)
 	tests/run.sh
