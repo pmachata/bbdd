@@ -1670,8 +1670,8 @@ bbdd_d_hold_create(struct bbdd_d *d, struct bbdd_d_session *dsess, char **error)
 {
 	struct itimerspec ts = {
 		.it_value = {
-			.tv_sec  = dsess->hold_time_us / 1000000,
-			.tv_nsec = (dsess->hold_time_us % 1000000) * 1000,
+			.tv_sec  = dsess->hold_time_us / 1'000'000,
+			.tv_nsec = (dsess->hold_time_us % 1'000'000) * 1000,
 		},
 	};
 	struct bbdd_d_hold *hold;
