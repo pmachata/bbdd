@@ -292,7 +292,7 @@ hold_time_test()
 	local i
 
 	for ((i = 0; i < timeout - 1; i++)); do
-		session_state_check up 0 "$@"
+		BBDD_SESSION_WAIT_TIME=1 session_state_check up 0 "$@"
 	done
 
 	sleep 2
