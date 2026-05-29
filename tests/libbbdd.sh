@@ -96,19 +96,66 @@ Bbdd_session_get()
 	Bbdd --json session "$@" show | jq -r ".sessions.[]$key"
 }
 
-Bbdd_session_remote_state()
+Bbdd_session_state_is()
 {
-	Bbdd_session_get .state.local.state "$@"
+	local op=$1; shift
+	local what=$1; shift
+	local state
+
+	state=$(Bbdd_session_get .state.local.state "$@")
+	[ $state $op $what ]
+	if (($? != 0)); then
+		return 1
+	fi
+
+	state=$(Bbdd_session_get .state.remote.state "$@")
+	[ $state $op $what ]
+}
+
+Bbdd_session_bpf_state_is()
+{
+	local op=$1; shift
+	local what=$1; shift
+	local state
+	local state
+
+	state=$(Bbdd_session_get .state.bpf.bstate "$@")
+	[ $state $op $what ]
+}
+
+Bbdd_session_wait()
+{
+	slowwait ${BBDD_SESSION_WAIT_TIME-1} "$@"
 }
 
 Bbdd_session_wait_up()
 {
-	slowwait 1 eq val up , Bbdd_session_remote_state "$@"
+	Bbdd_session_wait Bbdd_session_state_is == up "$@"
 }
 
 Bbdd_session_wait_not_up()
 {
-	slowwait 1 not eq val up , Bbdd_session_remote_state "$@"
+	Bbdd_session_wait Bbdd_session_state_is != up "$@"
+}
+
+Bbdd_session_wait_bpf_stable()
+{
+	Bbdd_session_wait Bbdd_session_bpf_state_is == stable "$@"
+}
+
+Bbdd_session_wait_bpf_await_final()
+{
+	Bbdd_session_wait Bbdd_session_bpf_state_is == await-final "$@"
+}
+
+Bbdd_session_wait_bpf_await_non_final()
+{
+	Bbdd_session_wait Bbdd_session_bpf_state_is == await-non-final "$@"
+}
+
+Bbdd_session_wait_bpf_shutting_down()
+{
+	Bbdd_session_wait Bbdd_session_bpf_state_is == shutting-down "$@"
 }
 
 Bbdd_describe_env()
@@ -121,6 +168,11 @@ Bbdd_log_test()
 	log_test "$(Bbdd_describe_env)$1"
 }
 
+Bbdd_log_info()
+{
+	log_info "$(Bbdd_describe_env)$1"
+}
+
 session_state_check()
 {
 	local check=$1; shift
@@ -128,7 +180,7 @@ session_state_check()
 	local should_fail=$((!goal))
 
 	"Bbdd_session_wait_$check" "$@"
-	check_err_fail "$should_fail" $? "session up"
+	check_err_fail "$should_fail" $? "session $check"
 }
 
 session_state_test()
