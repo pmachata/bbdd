@@ -74,7 +74,7 @@ int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
 			      char **error);
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    const struct bbdd_d_session *dsess,
+			    struct bbdd_d_session *dsess,
 			    char **error);
 
 void bbdd_bpf_session_del(struct bbdd_bpf *bpf,

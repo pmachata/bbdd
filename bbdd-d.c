@@ -1355,25 +1355,6 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(vrf_table, vrf.table);
 
 #undef ASSIGN
-
-	if (dsess->local.flags.shutdown) {
-		/* RFC: 6.18.6: [Unless enabling session] Set bfd.SessionState
-		 * to AdminDown */
-		dsess->local.state.state = BBDD_BFD_PKT_STATE_ADMINDOWN;
-		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_ADMIN_DOWN;
-
-		/* After the session is set admin down, the daemon is not
-		 * allowed to process remote packets anymore. Let's put the
-		 * remote down by hand. */
-		dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
-		dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
-
-	} else if (dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
-		/* RFC: 6.18.6: If enabling session Set bfd.SessionState to
-		 * Down */
-		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
-		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
-	}
 }
 
 static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,

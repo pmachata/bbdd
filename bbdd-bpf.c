@@ -79,7 +79,7 @@ struct bbdd_bpf_session_data {
 
 struct bbdd_bpf_shwait {
 	struct bbdd_bpf *bpf;
-	const struct bbdd_d_session *dsess;
+	struct bbdd_d_session *dsess;
 	struct bbdd_bpf_session *bsess;
 	int timer_fd;
 };
@@ -843,7 +843,7 @@ error:
 }
 
 static int bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
-					  const struct bbdd_d_session *dsess,
+					  struct bbdd_d_session *dsess,
 					  struct bbdd_bpf_session *bsess,
 					  char **error);
 
@@ -880,7 +880,7 @@ static void bbdd_bpf_handle_packet_got_final(struct bbdd_bpf *bpf,
 
 static void
 bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
-				     const struct bbdd_d_session *dsess,
+				     struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess)
 {
 	char *error;
@@ -928,7 +928,7 @@ static int bbdd_bpf_shwait_timer_cb(struct bbdd_poll_ctx *pctx, short,
 				    void *data, char **)
 {
 	struct bbdd_bpf_shwait *shwait = data;
-	const struct bbdd_d_session *dsess = shwait->dsess;
+	struct bbdd_d_session *dsess = shwait->dsess;
 	struct bbdd_bpf_session *bsess = shwait->bsess;
 	struct bbdd_bpf *bpf = shwait->bpf;
 	uint64_t expirations;
@@ -943,7 +943,7 @@ static int bbdd_bpf_shwait_timer_cb(struct bbdd_poll_ctx *pctx, short,
 }
 
 static struct bbdd_bpf_shwait *
-bbdd_bpf_shwait_create(struct bbdd_bpf *bpf, const struct bbdd_d_session *dsess,
+bbdd_bpf_shwait_create(struct bbdd_bpf *bpf, struct bbdd_d_session *dsess,
 		       struct bbdd_bpf_session *bsess, char **error)
 {
 	uint32_t detect_time_us =
@@ -1001,7 +1001,7 @@ err:
 }
 
 static int bbdd_bpf_shwait_start(struct bbdd_bpf *bpf,
-				 const struct bbdd_d_session *dsess,
+				 struct bbdd_d_session *dsess,
 				 struct bbdd_bpf_session *bsess,
 				 char **error)
 {
@@ -1028,7 +1028,7 @@ bbdd_bpf_user_bdata(const struct bbdd_d_session *dsess)
 }
 
 static int bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
-					  const struct bbdd_d_session *dsess,
+					  struct bbdd_d_session *dsess,
 					  struct bbdd_bpf_session *bsess,
 					  char **error)
 {
@@ -1097,6 +1097,10 @@ static int bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
 		*bdata = udata;
 
 apply:
+	assert(stop_shwait + need_shwait <= 1);
+	assert(need_poll + need_shwait <= 1);
+	/* need_poll + stop_shwait can be 2 */
+
 	switch (bsess->bstate) {
 		int rc;
 
@@ -1110,6 +1114,12 @@ apply:
 		}
 		/* Fall through. */
 	case BBDD_BPF_SESSION_STATE_STABLE:
+		if (stop_shwait) {
+			/* RFC: 6.18.6: If enabling session Set bfd.SessionState to
+			 * Down */
+			dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
+			dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
+		}
 		if (need_poll) {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: timing change, await final",
 					    dsess->local.discr);
@@ -1126,12 +1136,24 @@ apply:
 					    dsess->local.discr);
 			bsess->dfr_data = udata;
 			bsess->bstate = BBDD_BPF_SESSION_STATE_SHUTTING_DOWN;
+
+			/* RFC: 6.18.6: [Unless enabling session] Set
+			 * bfd.SessionState to AdminDown */
+			dsess->local.state.state = BBDD_BFD_PKT_STATE_ADMINDOWN;
+			dsess->local.state.diag = BBDD_BFD_PKT_DIAG_ADMIN_DOWN;
+
+			/* After the session is set admin down, the daemon is
+			 * not allowed to process remote packets anymore. Let's
+			 * put the remote down by hand. */
+			dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
+			dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
+
 		}
 		break;
 
 	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
 	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
-		if (need_poll) {
+		if (need_poll || need_shwait || stop_shwait) {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: queueing change",
 					    dsess->local.discr);
 			bsess->qd_change = true;
@@ -2634,7 +2656,7 @@ int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
 }
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
-			    const struct bbdd_d_session *dsess,
+			    struct bbdd_d_session *dsess,
 			    char **error)
 {
 	uint32_t discr = dsess->local.discr;

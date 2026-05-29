@@ -29,17 +29,21 @@ sleep 5
 in_sockdir SD1 session_state_test up 1
 in_sockdir SD2 session_state_test up 1
 
+#
 # Test the poll sequence.
+#
 
 in_sockdir SD1 session_state_test bpf_stable 1
 
 in_sockdir SD1 Bbdd_log_info "Change parameters"
 in_sockdir SD1 Bbdd session set min-tx 300ms min-rx 300ms
-BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_await_final 1
+BBDD_SESSION_WAIT_TIME=1 in_sockdir SD1 session_state_test bpf_await_final 1
 BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_await_non_final 1
 BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_stable 1
 
+#
 # Test admin down
+#
 
 get_tx_packets()
 {
@@ -78,8 +82,33 @@ Bbdd_log_test "Traffic stops after shutdown eventually"
 in_sockdir SD1 session_state_test not_up 1
 in_sockdir SD2 session_state_test not_up 1
 
+#
+# Admin up
+#
+
 in_sockdir SD1 Bbdd_log_info "Set admin-up"
 in_sockdir SD1 Bbdd session set no shutdown
 sleep 5
 in_sockdir SD1 session_state_test up 1
 in_sockdir SD2 session_state_test up 1
+
+#
+# Interactions
+#
+
+in_sockdir SD1 Bbdd_log_info "Set admin-down & back up"
+
+in_sockdir SD1 Bbdd session set shutdown
+BBDD_SESSION_WAIT_TIME=1 in_sockdir SD1 session_state_test bpf_shutting_down 1
+in_sockdir SD1 Bbdd session set no shutdown
+BBDD_SESSION_WAIT_TIME=1 in_sockdir SD1 session_state_test bpf_shutting_down 0
+BBDD_SESSION_WAIT_TIME=5 in_sockdir SD1 session_state_test bpf_stable 1
+
+in_sockdir SD1 Bbdd_log_info "Enter poll sequence, then set admin-down"
+
+in_sockdir SD1 Bbdd session set min-tx 199ms min-rx 199ms
+BBDD_SESSION_WAIT_TIME=1 in_sockdir SD1 session_state_test bpf_await_final 1
+in_sockdir SD1 Bbdd session set shutdown
+BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_await_non_final 1
+BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_shutting_down 1
+BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_stable 1
