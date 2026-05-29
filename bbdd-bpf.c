@@ -1428,6 +1428,11 @@ bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
 		dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 		dsess->local.state.diag = BBDD_BFD_PKT_DIAG_TIME_EXPIRED;
 
+		/* Remote timed out, there aren't going to be arriving explicit
+		 * down packets, we need to do it ourselves. */
+		dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
+		dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_TIME_EXPIRED;
+
 		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 	}
 }

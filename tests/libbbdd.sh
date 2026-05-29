@@ -125,7 +125,7 @@ Bbdd_session_bpf_state_is()
 
 Bbdd_session_wait()
 {
-	slowwait ${BBDD_SESSION_WAIT_TIME-1} "$@"
+	slowwait ${BBDD_SESSION_WAIT_TIME-2} "$@"
 }
 
 Bbdd_session_wait_up()
