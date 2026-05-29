@@ -1417,6 +1417,22 @@ bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
 		return;
 	}
 
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		invalid_on_hold_abort(bsess);
+	case BBDD_BPF_SESSION_STATE_STABLE:
+		break;
+	case BBDD_BPF_SESSION_STATE_SHUTTING_DOWN:
+		/* The point of shwait is to give the remote end a chance to
+		 * react. Since the remote timed out, this became pointless. */
+		bbdd_bpf_shwait_stop(bpf, bsess);
+		/* Fall through. */
+	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+		bbdd_bpf_handle_packet_got_non_final(bpf, dsess, bsess);
+		break;
+	}
+
 	/* If Demand mode is not active, and a period of time equal to the
 	 * Detection Time passes without receiving a BFD Control packet
 	 * from the remote system, and bfd.SessionState is Init or Up, the

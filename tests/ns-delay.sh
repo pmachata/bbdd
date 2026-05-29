@@ -33,9 +33,9 @@ in_sockdir SD2 session_state_test up 1
 # Test the poll sequence.
 #
 
-in_sockdir SD1 session_state_test bpf_stable 1
+Bbdd_log_head "Poll sequence"
 
-in_sockdir SD1 Bbdd_log_info "Change parameters"
+in_sockdir SD1 session_state_test bpf_stable 1
 in_sockdir SD1 Bbdd session set min-tx 300ms min-rx 300ms
 BBDD_SESSION_WAIT_TIME=1 in_sockdir SD1 session_state_test bpf_await_final 1
 BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_await_non_final 1
@@ -45,6 +45,8 @@ BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_stable 1
 # Test admin down
 #
 
+Bbdd_log_head "Admin-down"
+
 get_tx_packets()
 {
 	in_sockdir SD1 Bbdd --json session stats |
@@ -53,7 +55,6 @@ get_tx_packets()
 
 tx_packets_0=$(get_tx_packets)
 
-in_sockdir SD1 Bbdd_log_info "Set admin-down"
 in_sockdir SD1 Bbdd session set shutdown
 BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_shutting_down 1
 BBDD_SESSION_WAIT_TIME=3 in_sockdir SD1 session_state_test bpf_stable 1
@@ -66,8 +67,14 @@ tx_packets_d=$((tx_packets_1 - tx_packets_0))
 # of v1 right now, we could first see a state up packet or few, followed by
 # these 6 admin down packets. But we are checking bbdd's own tx_packets counter,
 # which shows which packets have been sent, which is what we care about.
-((tx_packets_d >= 6 && tx_packets_d <= 8))
-check_err $? "Expected approximately 6 packets, got $tx_packets_d"
+#
+# However, the sequence could be cut short: when the remote end sees the admin
+# down packets, it sets the session down, starts sending in slow pace, the local
+# end times out, and the shutdown sequence is cut short. So guess we could see
+# about three transmissions before this happens.
+#
+((tx_packets_d >= 3 && tx_packets_d <= 7))
+check_err $? "Expected 3 to 7 packets, got $tx_packets_d"
 Bbdd_log_test "Traffic continues after shutdown for a bit"
 
 # At this point we shouldn't be sending anymore.
@@ -78,14 +85,15 @@ tx_packets_d=$((tx_packets_2 - tx_packets_1))
 check_err $? "Expected no more packets, got $tx_packets_d"
 Bbdd_log_test "Traffic stops after shutdown eventually"
 
-in_sockdir SD1 session_state_test not_up 1
+in_sockdir SD1 session_state_test local_admindown 1
 in_sockdir SD2 session_state_test not_up 1
 
 #
 # Admin up
 #
 
-in_sockdir SD1 Bbdd_log_info "Set admin-up"
+Bbdd_log_head "Admin-up"
+
 in_sockdir SD1 Bbdd session set no shutdown
 sleep 2
 in_sockdir SD1 session_state_test up 1
@@ -95,7 +103,7 @@ in_sockdir SD2 session_state_test up 1
 # Interactions
 #
 
-in_sockdir SD1 Bbdd_log_info "Set admin-down & back up"
+Bbdd_log_head "Set admin-down & back up"
 
 in_sockdir SD1 Bbdd session set shutdown
 in_sockdir SD1 session_state_test bpf_shutting_down 1
@@ -103,11 +111,35 @@ in_sockdir SD1 Bbdd session set no shutdown
 in_sockdir SD1 session_state_test bpf_shutting_down 0
 in_sockdir SD1 session_state_test bpf_stable 1
 
-in_sockdir SD1 Bbdd_log_info "Enter poll sequence, then set admin-down"
+Bbdd_log_head "Enter poll sequence, then set admin-down"
 
 in_sockdir SD1 Bbdd session set min-tx 199ms min-rx 199ms
 in_sockdir SD1 session_state_test bpf_await_final 1
 in_sockdir SD1 Bbdd session set shutdown
 in_sockdir SD1 session_state_test bpf_await_non_final 1
 in_sockdir SD1 session_state_test bpf_shutting_down 1
+in_sockdir SD1 session_state_test bpf_stable 1
+in_sockdir SD1 Bbdd session set no shutdown
+in_sockdir SD1 session_state_test up 1
+in_sockdir SD2 session_state_test up 1
+
+Bbdd_log_head "Enter poll sequence, then remote disappears"
+
+in_sockdir SD1 Bbdd session set min-tx 198ms min-rx 198ms
+in_sockdir SD1 session_state_test bpf_await_final 1
+in_sockdir SD2 Bbdd session del
+in_sockdir SD1 session_state_test not_up 1
+in_sockdir SD1 session_state_test bpf_stable 1
+
+Bbdd_log_head "Enter poll, set admin-down, then remote disappears"
+
+in_sockdir SD2 Bbdd session add dst $(Bbdd_IP 1) \
+				min-tx 200ms min-rx 200ms detect-mult 6
+in_sockdir SD1 session_state_test up 1
+in_sockdir SD2 session_state_test up 1
+in_sockdir SD1 Bbdd session set min-tx 197ms min-rx 197ms
+in_sockdir SD1 session_state_test bpf_await_final 1
+in_sockdir SD1 Bbdd session set shutdown
+in_sockdir SD2 Bbdd session del
+in_sockdir SD1 session_state_test local_admindown 1
 in_sockdir SD1 session_state_test bpf_stable 1

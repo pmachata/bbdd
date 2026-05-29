@@ -96,7 +96,7 @@ Bbdd_session_get()
 	Bbdd --json session "$@" show | jq -r ".sessions.[]$key"
 }
 
-Bbdd_session_state_is()
+Bbdd_session_local_state_is()
 {
 	local op=$1; shift
 	local what=$1; shift
@@ -104,12 +104,26 @@ Bbdd_session_state_is()
 
 	state=$(Bbdd_session_get .state.local.state "$@")
 	[ $state $op $what ]
-	if (($? != 0)); then
-		return 1
-	fi
+}
+
+Bbdd_session_remote_state_is()
+{
+	local op=$1; shift
+	local what=$1; shift
+	local state
 
 	state=$(Bbdd_session_get .state.remote.state "$@")
 	[ $state $op $what ]
+}
+
+Bbdd_session_state_is()
+{
+	local op=$1; shift
+	local what=$1; shift
+	local state
+
+	Bbdd_session_local_state_is $op $what "$@" && \
+		Bbdd_session_remote_state_is $op $what "$@"
 }
 
 Bbdd_session_bpf_state_is()
@@ -139,6 +153,16 @@ Bbdd_session_bpf_state_stable()
 Bbdd_session_wait()
 {
 	slowwait ${BBDD_SESSION_WAIT_TIME-2} "$@"
+}
+
+Bbdd_session_wait_local_down()
+{
+	Bbdd_session_wait Bbdd_session_local_state_is == down "$@"
+}
+
+Bbdd_session_wait_local_admindown()
+{
+	Bbdd_session_wait Bbdd_session_local_state_is == admindown "$@"
 }
 
 Bbdd_session_wait_up()
@@ -184,6 +208,13 @@ Bbdd_log_test()
 Bbdd_log_info()
 {
 	log_info "$(Bbdd_describe_env)$1"
+}
+
+Bbdd_log_head()
+{
+	echo
+	Bbdd_log_info "$@"
+	echo
 }
 
 session_state_check()
