@@ -737,6 +737,11 @@ Ip()
 	$(nspfx) ip "$@"
 }
 
+Tc()
+{
+	$(nspfx) tc "$@"
+}
+
 Sysctl()
 {
 	$(nspfx) sysctl "$@"

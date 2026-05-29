@@ -12,6 +12,7 @@ tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 	vrf-bridge4.sh
 	vrf-bridge6.sh
 	vrf-ifbound.sh
+	ns-delay.sh
 	err.sh
 	cli.sh
 }"
