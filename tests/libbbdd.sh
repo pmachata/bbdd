@@ -117,10 +117,23 @@ Bbdd_session_bpf_state_is()
 	local op=$1; shift
 	local what=$1; shift
 	local state
-	local state
 
 	state=$(Bbdd_session_get .state.bpf.bstate "$@")
 	[ $state $op $what ]
+}
+
+Bbdd_session_bpf_state_stable()
+{
+	local state
+
+	Bbdd_session_bpf_state_is == stable "$@"
+	if (($? != 0)); then
+		return 1
+	fi
+
+	# When the state is stable we also shouldn't be seeing qd_timing.
+	state=$(Bbdd_session_get .state.bpf.qd_timing "$@")
+	[ $state != true ]
 }
 
 Bbdd_session_wait()
@@ -140,7 +153,7 @@ Bbdd_session_wait_not_up()
 
 Bbdd_session_wait_bpf_stable()
 {
-	Bbdd_session_wait Bbdd_session_bpf_state_is == stable "$@"
+	Bbdd_session_wait Bbdd_session_bpf_state_stable "$@"
 }
 
 Bbdd_session_wait_bpf_await_final()

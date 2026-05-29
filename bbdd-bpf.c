@@ -893,11 +893,12 @@ bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
 	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
 
 	if (bsess->qd_change) {
-		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: queued timing, await final",
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: queued change",
 				    dsess->local.discr);
+		bsess->qd_change = false;
 		rc = bbdd_bpf_handle_session_update(bpf, dsess, bsess, &error);
 		if (rc != 0)
-			bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "session discr %u: handle qd_change",
+			bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "session discr %u: handling qd_change",
 					 dsess->local.discr);
 	} else {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: stable",
