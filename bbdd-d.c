@@ -91,36 +91,7 @@ struct bbdd_d {
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-void bbdd_d_handle_ping(struct bbdd_sock *peer,
-			struct json_object *params_obj,
-			struct json_object *id)
-{
-	struct json_object *obj;
-	char *error;
-	int rc;
-
-	obj = bbdd_jrpc_new_object(id);
-	if (obj == NULL)
-		return;
-
-	rc = json_object_object_add(obj, "result", params_obj);
-	if (rc != 0)
-		goto put_obj;
-	json_object_get(params_obj);
-
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
-
-	json_object_put(obj);
-	return;
-
-put_obj:
-	json_object_put(obj);
-	bbdd_util_jrpc_respond_memerr(peer, id);
-}
-
-static void bbdd_d_handle_echo(struct bbdd_sock *peer,
+void bbdd_d_handle_echo(struct bbdd_sock *peer,
 			       struct json_object *params_obj,
 			       struct json_object *id)
 {
@@ -132,8 +103,6 @@ static void bbdd_d_handle_echo(struct bbdd_sock *peer,
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	struct json_object *result;
-	struct json_object *obj;
 	uint64_t reply_ts;
 	uint64_t ts;
 	char *error;
@@ -147,34 +116,7 @@ static void bbdd_d_handle_echo(struct bbdd_sock *peer,
 	ts = json_object_get_uint64(values[pol_ts]);
 	reply_ts = bbdd_util_now();
 
-	result = json_object_new_object();
-	if (result == NULL)
-		goto memerr;
-
-	if (bbdd_jrpc_append_uint64(result, "ts", ts) ||
-	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
-		goto put_result;
-
-	obj = bbdd_jrpc_new_object(id);
-	if (obj == NULL)
-		goto put_result;
-
-	if (bbdd_jrpc_append_obj(obj, "result", &result) != 0)
-		goto put_obj;
-
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
-
-	json_object_put(obj);
-	return;
-
-put_obj:
-	json_object_put(obj);
-put_result:
-	json_object_put(result);
-memerr:
-	bbdd_util_jrpc_respond_memerr(peer, id);
+	bbdd_jrpc_respond_echo(peer, id, ts, reply_ts);
 }
 
 void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
@@ -2227,22 +2169,23 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 	return bbdd_d_bfdd_handle_add_session_vrf(d, &csess, error);
 }
 
-static int __bbdd_d_bfdd_check_length(struct bbdd_d *d,
-				      unsigned int length,
-				      unsigned int exp_len,
-				      const char *where,
-				      char **error)
+static int
+__bbdd_d_bfdd_check_length(struct bbdd_d_global_diag_stats *diag_stats,
+			   unsigned int length,
+			   unsigned int exp_len,
+			   const char *where,
+			   char **error)
 {
 	if (length == exp_len)
 		return 0;
 
-	++d->diag_stats.dp_invalid_message_length;
+	++diag_stats->dp_invalid_message_length;
 	bbdd_util_fmterr(error, "%s: Invalid length: got %u, expected %u",
 			 where, length, exp_len);
 	return -EINVAL;
 }
 
-#define bbdd_d_bfdd_check_length(D, MSG, PAYLOAD, WHERE, ERROR)		\
+#define bbdd_d_bfdd_check_length(DIAG, MSG, PAYLOAD, WHERE, ERROR)	\
 	({								\
 		const struct bfddp_message *_M = (MSG);			\
 		enum bfddp_message_type _BMT = bbdd_ntoh16(_M->header.type); \
@@ -2251,7 +2194,8 @@ static int __bbdd_d_bfdd_check_length(struct bbdd_d *d,
 			       sizeof(_M->data PAYLOAD);		\
 									\
 		assert(_BMT == WHERE);					\
-		__bbdd_d_bfdd_check_length((D), _AL, _EL, #WHERE, (ERROR)); \
+		__bbdd_d_bfdd_check_length((DIAG), _AL, _EL, #WHERE,	\
+					   (ERROR));			\
 	})
 
 static int
@@ -2262,7 +2206,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 	uint32_t discr;
 	int rc;
 
-	rc = bbdd_d_bfdd_check_length(d, msg, .session,
+	rc = bbdd_d_bfdd_check_length(&d->diag_stats, msg, .session,
 				      DP_DELETE_SESSION, error);
 	if (rc != 0)
 		return rc;
@@ -2287,7 +2231,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	char *error2;
 	int rc1, rc2;
 
-	rc1 = bbdd_d_bfdd_check_length(d, msg, .counters_req,
+	rc1 = bbdd_d_bfdd_check_length(&d->diag_stats, msg, .counters_req,
 				       DP_REQUEST_SESSION_COUNTERS, error1);
 	if (rc1 != 0)
 		return rc1;
@@ -2330,17 +2274,19 @@ reply:
 	return bbdd_util_pickerr(rc1, error1, rc2, &error2);
 }
 
-static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d *d,
-					   const struct bfddp_message *msg,
-					   char **error)
+int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
+				    struct bbdd_d_global_diag_stats *diag_stats,
+				    const struct bfddp_message *msg,
+				    char **error)
 {
 	int rc;
 
-	rc = bbdd_d_bfdd_check_length(d, msg, .echo, ECHO_REQUEST, error);
+	rc = bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
+				      error);
 	if (rc != 0)
 		return rc;
 
-	return bbdd_bfdd_reply_echo(d->bfdd, bbdd_ntoh16(msg->header.id),
+	return bbdd_bfdd_reply_echo(bfdd, bbdd_ntoh16(msg->header.id),
 				    &msg->data.echo, error);
 }
 
@@ -2380,13 +2326,15 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		break;
 
 	case ECHO_REQUEST:
-		rc = bbdd_d_bfdd_handle_echo_request(d, msg, &error);
+		rc = bbdd_d_bfdd_handle_echo_request(d->bfdd, &d->diag_stats,
+						     msg, &error);
 		break;
 
-	/* We send no ECHO_REQUESTS ourselves, so we shouldn't be getting
-	 * ECHO_REPLY. The rest are outgoing messages that BFDD shouldn't be
-	 * sending to us. */
 	case ECHO_REPLY:
+		bbdd_bfdd_echo_handle_reply(d->bfdd, msg);
+		return;
+
+	/* Outgoing messages that BFDD shouldn't be sending to us. */
 	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
 	/* Whatever this is. */
@@ -2711,10 +2659,10 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(d->pctx, peer, params_obj, id);
-	else if (strcmp(method, "ping") == 0)
-		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
+	else if (strcmp(method, "bfdd-echo") == 0)
+		bbdd_bfdd_echo_handle_start(d->bfdd, peer, id);
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(d, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)

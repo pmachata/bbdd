@@ -35,7 +35,7 @@ Bbdd_stop()
 {
 	local pid=$1; shift
 
-	Bbdd -q ping
+	Bbdd -q echo
 	if [[ $? != 0 ]]; then
 		echo "bbdd already dead" >/dev/stderr
 		return
@@ -47,7 +47,7 @@ Bbdd_stop()
 		return
 	fi
 
-	slowwait 1 not Bbdd -q ping
+	slowwait 1 not Bbdd -q echo
 
 	if [[ $? != 0 ]]; then
 		echo "timeout waiting for bbdd to stop, killing" >/dev/stderr
@@ -57,7 +57,7 @@ Bbdd_stop()
 
 Bbdd_wait()
 {
-	slowwait 5 Bbdd -q ping
+	slowwait 5 Bbdd -q echo
 
 	if [[ $? != 0 ]]; then
 		echo "failed to start bbdd" >/dev/stderr
@@ -269,7 +269,7 @@ session_value_check()
 	check_err $? "$(Bbdd_describe_env)session value $key is $out, expected $value"
 }
 
-echo_test()
+__echo_test()
 {
 	local t0
 	local t1
@@ -278,10 +278,10 @@ echo_test()
 	local resp
 
 	t0=$(now)
-	resp=$(Bbdd --json echo)
+	resp=$(Bbdd --json "$@")
 	rc=$?
 	t1=$(now)
-	check_err "$rc" "bbdd echo exit code is $rc, 0 expected"
+	check_err "$rc" "bbdd bfdd echo exit code is $rc, 0 expected"
 
 	reported_lat=$(echo "$resp" | jq '.reply_ts - .ts')
 	measured_lat=$((t1 - t0))
@@ -296,6 +296,16 @@ echo_test()
 	check_err $? "reported latency ($reported_lat) suspiciously high (measured $measured_lat)"
 
 	Bbdd_log_test "echo ($reported_lat us)"
+}
+
+echo_test()
+{
+	__echo_test echo
+}
+
+bfdd_echo_test()
+{
+	__echo_test bfdd echo
 }
 
 packet_size_test()

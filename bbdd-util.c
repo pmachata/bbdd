@@ -278,6 +278,47 @@ put_obj:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
+void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
+			    struct json_object *id,
+			    uint64_t ts, uint64_t reply_ts)
+{
+	struct json_object *result;
+	struct json_object *resp;
+	char *error;
+	int rc;
+
+	resp = bbdd_jrpc_new_object(id);
+	if (resp == NULL)
+		goto err_memerr;
+
+	result = json_object_new_object();
+	if (result == NULL)
+		goto put_resp;
+
+	if (bbdd_jrpc_append_uint64(result, "ts", ts) ||
+	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
+		goto put_result;
+
+	rc = bbdd_jrpc_append_obj(resp, "result", &result);
+	if (rc != 0)
+		goto put_result;
+
+	rc = bbdd_util_jrpc_send(peer, resp, &error);
+	if (rc != 0)
+		// xxx monitor
+		bbdd_util_printerr(&error, "Failed to send echo response");
+
+	json_object_put(resp);
+	return;
+
+put_result:
+	json_object_put(result);
+put_resp:
+	json_object_put(resp);
+err_memerr:
+	bbdd_util_jrpc_respond_memerr(peer, id);
+}
+
 struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af)
 {
 	struct json_object *obj;

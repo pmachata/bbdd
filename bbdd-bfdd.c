@@ -17,6 +17,12 @@
 #include "bbdd-util.h"
 #include "bfddp.h"
 
+/* Tracking an in-flight bfdd-echo until ECHO_REPLY arrives. */
+struct bbdd_bfdd_echo {
+	struct bbdd_sock peer;
+	struct json_object *id;
+};
+
 struct bbdd_bfdd {
 	struct bfddp_ctx *bctx;
 	int fd;
@@ -24,6 +30,7 @@ struct bbdd_bfdd {
 	struct bbdd_mon *mon;
 
 	struct bbdd_bfdd_cbs cbs;
+	struct bbdd_bfdd_echo *echo; /* non-NULL when ECHO_REQUEST pending. */
 };
 
 static int bbdd_bfdd_handle_messages(struct bbdd_bfdd *bfdd, char **error)
@@ -349,6 +356,90 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
+static struct bbdd_bfdd_echo *bbdd_bfdd_echo_alloc(struct bbdd_sock *peer,
+						   struct json_object *id,
+						   char **error)
+{
+	struct bbdd_bfdd_echo *echo;
+
+	echo = malloc(sizeof(*echo));
+	if (echo == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		return NULL;
+	}
+
+	*echo = (struct bbdd_bfdd_echo) {
+		.peer = *peer,
+		.id = json_object_get(id),
+	};
+
+	return echo;
+}
+
+static void bbdd_bfdd_echo_free(struct bbdd_bfdd_echo *echo)
+{
+	json_object_put(echo->id);
+	free(echo);
+}
+
+void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
+				 struct json_object *id)
+{
+	struct bbdd_bfdd_echo *echo;
+	uint64_t ts;
+	char *error;
+	int rc;
+
+	if (bfdd == NULL) {
+		bbdd_util_jrpc_respond_interr(peer, id,
+					      "No BFDD client connected");
+		return;
+	}
+
+	if (bfdd->echo != NULL) {
+		bbdd_util_jrpc_respond_interr(peer, id,
+					      "Echo already pending");
+		return;
+	}
+
+	echo = bbdd_bfdd_echo_alloc(peer, id, &error);
+	if (echo == NULL)
+		goto err;
+
+	ts = bbdd_util_now();
+	rc = bbdd_bfdd_send_echo(bfdd, 1, ts, &error);
+	if (rc != 0)
+		goto echo_free;
+
+	bfdd->echo = echo;
+	return;
+
+echo_free:
+	bbdd_bfdd_echo_free(echo);
+err:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+}
+
+static void bbdd_bfdd_echo_stop(struct bbdd_bfdd *bfdd)
+{
+	bbdd_bfdd_echo_free(bfdd->echo);
+	bfdd->echo = NULL;
+}
+
+void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
+				 const struct bfddp_message *msg)
+{
+	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
+	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
+
+	if (bfdd->echo == NULL)
+		return;
+
+	bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
+			       bfdd_time, dp_time);
+	bbdd_bfdd_echo_stop(bfdd);
+}
+
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
 			 const struct bfddp_echo *in_echo, char **error)
@@ -576,6 +667,12 @@ int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 {
+	if (bfdd->echo != NULL) {
+		bbdd_util_jrpc_respond_interr(&bfdd->echo->peer, bfdd->echo->id,
+					      "BFDD client disconnect");
+		bbdd_bfdd_echo_stop(bfdd);
+	}
+
 	bbdd_bfdd_poll_unset(bfdd);
 	bfddp_free(bfdd->bctx);
 	if (bfdd->cbs.connect_free_cb != NULL)

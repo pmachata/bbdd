@@ -28,7 +28,7 @@ static int bbdd_help(void)
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
 	     "                    -V | --version | --sockdir <DIR> | --json |\n"
 	     "                    -N | -t | --timestamp ]\n"
-	     "	     COMMAND := { start | stop | ping | session | global | bfdd | monitor }\n"
+	     "	     COMMAND := { start | stop | echo | session | global | bfdd | monitor }\n"
 	     "\n"
 	     "  --json         show JSON result object instead of formatting it\n"
 	     "  -N             suppress human-readable unit conversion (show raw microseconds)\n"
@@ -49,9 +49,6 @@ static int bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 	} else if (strcmp(*argv, "stop") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_stop(argc, argv);
-	} else if (strcmp(*argv, "ping") == 0) {
-		NEXT_ARG_FWD();
-		return bbdd_c_ping(argc, argv);
 	} else if (strcmp(*argv, "echo") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_echo(argc, argv);

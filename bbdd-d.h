@@ -9,6 +9,7 @@
 
 #include "bbdd-c.i"
 #include "bbdd-bpf.i"
+#include "bbdd-bfdd.i"
 #include "bbdd-mon.i"
 #include "bbdd-nl.i"
 #include "bbdd-poll.i"
@@ -97,13 +98,18 @@ void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
 			struct bbdd_sock *peer,
 			struct json_object *params_obj,
 			struct json_object *id);
-void bbdd_d_handle_ping(struct bbdd_sock *peer,
+void bbdd_d_handle_echo(struct bbdd_sock *peer,
 			struct json_object *params_obj,
 			struct json_object *id);
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 				     struct bbdd_sock *peer,
 				     struct json_object *params_obj,
 				     struct json_object *id);
+
+int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
+				    struct bbdd_d_global_diag_stats *diag_stats,
+				    const struct bfddp_message *msg,
+				    char **error);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);

@@ -15,6 +15,7 @@
 #include "bfddp_packet.i"
 #include "bbdd-poll.i"
 #include "bbdd-prog-stat.i"
+#include "bbdd-sock.i"
 
 #define BBDD_BFDD_DEFAULT_ADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
@@ -45,6 +46,11 @@ struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
+
+void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
+				 struct json_object *id);
+void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
+				 const struct bfddp_message *msg);
 
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 			uint64_t bfdd_time_us, char **error);

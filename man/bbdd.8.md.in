@@ -11,7 +11,7 @@ SYNOPSIS
 `bbdd -V`
 
 `bbdd [-v | -q] [-N] [-t | --timestamp] [--json] [--sockdir <PATH>]
-{start | stop | ping | echo | session | global | bfdd | monitor | help}`
+{start | stop | echo | session | global | bfdd | monitor | help}`
 
 DESCRIPTION
 ===========
@@ -94,14 +94,10 @@ COMMANDS
 
 : Stop the running daemon.
 
-`ping`
-
-: Check the liveness of the daemon.
-
 `echo`
 
-: Measure one-way latency to the daemon. This is the amount of time it
-  takes to accept the echo request over the socket, parse it, dispatch it
+: Check liveness of the daemon and measure one-way JRPC latency — the time
+  it takes to accept the echo request over the socket, parse it, dispatch it
   and act on it.
 
 `session`

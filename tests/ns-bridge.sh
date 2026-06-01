@@ -13,6 +13,8 @@ in_sockdir SD2 in_ns NS2 adf_Bbdd_start
 in_sockdir SDb in_ns NS2 adf_Bbdd_bridge_start
 
 in_sockdir SD2 Bbdd_bfdd_connect SDb
+in_sockdir SD2 bfdd_echo_test
+in_sockdir SDb bfdd_echo_test
 
 in_sockdir SD1 Bbdd session add \
 	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3 \
@@ -64,4 +66,3 @@ cpi_test
 sleep 1 # Collect some more traffic -- the CPI test already slept 1s
 
 in_sockdir SDb packet_size_test discr 2
-in_sockdir SDb echo_test

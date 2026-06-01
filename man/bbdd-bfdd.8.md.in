@@ -66,6 +66,12 @@ COMMANDS
   Exits with status 0 if connected, 1 if not. With `-v`, also prints a
   human-readable `connected: yes` or `connected: no` message.
 
+`bfdd echo`
+
+: Issue `ECHO_REQUEST`, wait for `ECHO_REPLY`, and translate the timestamps
+  within to JRPC response. Can be used to measure the wire protocol one-way
+  latency. Only available when a BFDD client is connected to the bridge.
+
 `bridge start [TYPE:ADDRESS[:PORT]]`
 
 : Start a BFDD bridge. The bridge is a separate process that listens on the
@@ -82,15 +88,14 @@ COMMANDS
   commands that the bridge accepts have their limitations compared to the
   daemon:
 
-  `stop`, `ping`
-  : Stop the bridge or probe its liveness.
+  `stop`
+  : Stop the bridge.
 
   `echo`
-  : Translated to `ECHO_REQUEST`, `ECHO_REPLY` and used to measure the wire
-    protocol one-way latency.
+  : Measure one-way JRPC latency to the bridge, same as `bbdd echo` to the
+    main daemon.
 
   `session add`
-
   : Translated to `DP_ADD_SESSION`, which can be used to both add a new session
     and edit an existing one, using the discriminator as the key.
 

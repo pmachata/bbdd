@@ -200,87 +200,6 @@ static int bbdd_c_cmd_noargs(int argc, char **argv, void (*help_cb)(void))
 	return 0;
 }
 
-static void bbdd_c_ping_help(void)
-{
-	fprintf(stderr,
-		"Usage: bbdd ping\n"
-		"\n"
-	);
-}
-
-static int bbdd_c_ping_jrpc(void)
-{
-	struct json_object *response;
-	struct json_object *request;
-	struct json_object *result;
-	const int id = 1;
-	int err;
-	int nr;
-	int rc;
-	int r;
-
-	request = bbdd_jrpc_new_request(id, "ping");
-	if (request == NULL)
-		return -1;
-
-	srand((unsigned int)time(NULL));
-	r = rand();
-	rc = bbdd_jrpc_append_int(request, "params", r);
-	if (rc != 0) {
-		fprintf(stderr, "Failed to form a request object.\n");
-		err = -1;
-		goto put_request;
-	}
-
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
-	}
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_int,
-					    &result)) {
-		err = -1;
-		goto put_response;
-	}
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
-	nr = json_object_get_int(result);
-	if (nr != r) {
-		fprintf(stderr, "Unexpected ping response: sent %d, got %d.\n",
-			r, nr);
-		err = -1;
-		goto put_result;
-	}
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bbdd is alive\n");
-	err = 0;
-
-put_result:
-	json_object_put(result);
-put_response:
-	json_object_put(response);
-put_request:
-	json_object_put(request);
-	return err;
-}
-
-int bbdd_c_ping(int argc, char **argv)
-{
-	int err;
-
-	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_ping_help);
-	if (err != 0)
-		return err;
-
-	return bbdd_c_ping_jrpc();
-}
-
 static void bbdd_c_echo_help(void)
 {
 	fprintf(stderr,
@@ -289,7 +208,7 @@ static void bbdd_c_echo_help(void)
 	);
 }
 
-static int bbdd_c_echo_jrpc(void)
+static int bbdd_c_echo_jrpc(const char *method)
 {
 	enum {
 		pol_ts,
@@ -315,7 +234,7 @@ static int bbdd_c_echo_jrpc(void)
 	char *error;
 	int rc;
 
-	request = bbdd_jrpc_new_request(id, "echo");
+	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL)
 		return -1;
 
@@ -380,7 +299,7 @@ int bbdd_c_echo(int argc, char **argv)
 	if (err != 0)
 		return err;
 
-	return bbdd_c_echo_jrpc();
+	return bbdd_c_echo_jrpc("echo");
 }
 
 static void bbdd_c_stop_help(void)
@@ -2260,10 +2179,23 @@ put_request:
 	return err;
 }
 
+static int bbdd_c_bfdd_echo(int argc, char **argv)
+{
+	int err;
+
+	err = bbdd_c_cmd_noargs(argc, argv, NULL);
+	if (err != 0) {
+		fprintf(stderr, "Usage: bbdd bfdd echo\n\n");
+		return err;
+	}
+
+	return bbdd_c_echo_jrpc("bfdd-echo");
+}
+
 static void bbdd_c_bfdd_help(void)
 {
 	fprintf(stderr,
-		"Usage: bbdd bfdd { bridge | connect | connected | disconnect | help }\n"
+		"Usage: bbdd bfdd { bridge | connect | connected | disconnect | echo | help }\n"
 		"\n"
 	);
 }
@@ -2294,6 +2226,9 @@ int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 	} else if (strcmp(*argv, "disconnect") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd_disconnect(argc, argv);
+	} else if (strcmp(*argv, "echo") == 0) {
+		NEXT_ARG_FWD();
+		return bbdd_c_bfdd_echo(argc, argv);
 	}
 
 	fprintf(stderr, "What is \"%s\"?\n", *argv);

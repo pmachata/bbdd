@@ -26,11 +26,6 @@
 #include "bfddp.h"
 #include "bfddp_packet.h"
 
-struct bbdd_br_echo {
-	struct bbdd_sock peer;
-	struct json_object *id;
-};
-
 struct bbdd_br_stats {
 	struct bbdd_sock peer;
 	struct json_object *id;
@@ -45,41 +40,10 @@ struct bbdd_br {
 	struct bbdd_sock bfdd_server;
 	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
 
-	struct bbdd_br_echo *echo; /* non-NULL = echo awaiting ECHO_REPLY */
 	struct bbdd_br_stats *stats; /* non-NULL = session-stats awaiting
 				      * BFD_SESSION_COUNTERS */
+	struct bbdd_d_global_diag_stats diag_stats;
 };
-
-static struct bbdd_br_echo *bbdd_br_echo_alloc(struct bbdd_sock *peer,
-					       struct json_object *id,
-					       char **error)
-{
-	struct bbdd_br_echo *echo;
-
-	echo = malloc(sizeof(*echo));
-	if (echo == NULL) {
-		bbdd_util_fmterr(error, "Could not allocate echo context: %m");
-		return NULL;
-	}
-
-	*echo = (struct bbdd_br_echo) {
-		.peer = *peer,
-		.id = json_object_get(id),
-	};
-	return echo;
-}
-
-static void bbdd_br_echo_free(struct bbdd_br_echo *echo)
-{
-	json_object_put(echo->id);
-	free(echo);
-}
-
-static void bbdd_br_echo_close(struct bbdd_br_echo *echo, const char *msg)
-{
-	bbdd_util_jrpc_respond_interr(&echo->peer, echo->id, msg);
-	bbdd_br_echo_free(echo);
-}
 
 static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
 						  struct json_object *id,
@@ -122,61 +86,10 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	bbdd_bfdd_close(br->bfdd);
 	br->bfdd = NULL;
 
-	if (br->echo != NULL) {
-		bbdd_br_echo_close(br->echo, "BFDD client disconnect");
-		br->echo = NULL;
-	}
-
 	if (br->stats != NULL) {
 		bbdd_br_stats_close(br->stats, "BFDD client disconnect");
 		br->stats = NULL;
 	}
-}
-
-static void bbdd_br_bfdd_handle_echo_reply(struct bbdd_br *br,
-					   const struct bfddp_message *msg)
-{
-	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
-	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
-	struct json_object *result;
-	struct json_object *resp;
-	char *error;
-	int rc;
-
-	if (br->echo == NULL)
-		return;
-
-	resp = bbdd_jrpc_new_object(br->echo->id);
-	if (resp == NULL)
-		goto err_memerr;
-
-	result = json_object_new_object();
-	if (result == NULL)
-		goto put_resp;
-
-	if (bbdd_jrpc_append_uint64(result, "ts", bfdd_time) ||
-	    bbdd_jrpc_append_uint64(result, "reply_ts", dp_time))
-		goto put_result;
-
-	rc = bbdd_jrpc_append_obj(resp, "result", &result);
-	if (rc != 0)
-		goto put_result;
-
-	rc = bbdd_util_jrpc_send(&br->echo->peer, resp, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to send ping response");
-	json_object_put(resp);
-	goto out;
-
-put_result:
-	json_object_put(result);
-put_resp:
-	json_object_put(resp);
-err_memerr:
-	bbdd_util_jrpc_respond_memerr(&br->echo->peer, br->echo->id);
-out:
-	bbdd_br_echo_free(br->echo);
-	br->echo = NULL;
 }
 
 static int bbdd_br_jrpc_dissect_select_discr(struct json_object *select_obj,
@@ -385,58 +298,6 @@ static void bbdd_br_handle_session_del(struct bbdd_br *br, struct bbdd_sock *pee
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
-static void bbdd_br_handle_echo(struct bbdd_br *br, struct bbdd_sock *peer,
-				struct json_object *params_obj,
-				struct json_object *id)
-{
-	enum {
-		pol_ts,
-	};
-	struct bbdd_jrpc_policy policy[] = {
-		[pol_ts] = { .key = "ts", .type = json_type_int, .required = true },
-	};
-	struct json_object *values[ARRAY_SIZE(policy)] = {};
-	bool seen[ARRAY_SIZE(policy)] = {};
-	uint64_t ts;
-	char *error;
-	int rc;
-
-	if (br->bfdd == NULL)
-		return bbdd_util_jrpc_respond_interr(peer, id,
-						     "No BFDD client connected");
-
-	if (br->echo != NULL)
-		return bbdd_util_jrpc_respond_interr(peer, id,
-						     "Echo already pending");
-
-	/* Parse the request for validation's sake, but we ignore the timestamp
-	 * and use our own. The goal here is to measure latency from the bridge
-	 * to the daemon, not the overall latency of the CLI-bridge-daemon
-	 * system. Bridge performance is not interesting. */
-
-	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
-			       ARRAY_SIZE(policy), &error);
-	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
-
-	br->echo = bbdd_br_echo_alloc(peer, id, &error);
-	if (br->echo == NULL)
-		goto err;
-
-	ts = bbdd_util_now();
-	rc = bbdd_bfdd_send_echo(br->bfdd, 1, ts, &error);
-	if (rc != 0)
-		goto echo_free;
-
-	return;
-
-echo_free:
-	bbdd_br_echo_free(br->echo);
-	br->echo = NULL;
-err:
-	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
-}
-
 static void bbdd_br_handle_session_stats(struct bbdd_br *br,
 					 struct bbdd_sock *peer,
 					 struct json_object *params_obj,
@@ -492,10 +353,10 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(br->pctx, peer, params_obj, id);
-	else if (strcmp(method, "ping") == 0)
-		bbdd_d_handle_ping(peer, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
-		bbdd_br_handle_echo(br, peer, params_obj, id);
+		bbdd_d_handle_echo(peer, params_obj, id);
+	else if (strcmp(method, "bfdd-echo") == 0)
+		bbdd_bfdd_echo_handle_start(br->bfdd, peer, id);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_br_handle_session_add(br, peer, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)
@@ -558,9 +419,10 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 {
 	enum bfddp_message_type bmt;
 	char *error;
+	int rc;
 
 	if (msg->header.version != 1) {
-		bbdd_util_fmterr(&error, "bfdd: Wrong message version number %d",
+		bbdd_util_fmterr(&error, "Wrong message version number %d",
 				 msg->header.version);
 		goto senderr;
 	}
@@ -570,18 +432,24 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {
 	case ECHO_REPLY:
-		return bbdd_br_bfdd_handle_echo_reply(br, msg);
+		return bbdd_bfdd_echo_handle_reply(br->bfdd, msg);
 	case BFD_SESSION_COUNTERS:
 		return bbdd_br_bfdd_handle_session_counters(br, msg);
 	case BFD_STATE_CHANGE:
 		return bbdd_br_bfdd_handle_state_change(br, msg);
 	case ECHO_REQUEST:
+		rc = bbdd_d_bfdd_handle_echo_request(br->bfdd, &br->diag_stats,
+						     msg, &error);
+		if (rc != 0)
+			goto senderr;
+		return;
+
 	case DP_ADD_SESSION:
 	case DP_DELETE_SESSION:
 	case DP_REQUEST_SESSION_COUNTERS:
 	default:
-		bbdd_util_fmterr(&error, "bfdd: Invalid message type %d", bmt);
-		goto senderr;
+		bbdd_util_fmterr(&error, "Invalid message type %d", bmt);
+		break;
 	}
 
 senderr:
