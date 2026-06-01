@@ -1,170 +1,153 @@
-BPFTOOL ?= bpftool
-CLANG ?= clang
-LLVM_STRIP ?= llvm-strip
-LIBBPF ?= -lbpf
-LIBMNL ?= -lmnl
-COVERAGE ?= 0
+# SPDX-License-Identifier: GPL-2.0
 
-ifeq ($(V),1)
-	Q =
-	NQ = @
-	msg =
-else
-	Q = @
-	NQ =
-	msg = @printf '  %-8s %s%s\n'					\
-		      "$(1)"						\
-		      "$(patsubst $(abspath $(OUTPUT))/%,%,$(2))"	\
-		      "$(if $(3), $(3))";
-	MAKEFLAGS += --no-print-directory
-endif
+# ── Installation directories (GNU coding standards) ──────────────────────────
 
-OUTPUT := .output
-INCLUDES := -iquote $(OUTPUT)/src
+PREFIX          := /usr/local
+BINDIR          := $(PREFIX)/bin
+MANDIR          := $(PREFIX)/share/man
+SYSCONFDIR      := $(PREFIX)/etc
+RUNSTATEDIR     := /run
+DEFAULT_SOCKDIR := $(RUNSTATEDIR)/bbdd
 
-WARN_CFLAGS = -Wall -Wunused
-CFLAGS := -g $(WARN_CFLAGS)
+# ── Directories ───────────────────────────────────────────────────────────────
+
+O   := .output
+SRC := src
+MAN := man
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
+
+CC        := gcc
+CLANG     := clang
+LLVM_STRIP := llvm-strip
+BPFTOOL   := bpftool
+PANDOC    := pandoc
+GCOVR     := gcovr
+INSTALL   := install
+
+# ── Flags ─────────────────────────────────────────────────────────────────────
+
+PKG_CFLAGS := $(shell pkg-config --cflags libbpf json-c libmnl)
+PKG_LIBS   := $(shell pkg-config --libs   libbpf json-c libmnl)
+
+WARN_CFLAGS := -Wall -Wextra -Wmissing-declarations
+CFLAGS       = -g -O2 $(WARN_CFLAGS)
+LDFLAGS     :=
 
 ifeq ($(COVERAGE),1)
-	CFLAGS += --coverage
-	LDFLAGS += --coverage
+CFLAGS  += --coverage
+LDFLAGS += --coverage
 endif
 
-APPS := bbdd
-bbdd-OBJECTS :=					\
-	$(OUTPUT)/bbdd.o			\
-	$(OUTPUT)/bbdd-bfdd.o			\
-	$(OUTPUT)/bbdd-bpf.o			\
-	$(OUTPUT)/bbdd-br.o			\
-	$(OUTPUT)/bbdd-c.o			\
-	$(OUTPUT)/bbdd-d.o			\
-	$(OUTPUT)/bbdd-jrpc.o			\
-	$(OUTPUT)/bbdd-mon.o			\
-	$(OUTPUT)/bbdd-nl.o			\
-	$(OUTPUT)/bbdd-poll.o			\
-	$(OUTPUT)/bbdd-sess.o			\
-	$(OUTPUT)/bbdd-sock.o			\
-	$(OUTPUT)/bbdd-util.o			\
-	$(OUTPUT)/bbdd-util.o			\
-	$(OUTPUT)/bfddp.o			\
-	#
-SYSTEMD_UNITS :=				\
-	$(OUTPUT)/bbdd.service			\
-	#
-MAN_PAGES :=					\
-	$(OUTPUT)/man/bbdd.8			\
-	$(OUTPUT)/man/bbdd-session.8		\
-	$(OUTPUT)/man/bbdd-bfdd.8		\
-	#
-EXTRA_CLEAN :=					\
-	$(OUTPUT)/src/config.h			\
-	$(OUTPUT)/src/bbdd-prog.bpf.o		\
-	$(OUTPUT)/src/bbdd-prog.skel.h		\
-	#
-EXTRA_DEPS :=					\
-	$(OUTPUT)/bbdd-prog.bpf.o		\
-	#
+# ── sed substitutions applied to all .in files ────────────────────────────────
 
-# Files that need to be in place before dependencies can be parsed.
-DEP_DEPS :=					\
-	$(OUTPUT)/src/config.h			\
-	$(OUTPUT)/src/bbdd-prog.skel.h		\
-	$(OUTPUT)/src/vmlinux.h
-	#
+SED_SUBST := \
+    -e 's|@BINDIR@|$(BINDIR)|g'                   \
+    -e 's|@SYSCONFDIR@|$(SYSCONFDIR)|g'           \
+    -e 's|@RUNSTATEDIR@|$(RUNSTATEDIR)|g'         \
+    -e 's|@DEFAULT_SOCKDIR@|$(DEFAULT_SOCKDIR)|g'
 
-# N.B. sort also makes the list unique.
-ALL_OBJECTS := $(sort $(foreach app,$(APPS),$($(app)-OBJECTS)) $(EXTRA_DEPS))
-ALL_DEPS := $(ALL_OBJECTS:%.o=%.dep)
-OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS))) $(OUTPUT)/man/ $(OUTPUT)/src/
+# ── C sources, objects, dependency files ─────────────────────────────────────
 
-BUILT := $(APPS) $(SYSTEMD_UNITS) $(MAN_PAGES)
+SRCS := $(filter-out $(SRC)/bbdd-prog.bpf.c, $(wildcard $(SRC)/*.c))
+OBJS := $(patsubst $(SRC)/%.c, $(O)/%.o, $(SRCS))
+DEPS := $(patsubst $(SRC)/%.c, $(O)/%.dep, $(SRCS))
 
-PREFIX = /usr/local
-EXEC_PREFIX = $(PREFIX)
-BINDIR = $(EXEC_PREFIX)/bin
-DATAROOTDIR = $(PREFIX)/share
-DATADIR = $(DATAROOTDIR)
-SYSCONFDIR = $(PREFIX)/etc
-LOCALSTATEDIR = $(PREFIX)/var
-RUNSTATEDIR = $(LOCALSTATEDIR)/run
-DOCDIR = $(DATAROOTDIR)/doc/$(PACKAGE)
-MANDIR = $(DATAROOTDIR)/man
-MAN8DIR = $(MANDIR)/man8
-SYSTEMDSYSTEMUNITDIR = $(shell pkgconf --variable=systemdsystemunitdir systemd)
-DESTDIR =
-VAR_SUBSTITUTIONS = 				\
-	s|@BINDIR@|$(BINDIR)|g;			\
-	s|@SYSCONFDIR@|$(SYSCONFDIR)|g;		\
-	s|@RUNSTATEDIR@|$(RUNSTATEDIR)|g;	\
-	s|@DEFAULT_SOCKDIR@|$(RUNSTATEDIR)|g;	\
-	#
+# ── BPF ───────────────────────────────────────────────────────────────────────
 
-.PHONY: all
-all: $(BUILT)
+BPF_SRC  := $(SRC)/bbdd-prog.bpf.c
+BPF_OBJ  := $(O)/bbdd-prog.bpf.o
+BPF_SKEL := $(O)/bbdd-prog.skel.h
+VMLINUX  := $(O)/vmlinux.h
 
-.PHONY: clean
+# ── Generated config header ───────────────────────────────────────────────────
+
+CONFIG_H := $(O)/config.h
+
+# ── Man pages ─────────────────────────────────────────────────────────────────
+
+MAN_SRCS  := $(wildcard $(MAN)/*.md.in)
+MAN_MDS   := $(patsubst $(MAN)/%.md.in, $(O)/man/%.md, $(MAN_SRCS))
+MAN_PAGES := $(patsubst $(MAN)/%.md.in, $(O)/man/%,    $(MAN_SRCS))
+
+# ── Binary ────────────────────────────────────────────────────────────────────
+
+BINARY := $(O)/bbdd
+
+# ── Top-level targets ─────────────────────────────────────────────────────────
+
+.PHONY: all clean install coverage
+
+all: $(BINARY) $(MAN_PAGES)
+
+# ── Output directories ────────────────────────────────────────────────────────
+
+$(O) $(O)/man:
+	mkdir -p $@
+
+# ── vmlinux.h ─────────────────────────────────────────────────────────────────
+
+$(VMLINUX): | $(O)
+	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > $@
+
+# ── BPF program ───────────────────────────────────────────────────────────────
+
+$(BPF_OBJ): $(BPF_SRC) $(VMLINUX) | $(O)
+	$(CLANG) -target bpf -O2 -g \
+		$(PKG_CFLAGS) -I$(O) -I$(SRC) \
+		-c $< -o $@
+	$(LLVM_STRIP) -g $@
+
+$(BPF_SKEL): $(BPF_OBJ)
+	$(BPFTOOL) gen skeleton $< name bbdd_prog > $@
+
+# ── config.h ──────────────────────────────────────────────────────────────────
+
+$(CONFIG_H): $(SRC)/config.h.in | $(O)
+	sed $(SED_SUBST) $< > $@
+
+# ── C compilation ─────────────────────────────────────────────────────────────
+# BPF skeleton and config.h are explicit prerequisites so they are generated
+# before any source file is compiled, making them available to the compiler
+# and to the initial dependency scan.
+
+$(O)/%.o: $(SRC)/%.c $(BPF_SKEL) $(CONFIG_H) | $(O)
+	$(CC) $(CFLAGS) $(PKG_CFLAGS) -I$(O) -I$(SRC) \
+		-MMD -MF $(O)/$*.dep -MT $@ \
+		-c $< -o $@
+
+-include $(DEPS)
+
+# ── Linking ───────────────────────────────────────────────────────────────────
+
+$(BINARY): $(OBJS)
+	$(CC) $(LDFLAGS) $^ $(PKG_LIBS) -o $@
+
+# ── Man pages ─────────────────────────────────────────────────────────────────
+
+$(O)/man/%.md: $(MAN)/%.md.in | $(O)/man
+	sed $(SED_SUBST) $< > $@
+
+$(O)/man/%: $(O)/man/%.md
+	$(PANDOC) -s -t man $< -o $@
+
+# ── Install ───────────────────────────────────────────────────────────────────
+
+install: all
+	$(INSTALL) -d $(DESTDIR)$(BINDIR)
+	$(INSTALL) -m 755 $(BINARY) $(DESTDIR)$(BINDIR)/bbdd
+	$(INSTALL) -d $(DESTDIR)$(MANDIR)/man8
+	$(INSTALL) -m 644 $(MAN_PAGES) $(DESTDIR)$(MANDIR)/man8/
+
+# ── Coverage ──────────────────────────────────────────────────────────────────
+# Build with COVERAGE=1, run tests, then invoke this target.
+
+coverage:
+	mkdir -p $(O)/coverage
+	$(GCOVR) -r $(SRC) --object-directory $(O) \
+		--html-details $(O)/coverage/index.html
+
+# ── Clean ─────────────────────────────────────────────────────────────────────
+
 clean:
-	rm -Rf $(OUTPUT)
-
-.PHONY: doc
-doc: $(MAN_PAGES)
-
-.PHONY: $(APPS)
-$(APPS): %: $(OUTPUT)/%
-
-.PHONY: install
-install: $(BUILT)
-	echo xxx no install xxx
-
-%/:
-	$(call msg,MKDIR,$@)
-	$(Q)mkdir -p $@
-
-$(OUTPUT)/bbdd: LDFLAGS += $(shell pkgconf --libs libelf json-c libsystemd \
-				libnl-3.0 libnl-genl-3.0)
-$(OUTPUT)/bbdd: $(bbdd-OBJECTS) $(LIBBPF) $(LIBMNL)
-	$(call msg,BINARY,$@)
-	$(Q)$(CC) $^ $(LDFLAGS) -lz -o $@
-
-$(OUTPUT)/%.o: src/%.c | $(OUTPUT_DIRS)
-	$(call msg,CC,$@)
-	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
-
-$(OUTPUT)/%.dep: src/%.c | $(OUTPUT_DIRS) $(DEP_DEPS)
-	$(call msg,DEP,$@)
-	$(Q)$(CC) -MM $(CFLAGS) -MT '$(@:%.dep=%.o) $@' $(INCLUDES) $< -o $@
-
-$(OUTPUT)/%: %.in | $(OUTPUT_DIRS)
-	$(call msg,SED,$*)
-	$(Q)sed -e '$(VAR_SUBSTITUTIONS)' $< > $@
-	$(Q)chmod --reference=$< $@
-
-$(OUTPUT)/src/vmlinux.h: /sys/kernel/btf/vmlinux | $(OUTPUT_DIRS)
-	$(Q)$(BPFTOOL) btf dump file $< format c > $@
-
-.PRECIOUS: $(OUTPUT)/%.bpf.o
-$(OUTPUT)/%.bpf.o: src/%.bpf.c src/bbdd.h $(OUTPUT)/src/vmlinux.h
-	$(call msg,BPF,$@)
-	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(WARN_CFLAGS) -c $< -o $@
-	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
-
-$(OUTPUT)/src/%.skel.h: $(OUTPUT)/%.bpf.o
-	$(call msg,GEN-SKEL,$@)
-	$(Q)$(BPFTOOL) gen skeleton $< name bbdd_prog > $@
-
-$(MAN_PAGES): $(OUTPUT)/%: $(OUTPUT)/%.md | $(OUTPUT_DIRS)
-	$(call msg,MAN,$@)
-	$(Q)pandoc --standalone --to man $< -o $@
-
-test: $(BUILT)
-	tests/run.sh
-
-ifeq ($(COVERAGE),1)
-coverage: $(OUTPUT)/coverage/ | $(OUTPUT_DIRS)
-	gcovr --html-nested --output $(OUTPUT)/coverage/bbdd.html
-
-coverage-clean:
-	rm -f $(OUTPUT)/*.gcda
-endif
-
--include $(ALL_DEPS)
+	rm -rf $(O)
