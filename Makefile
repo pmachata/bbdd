@@ -20,7 +20,7 @@ else
 endif
 
 OUTPUT := .output
-INCLUDES := -I $(OUTPUT)
+INCLUDES := -iquote $(OUTPUT)/src
 
 WARN_CFLAGS = -Wall -Wunused
 CFLAGS := -g $(WARN_CFLAGS)
@@ -57,9 +57,9 @@ MAN_PAGES :=					\
 	$(OUTPUT)/man/bbdd-bfdd.8		\
 	#
 EXTRA_CLEAN :=					\
-	$(OUTPUT)/config.h			\
-	$(OUTPUT)/bbdd-prog.bpf.o		\
-	$(OUTPUT)/bbdd-prog.skel.h		\
+	$(OUTPUT)/src/config.h			\
+	$(OUTPUT)/src/bbdd-prog.bpf.o		\
+	$(OUTPUT)/src/bbdd-prog.skel.h		\
 	#
 EXTRA_DEPS :=					\
 	$(OUTPUT)/bbdd-prog.bpf.o		\
@@ -67,15 +67,15 @@ EXTRA_DEPS :=					\
 
 # Files that need to be in place before dependencies can be parsed.
 DEP_DEPS :=					\
-	$(OUTPUT)/config.h			\
-	$(OUTPUT)/bbdd-prog.skel.h		\
-	$(OUTPUT)/vmlinux.h
+	$(OUTPUT)/src/config.h			\
+	$(OUTPUT)/src/bbdd-prog.skel.h		\
+	$(OUTPUT)/src/vmlinux.h
 	#
 
 # N.B. sort also makes the list unique.
 ALL_OBJECTS := $(sort $(foreach app,$(APPS),$($(app)-OBJECTS)) $(EXTRA_DEPS))
 ALL_DEPS := $(ALL_OBJECTS:%.o=%.dep)
-OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS))) $(OUTPUT)/man/
+OUTPUT_DIRS := $(sort $(dir $(ALL_OBJECTS))) $(OUTPUT)/man/ $(OUTPUT)/src/
 
 BUILT := $(APPS) $(SYSTEMD_UNITS) $(MAN_PAGES)
 
@@ -126,11 +126,11 @@ $(OUTPUT)/bbdd: $(bbdd-OBJECTS) $(LIBBPF) $(LIBMNL)
 	$(call msg,BINARY,$@)
 	$(Q)$(CC) $^ $(LDFLAGS) -lz -o $@
 
-$(OUTPUT)/%.o: %.c | $(OUTPUT_DIRS)
+$(OUTPUT)/%.o: src/%.c | $(OUTPUT_DIRS)
 	$(call msg,CC,$@)
 	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-$(OUTPUT)/%.dep: %.c | $(OUTPUT_DIRS) $(DEP_DEPS)
+$(OUTPUT)/%.dep: src/%.c | $(OUTPUT_DIRS) $(DEP_DEPS)
 	$(call msg,DEP,$@)
 	$(Q)$(CC) -MM $(CFLAGS) -MT '$(@:%.dep=%.o) $@' $(INCLUDES) $< -o $@
 
@@ -139,16 +139,16 @@ $(OUTPUT)/%: %.in | $(OUTPUT_DIRS)
 	$(Q)sed -e '$(VAR_SUBSTITUTIONS)' $< > $@
 	$(Q)chmod --reference=$< $@
 
-$(OUTPUT)/vmlinux.h: /sys/kernel/btf/vmlinux
+$(OUTPUT)/src/vmlinux.h: /sys/kernel/btf/vmlinux | $(OUTPUT_DIRS)
 	$(Q)$(BPFTOOL) btf dump file $< format c > $@
 
 .PRECIOUS: $(OUTPUT)/%.bpf.o
-$(OUTPUT)/%.bpf.o: %.bpf.c bbdd.h $(OUTPUT)/vmlinux.h
+$(OUTPUT)/%.bpf.o: src/%.bpf.c src/bbdd.h $(OUTPUT)/src/vmlinux.h
 	$(call msg,BPF,$@)
 	$(Q)$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_$(ARCH) $(INCLUDES) $(WARN_CFLAGS) -c $< -o $@
 	$(Q)$(LLVM_STRIP) -g $@ # strip useless DWARF info
 
-$(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o
+$(OUTPUT)/src/%.skel.h: $(OUTPUT)/%.bpf.o
 	$(call msg,GEN-SKEL,$@)
 	$(Q)$(BPFTOOL) gen skeleton $< name bbdd_prog > $@
 
