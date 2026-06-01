@@ -778,6 +778,15 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	csess->detect_mult = fsess->detect_mult;
 	csess->detect_mult_seen = 1;
 
+	/* If an interface name is too long, it will be truncated, and will
+	 * subsequently fail validation. We therefore do not mind the
+	 * truncation. */
+#define copy_name(dst, src) do {					\
+		size_t _n = strnlen((src), sizeof(dst) - 1);		\
+		memcpy((dst), (src), _n);				\
+		(dst)[_n] = '\0';					\
+	} while (0)
+
 	if (bbdd_ntoh32(fsess->ifindex) == 0) {
 		csess->netif.unset = true;
 	} else {
@@ -785,12 +794,7 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 		csess->netif.ifindex_seen = 1;
 
 		if (fsess->ifname[0] != '\0') {
-			/* If an interface name is too long, it will be truncated,
-			 * and will subsequently fail validation. So we don't care,
-			 * and this contraption silences a GCC warning. */
-			(void) (snprintf(csess->netif.name,
-					 sizeof(csess->netif.name),
-					 "%s", fsess->ifname) != 0);
+			copy_name(csess->netif.name, fsess->ifname);
 			csess->netif.name_seen = 1;
 		}
 	}
@@ -802,12 +806,11 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 		csess->vrf.table_seen = 1;
 
 		if (cmsess->vrfname[0] != '\0') {
-			(void) (snprintf(csess->vrf.netif.name,
-					 sizeof(csess->vrf.netif.name),
-					 "%s", cmsess->vrfname) != 0);
+			copy_name(csess->vrf.netif.name, cmsess->vrfname);
 			csess->vrf.netif.name_seen = 1;
 		}
 	}
+#undef copy_name
 
 	return 0;
 }
