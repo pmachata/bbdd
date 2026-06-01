@@ -414,7 +414,6 @@ bbdd_br_bfdd_handle_state_change(struct bbdd_br *br,
 }
 
 static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
-				      struct bbdd_bfdd *bfdd,
 				      struct bfddp_message *msg)
 {
 	enum bfddp_message_type bmt;
@@ -463,7 +462,7 @@ static void bbdd_br_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
 	__bbdd_br_bfdd_hangup(br, bfdd);
 }
 
-static void bbdd_br_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
+static void bbdd_br_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *,
 				    void *data)
 {
 	struct bbdd_br *br = data;
@@ -471,17 +470,17 @@ static void bbdd_br_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
 	__bbdd_br_bfdd_hangup(br, bfdd);
 }
 
-static int bbdd_br_bfdd_message_cb(struct bbdd_bfdd *bfdd,
+static int bbdd_br_bfdd_message_cb(struct bbdd_bfdd *,
 				   struct bfddp_message *msg,
-				   void *data, char **error)
+				   void *data, char **)
 {
 	struct bbdd_br *br = data;
 
-	__bbdd_br_bfdd_message_cb(br, bfdd, msg);
+	__bbdd_br_bfdd_message_cb(br, msg);
 	return 0;
 }
 
-static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short revents,
+static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short,
 				      void *arg, char **error)
 {
 	struct bbdd_br *br = arg;

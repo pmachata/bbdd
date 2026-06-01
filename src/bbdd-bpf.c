@@ -250,7 +250,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error)
 {
-	struct bbdd_bpf_session_data *bdata;
+	struct bbdd_bpf_session_data *bdata = bbdd_poison;
 	struct bbdd_bfd_pkt bfd;
 	union {
 		struct sockaddr    sa;
@@ -925,7 +925,7 @@ static void bbdd_bpf_shwait_stop(struct bbdd_bpf *bpf,
 	bsess->shwait = NULL;
 }
 
-static int bbdd_bpf_shwait_timer_cb(struct bbdd_poll_ctx *pctx, short,
+static int bbdd_bpf_shwait_timer_cb(struct bbdd_poll_ctx *, short,
 				    void *data, char **)
 {
 	struct bbdd_bpf_shwait *shwait = data;
@@ -1033,7 +1033,7 @@ static int bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
 					  struct bbdd_bpf_session *bsess,
 					  char **error)
 {
-	struct bbdd_bpf_session_data *bdata;
+	struct bbdd_bpf_session_data *bdata = bbdd_poison;
 	struct bbdd_bpf_session_data udata;
 	bool need_shwait = false;
 	bool stop_shwait = false;
@@ -1530,12 +1530,11 @@ bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
 
 	bitarr = bbdd_bpf_rb_format_packet_bitarr(packet);
 	if (bitarr == NULL)
-		goto oom;
+		goto put_obj;
 
-	rc = json_object_object_add(obj, "bits", bitarr);
+	rc = bbdd_jrpc_append_obj(obj, "bits", &bitarr);
 	if (rc != 0)
-		goto oom;
-	bitarr = NULL;
+		goto put_bitarr;
 
 	state = bbdd_bfd_pkt_state(packet);
 	diag = bbdd_bfd_pkt_diag(packet);
@@ -1556,14 +1555,16 @@ bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
 				 bbdd_ntoh32(packet->desired_tx)) ||
 	    bbdd_jrpc_append_int(obj, "required-rx",
 				 bbdd_ntoh32(packet->required_rx)))
-		goto oom;
+		goto put_obj;
 
 	return obj;
 
+put_bitarr:
+	json_object_put(bitarr);
+put_obj:
+	json_object_put(obj);
 oom:
 	bbdd_util_fmterr(error, "%m");
-	json_object_put(bitarr);
-	json_object_put(obj);
 	return NULL;
 }
 
@@ -1758,7 +1759,7 @@ bbdd_bpf_rb_format_jrpc(const struct bbdd_bpf_rb_elem_head *head,
 	}
 }
 
-static void bbdd_bpf_rb_mon_send(struct bbdd_bpf *bpf, struct bbdd_mon *mon,
+static void bbdd_bpf_rb_mon_send(struct bbdd_mon *mon,
 				 const struct bbdd_bpf_rb_elem_head *head)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_ringbuf;
@@ -1783,7 +1784,7 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	struct bbdd_bpf_rb_context *rb_ctx = ctx;
 	const struct bbdd_bpf_rb_elem_head *head = data;
 
-	bbdd_bpf_rb_mon_send(rb_ctx->bpf, rb_ctx->mon, head);
+	bbdd_bpf_rb_mon_send(rb_ctx->mon, head);
 
 	switch (head->type) {
 	case BBDD_BPF_RB_ELEM_TX_NO_NEIGH:

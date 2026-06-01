@@ -1566,7 +1566,7 @@ static void bbdd_d_hold_destroy(struct bbdd_d_hold *hold)
 	free(hold);
 }
 
-static int bbdd_d_hold_timer_cb(struct bbdd_poll_ctx *pctx, short,
+static int bbdd_d_hold_timer_cb(struct bbdd_poll_ctx *, short,
 				void *data, char **)
 {
 	struct bbdd_d_hold *hold = data;
@@ -2291,7 +2291,6 @@ int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 }
 
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
-				     struct bbdd_bfdd *bfdd,
 				     struct bfddp_message *msg)
 {
 	enum bfddp_message_type bmt;
@@ -2351,13 +2350,13 @@ senderr:
 	bbdd_mon_senderr(d->mon, &error, "bfdd");
 }
 
-static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *bfdd,
+static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *,
 				  struct bfddp_message *msg,
 				  void *data, char **)
 {
 	struct bbdd_d *d = data;
 
-	__bbdd_d_bfdd_message_cb(d, bfdd, msg);
+	__bbdd_d_bfdd_message_cb(d, msg);
 	return 0;
 }
 
@@ -2389,7 +2388,7 @@ struct bbdd_d_bfdd_connect_ctx {
 	struct json_object *id;
 };
 
-static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *bfdd, void *data)
+static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 	struct bbdd_d *d = cctx->d;
@@ -2689,7 +2688,7 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 		bbdd_d_handle_unhandled(peer, method, id);
 }
 
-static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *pctx, short, void *arg,
+static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *, short, void *arg,
 			   char **)
 {
 	struct bbdd_d *d = arg;
@@ -2931,7 +2930,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	uint32_t veth_tx_ifindex;
 	bool failed = true;
 	char *error;
-	int err;
+	int err = -ENOMEM;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 

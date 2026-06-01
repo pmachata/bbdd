@@ -102,10 +102,11 @@ error:
 	return -1;
 }
 
-int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
-		       int fd, short events,
-		       int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
-		       void *data, char **error)
+static int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
+			      int fd, short events,
+			      int (*fn)(struct bbdd_poll_ctx *, short, void *,
+					char **),
+			      void *data, char **error)
 {
 	ssize_t ix;
 
