@@ -1,0 +1,84 @@
+# bbdd — BPF-based BFD dataplane daemon
+
+`bbdd` implements the BFD (Bidirectional Forwarding Detection,
+[RFC 5880](https://www.rfc-editor.org/rfc/rfc5880)) dataplane in-kernel
+using the Linux BPF subsystem.
+
+## Overview
+
+The daemon can be controlled in two ways:
+
+- **Standalone JSON RPC mode** — `bbdd` acts as a fully independent BFD
+  service, controlled through its JSON RPC interface by the `bbdd` CLI.
+
+- **FRR datapath mode** — `bbdd` connects to an FRR BFD daemon (`bfdd`)
+  over the bfddp wire protocol and acts as its dataplane.  The `bbdd bfdd`
+  command suite manages that connection.
+
+### Method of operation
+
+To transmit BFD packets, `bbdd` creates a pair of VETH netdevices configured
+with `mq` and `fq` qdiscs.  Packets are looped from the TX end back to the RX
+end with an appropriate SKB timestamp, so that the kernel drives the regular
+send cadence without any userspace involvement.
+
+On the receive side, `bbdd` maintains a per-session timer that is reset as BFD
+packets arrive.  BPF programs attached via TC and `sk_lookup` handle
+classification and socket steering.
+
+The full receive/transmit cycle is therefore offloaded to the kernel.  The
+userspace daemon handles exceptional states — timeouts, configuration changes,
+the session state machine — while the in-kernel BPF programs carry the stable,
+high-frequency path.
+
+## Building
+
+### Dependencies
+
+| Component         | Tools / libraries                      |
+|-------------------|----------------------------------------|
+| C compilation     | Any C compiler (e.g. GCC)              |
+| BPF programs      | LLVM: `clang`, `llvm-strip`, `bpftool` |
+| Runtime libraries | `libbpf`, `json-c`, `libmnl`           |
+| Man pages         | `pandoc`                               |
+| Coverage reports  | `gcovr`                                |
+
+### Build
+
+```
+make
+```
+
+Optional variables (passed on the `make` command line):
+
+| Variable      | Default               | Purpose                                       |
+|---------------|-----------------------|-----------------------------------------------|
+| `PREFIX`      | `/usr/local`          | Installation prefix                           |
+| `BINDIR`      | `$(PREFIX)/bin`       | Binary directory                              |
+| `MANDIR`      | `$(PREFIX)/share/man` | Man page directory                            |
+| `SYSCONFDIR`  | `$(PREFIX)/etc`       | System configuration directory                |
+| `RUNSTATEDIR` | `/run`                | Runtime state directory                       |
+| `COVERAGE`    | `0`                   | Set to `1` to enable coverage instrumentation |
+
+```
+make install
+```
+
+After a coverage build, run `make coverage` to generate an HTML report under
+`.output/coverage/`.
+
+## License
+
+The package as a whole is distributed under the **GNU General Public License
+version 2 only** (GPL-2.0, without the "or any later version" clause).  The
+full text is in [`COPYING.gpl-2.0`](COPYING.gpl-2.0).
+
+It contains components under additional licenses:
+
+- Parts under the **MIT** license — see [`COPYING.mit`](COPYING.mit).
+- Parts under the **GNU Lesser General Public License version 2.1**
+  (LGPL-2.1) — see [`COPYING.lgpl-2.1`](COPYING.lgpl-2.1).
+
+## Contact
+
+Bug reports and patches: <mlxsw@nvidia.com>
