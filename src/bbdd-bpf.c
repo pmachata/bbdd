@@ -189,7 +189,9 @@ bbdd_bpf_make_packet(uint32_t my_disc,
 
 static uint32_t bbdd_bpf_cksum_acc(uint32_t sum, const void *buf, size_t len)
 {
-	const uint16_t *p = buf;
+	/* may_alias: reading a struct (e.g. iphdr) through uint16_t * is UB under strict aliasing. */
+	typedef uint16_t __attribute__((__may_alias__)) u16a;
+	const u16a *p = buf;
 
 	while (len >= 2) {
 		sum += *p++;
