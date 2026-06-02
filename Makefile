@@ -94,7 +94,7 @@ $(VMLINUX): | $(O)
 
 $(BPF_OBJ): $(BPF_SRC) $(VMLINUX) | $(O)
 	$(CLANG) -target bpf -O2 -g \
-		$(PKG_CFLAGS) -I$(O) -I$(SRC) \
+		-I$(O) -I$(SRC) \
 		-c $< -o $@
 	$(LLVM_STRIP) -g $@
 
