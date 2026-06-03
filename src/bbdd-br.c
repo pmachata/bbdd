@@ -356,7 +356,7 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(br->bfdd, peer, id);
+		bbdd_bfdd_echo_handle_start(br->bfdd, peer, id, false);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_br_handle_session_add(br, peer, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)
@@ -438,7 +438,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 		return bbdd_br_bfdd_handle_state_change(br, msg);
 	case ECHO_REQUEST:
 		rc = bbdd_d_bfdd_handle_echo_request(br->bfdd, &br->diag_stats,
-						     msg, &error);
+						     msg, false, &error);
 		if (rc != 0)
 			goto senderr;
 		return;

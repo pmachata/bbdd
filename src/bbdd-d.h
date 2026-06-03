@@ -109,7 +109,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 				    struct bbdd_d_global_diag_stats *diag_stats,
 				    const struct bfddp_message *msg,
-				    char **error);
+				    bool is_dp, char **error);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);

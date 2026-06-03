@@ -2277,7 +2277,7 @@ reply:
 int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 				    struct bbdd_d_global_diag_stats *diag_stats,
 				    const struct bfddp_message *msg,
-				    char **error)
+				    bool is_dp, char **error)
 {
 	int rc;
 
@@ -2287,7 +2287,7 @@ int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 		return rc;
 
 	return bbdd_bfdd_reply_echo(bfdd, bbdd_ntoh16(msg->header.id),
-				    &msg->data.echo, error);
+				    &msg->data.echo, is_dp, error);
 }
 
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
@@ -2326,7 +2326,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 
 	case ECHO_REQUEST:
 		rc = bbdd_d_bfdd_handle_echo_request(d->bfdd, &d->diag_stats,
-						     msg, &error);
+						     msg, true, &error);
 		break;
 
 	case ECHO_REPLY:
@@ -2661,7 +2661,7 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(d->bfdd, peer, id);
+		bbdd_bfdd_echo_handle_start(d->bfdd, peer, id, true);
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(d, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)

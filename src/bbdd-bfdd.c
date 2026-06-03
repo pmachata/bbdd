@@ -21,6 +21,8 @@
 struct bbdd_bfdd_echo {
 	struct bbdd_sock peer;
 	struct json_object *id;
+	bool is_dp; /* true when we sent as data plane, false when as
+		     * BFDD/bridge */
 };
 
 struct bbdd_bfdd {
@@ -383,7 +385,7 @@ static void bbdd_bfdd_echo_free(struct bbdd_bfdd_echo *echo)
 }
 
 void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
-				 struct json_object *id)
+				 struct json_object *id, bool is_dp)
 {
 	struct bbdd_bfdd_echo *echo;
 	uint64_t ts;
@@ -406,8 +408,9 @@ void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
 	if (echo == NULL)
 		goto err;
 
+	echo->is_dp = is_dp;
 	ts = bbdd_util_now();
-	rc = bbdd_bfdd_send_echo(bfdd, 1, ts, &error);
+	rc = bbdd_bfdd_send_echo(bfdd, 1, ts, is_dp, &error);
 	if (rc != 0)
 		goto echo_free;
 
@@ -435,16 +438,21 @@ void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 	if (bfdd->echo == NULL)
 		return;
 
-	bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
-			       bfdd_time, dp_time);
+	if (bfdd->echo->is_dp)
+		bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
+				       dp_time, bfdd_time);
+	else
+		bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
+				       bfdd_time, dp_time);
 	bbdd_bfdd_echo_stop(bfdd);
 }
 
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo, char **error)
+			 const struct bfddp_echo *in_echo,
+			 bool is_dp, char **error)
 {
-	uint64_t dp_time = bbdd_util_now();
+	uint64_t now = bbdd_util_now();
 	struct bfddp_message msg;
 
 	msg = (struct bfddp_message) {
@@ -455,8 +463,10 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 					     sizeof(msg.data.echo)),
 
 		.data.echo = (struct bfddp_echo) {
-			.dp_time = bbdd_hton64(dp_time),
-			.bfdd_time = in_echo->bfdd_time,
+			.dp_time   = is_dp ? bbdd_hton64(now)
+					   : in_echo->dp_time,
+			.bfdd_time = is_dp ? in_echo->bfdd_time
+					   : bbdd_hton64(now),
 		},
 	};
 
@@ -464,7 +474,7 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 }
 
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t bfdd_time_us, char **error)
+			uint64_t time_us, bool is_dp, char **error)
 {
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
@@ -473,7 +483,10 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 		.header.length = bbdd_hton16(sizeof(msg.header) +
 					     sizeof(msg.data.echo)),
 		.data.echo = {
-			.bfdd_time = bbdd_hton64(bfdd_time_us),
+			.dp_time   = is_dp ? bbdd_hton64(time_us)
+					   : bbdd_hton64(0),
+			.bfdd_time = is_dp ? bbdd_hton64(0)
+					   : bbdd_hton64(time_us),
 		},
 	};
 

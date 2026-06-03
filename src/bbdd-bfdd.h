@@ -48,15 +48,16 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
 bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
 
 void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
-				 struct json_object *id);
+				 struct json_object *id, bool is_dp);
 void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 				 const struct bfddp_message *msg);
 
 int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t bfdd_time_us, char **error);
+			uint64_t time_us, bool is_dp, char **error);
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo, char **error);
+			 const struct bfddp_echo *in_echo,
+			 bool is_dp, char **error);
 int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
 				const struct bbdd_d_session *dsess,
 				char **error);
