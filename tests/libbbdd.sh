@@ -80,7 +80,7 @@ adf_Bbdd_start()
 adf_Bbdd_bridge_start()
 {
 	Bbdd --debug=mon-eager \
-	     bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd.sock &
+	     bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd_dplane.sock &
 	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
 
 	Bbdd_wait
@@ -90,7 +90,7 @@ Bbdd_bfdd_connect()
 {
 	local dst_sockdir=$1; shift
 
-	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd.sock
+	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd_dplane.sock
 }
 
 Bbdd_session_get()

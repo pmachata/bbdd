@@ -15,31 +15,40 @@ Frr_require()
 	done
 }
 
-in_frrdir()
-{
-	local fd_name=$1; shift
-
-	FRRD="${fd_name}" "$@"
-}
-
 Frr_vtysh()
 {
-	"$FRR_VTYSH" --vty_socket "${!FRRD}" -d bfdd "$@"
+	"$FRR_VTYSH" --vty_socket "${!BBDD_SOCKDIR}" -d bfdd "$@"
+}
+
+Frr_bground()
+{
+	$(nspfx) "$FRR_BFDD" \
+		 --vty_socket "${!BBDD_SOCKDIR}" \
+		 --pid_file "${!BBDD_SOCKDIR}/bfdd.pid" \
+		 --socket "${!BBDD_SOCKDIR}/zserv.api" \
+		 --log file:/dev/stderr --log-level error "$@" &
 }
 
 adf_Frr_bfdd_start()
 {
-	$(nspfx) "$FRR_BFDD" \
-		 --vty_socket "${!FRRD}" \
-		 --pid_file "${!FRRD}/bfdd.pid" \
-		 --socket "${!FRRD}/zserv.api" \
-		 --log file:/dev/stderr --log-level error &
+	Frr_bground "$@"
 	local pid=$!
 	defer kill_process $pid
 
-	slowwait 5 test -S "${!FRRD}/bfdd.vty"
+	slowwait 5 test -S "${!BBDD_SOCKDIR}/bfdd.vty"
 	if [[ $? != 0 ]]; then
 		echo "failed to start bfdd" >/dev/stderr
+		exit 1
+	fi
+}
+
+adf_Frr_bfdd_dplane_start()
+{
+	adf_Frr_bfdd_start --dplaneaddr "unix:${!BBDD_SOCKDIR}/bfdd_dplane.sock"
+
+	slowwait 5 test -S "${!BBDD_SOCKDIR}/bfdd_dplane.sock"
+	if [[ $? != 0 ]]; then
+		echo "bfdd did not open dplane socket" >/dev/stderr
 		exit 1
 	fi
 }
@@ -84,5 +93,6 @@ Frr_session_test_up()
 
 	Frr_session_wait_up "$peer"
 	check_err $? "FRR bfdd session with $peer did not reach up"
-	log_test "$(format_env "$FRRD")FRR bfdd session with $peer up"
+
+	Bbdd_log_test "FRR bfdd session with $peer up"
 }
