@@ -67,6 +67,25 @@ make install
 After a coverage build, run `make coverage` to generate an HTML report under
 `.output/coverage/`.
 
+## Limitations
+
+The following optional [RFC 5880][] features are not currently supported.
+Incoming packets that use an unsupported feature are discarded and a
+diagnostic counter is incremented.
+
+- **Echo mode** — packets with a non-zero Required Min Echo RX Interval are
+  discarded; the `rx_unsupported` per-session diagnostic counter is
+  incremented.
+
+- **Authentication** — packets with the Auth (A) bit set are discarded and
+  counted as `rx_unsupported`.
+
+- **Demand mode** — packets with the Demand (D) bit set are discarded and
+  counted as `rx_unsupported`.
+
+- **Multipoint** — the Multipoint (M) bit must be zero; packets with M=1 are
+  discarded and counted as `rx_multipoint_not_0`.
+
 ## License
 
 The package as a whole is distributed under the **GNU General Public License

@@ -141,6 +141,29 @@ COMMANDS
 
   When no topics are given, the default is all topics except of `debug`.
 
+LIMITATIONS
+===========
+
+The following optional features defined in [RFC 5880][] are not supported.
+Incoming packets that use an unsupported feature are discarded and a
+diagnostic counter is incremented.
+
+Echo mode
+: Packets with a non-zero Required Min Echo RX Interval are discarded;
+  the `rx_unsupported` per-session diagnostic counter is incremented.
+
+Authentication
+: Packets with the Auth (A) bit set are discarded and counted as
+  `rx_unsupported`.
+
+Demand mode
+: Packets with the Demand (D) bit set are discarded and counted as
+  `rx_unsupported`.
+
+Multipoint
+: The Multipoint (M) bit must be zero per the [RFC 5880][] specification;
+  packets with M=1 are discarded and counted as `rx_multipoint_not_0`.
+
 SEE ALSO
 ========
 
