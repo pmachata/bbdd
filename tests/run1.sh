@@ -11,6 +11,7 @@ trap defer_scopes_cleanup EXIT
 
 source ${tests_dir}/lib.sh
 source ${tests_dir}/libbbdd.sh
+source ${tests_dir}/libfrr.sh
 
 if [[ "$(id -u)" -ne 0 ]]; then
 	log_test_skip "need root privileges"

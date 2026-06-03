@@ -1,16 +1,20 @@
 # SPDX-License-Identifier: GPL-2.0
 
-tmpdir=$(mktemp -d XXXXXX)
+tmpdir=$(mktemp -d /tmp/XXXXXX)
 defer rm -Rf "$tmpdir"
+chmod a+rwx "${tmpdir}"
 
 Bbdd_setup_sockdir()
 {
 	local sd_name
+	local dir
 
 	for sd_name in "$@"; do
-		eval "${sd_name}=${tmpdir}/${sd_name,,}-$(mktemp -u XXXXXX)"
-		mkdir -p "${!sd_name}"
+		dir="${tmpdir}/${sd_name}"
+		eval "${sd_name}=${dir}"
+		mkdir "${!sd_name}"
 		defer rm -Rf "${!sd_name}"
+		chmod a+rwx "${!sd_name}"
 	done
 }
 
