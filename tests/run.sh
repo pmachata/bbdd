@@ -1,6 +1,8 @@
 #!/bin/bash
 
 tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
+source ${tests_dir}/defer.sh
+source ${tests_dir}/lib.sh
 
 : "${TESTS:=
 	ns-basic4.sh
@@ -22,6 +24,12 @@ tests_dir=$(dirname "$(readlink -e "${BASH_SOURCE[0]}")")
 }"
 
 for t in $TESTS; do
-	echo == $t ==
+	echo "== $t =="
+
 	${tests_dir}/run1.sh "${tests_dir}/$t"
+	check_err $? "$t"
+
+	log_test "$t"
 done
+
+exit "$EXIT_STATUS"
