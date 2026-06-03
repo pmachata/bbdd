@@ -1,0 +1,16 @@
+[Unit]
+Description=BPF-based BFD dataplane daemon
+Documentation=man:bbdd(8)
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/bbdd start
+Restart=on-failure
+
+RuntimeDirectory=bbdd
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

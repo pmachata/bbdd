@@ -58,6 +58,7 @@ Optional variables (passed on the `make` command line):
 | `MANDIR`      | `$(PREFIX)/share/man` | Man page directory                            |
 | `SYSCONFDIR`  | `$(PREFIX)/etc`       | System configuration directory                |
 | `RUNSTATEDIR` | `/run`                | Runtime state directory                       |
+| `SYSTEMDDIR`  | `$(PREFIX)/lib/systemd/system` | systemd unit directory               |
 | `COVERAGE`    | `0`                   | Set to `1` to enable coverage instrumentation |
 
 ```

@@ -7,6 +7,7 @@ BINDIR          := $(PREFIX)/bin
 MANDIR          := $(PREFIX)/share/man
 SYSCONFDIR      := $(PREFIX)/etc
 RUNSTATEDIR     := /run
+SYSTEMDDIR      := $(PREFIX)/lib/systemd/system
 DEFAULT_SOCKDIR := $(RUNSTATEDIR)/bbdd
 
 # ── Directories ───────────────────────────────────────────────────────────────
@@ -70,6 +71,12 @@ MAN_SRCS  := $(wildcard $(MAN)/*.md.in)
 MAN_MDS   := $(patsubst $(MAN)/%.md.in, $(O)/man/%.md, $(MAN_SRCS))
 MAN_PAGES := $(patsubst $(MAN)/%.md.in, $(O)/man/%,    $(MAN_SRCS))
 
+# ── Systemd units ─────────────────────────────────────────────────────────────
+
+SYSTEMD_DIR  := systemd
+SYSTEMD_SRCS := $(wildcard $(SYSTEMD_DIR)/*.service.in)
+SYSTEMD_SVCS := $(patsubst $(SYSTEMD_DIR)/%.service.in,$(O)/systemd/%.service,$(SYSTEMD_SRCS))
+
 # ── Binary ────────────────────────────────────────────────────────────────────
 
 BINARY := $(O)/bbdd
@@ -78,11 +85,11 @@ BINARY := $(O)/bbdd
 
 .PHONY: all clean install coverage
 
-all: $(BINARY) $(MAN_PAGES)
+all: $(BINARY) $(MAN_PAGES) $(SYSTEMD_SVCS)
 
 # ── Output directories ────────────────────────────────────────────────────────
 
-$(O) $(O)/man:
+$(O) $(O)/man $(O)/systemd:
 	mkdir -p $@
 
 # ── vmlinux.h ─────────────────────────────────────────────────────────────────
@@ -131,6 +138,11 @@ $(O)/man/%.md: $(MAN)/%.md.in | $(O)/man
 $(O)/man/%: $(O)/man/%.md
 	$(PANDOC) -s -t man $< -o $@
 
+# ── Systemd units ─────────────────────────────────────────────────────────────
+
+$(O)/systemd/%.service: $(SYSTEMD_DIR)/%.service.in | $(O)/systemd
+	sed $(SED_SUBST) $< > $@
+
 # ── Install ───────────────────────────────────────────────────────────────────
 
 install: all
@@ -138,6 +150,8 @@ install: all
 	$(INSTALL) -m 755 $(BINARY) $(DESTDIR)$(BINDIR)/bbdd
 	$(INSTALL) -d $(DESTDIR)$(MANDIR)/man8
 	$(INSTALL) -m 644 $(MAN_PAGES) $(DESTDIR)$(MANDIR)/man8/
+	$(INSTALL) -d $(DESTDIR)$(SYSTEMDDIR)
+	$(INSTALL) -m 644 $(SYSTEMD_SVCS) $(DESTDIR)$(SYSTEMDDIR)/
 
 # ── Coverage ──────────────────────────────────────────────────────────────────
 # Build with COVERAGE=1, run tests, then invoke this target.
