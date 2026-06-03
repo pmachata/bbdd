@@ -32,11 +32,11 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 	long long rv;
 
 	errno = 0;
-	rv = strtoll(str, &nulbyte, 10);
+	rv = strtoll(str, &nulbyte, 0);
 	/* No conversion performed. */
 	if (rv == 0 && errno == EINVAL) {
 	invalid:
-		bbdd_util_fmterr(error, "Invalid %s `%s'. Expected integral [%lld,%lld]",
+		bbdd_util_fmterr(error, "Invalid %s `%s'. Expected integer [%lld,%lld] (decimal or 0x-hex)",
 				 what, str, min, max);
 		return -1;
 	}

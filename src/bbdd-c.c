@@ -1445,7 +1445,7 @@ static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
 	uint32_t mult;
 	char *end;
 
-	val = strtoull(str, &end, 10);
+	val = strtoull(str, &end, 0);
 	if (end == str) {
 		fprintf(stderr, "Can't parse %s `%s': not a valid number.\n",
 			what, str);
