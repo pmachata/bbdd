@@ -31,10 +31,17 @@ find_match "$OUT" "\bvrf V1\b"
 find_match "$OUT" "\bvrf-index ${V1_ifindex}\b"
 find_match "$OUT" "\bvrf-table 1\b"
 find_match "$OUT" "\bdiscr 0\b" # remote
+find_no_match "$OUT" "remote-discr"
 Bbdd_log_test "Session output"
 
 OUT=$(Bbdd session show)
 find_no_match "$OUT" "src"
 find_no_match "$OUT" "netif"
-
 Bbdd_log_test "Session output (non-verbose)"
+
+Bbdd -q session set remote-discr 1234
+OUT=$(Bbdd -v session show)
+find_match "$OUT" "\bdiscr 1111\b"
+find_match "$OUT" "\bdiscr 1234\b"
+find_match "$OUT" "\bremote-discr 1234\b"
+Bbdd_log_test "Session output (remote-discr)"

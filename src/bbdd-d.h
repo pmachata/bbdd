@@ -71,6 +71,7 @@ struct bbdd_d_session {
 	uint8_t ttl;
 	uint32_t ifindex;
 	uint32_t vrf_ifindex;
+	uint32_t user_remote_discr; /* 0 when not given. */
 
 	/* Non-0; table 0 is invalid, so use it to mean `not configured'. */
 	uint32_t vrf_table;

@@ -21,6 +21,7 @@ struct bbdd_bpf_match_digest {
 	uint8_t ttl;
 	bool multihop;
 	uint32_t table;
+	uint32_t my_disc;
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
 };

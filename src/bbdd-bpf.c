@@ -1450,6 +1450,7 @@ bbdd_bpf_rb_handle_discr_0(struct bbdd_bpf *bpf,
 		.ifindex = elem->ifindex,
 		.ttl = elem->ttl,
 		.multihop = elem->multihop,
+		.my_disc = bbdd_ntoh32(elem->packet.my_disc),
 	};
 	struct bbdd_d_session *dsess = NULL;
 	struct bbdd_nl_ifinfo nlinfo;
@@ -1569,7 +1570,7 @@ bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
 		 * us and the peer would have a completely incompatible non-0
 		 * discriminators and would fail to make a handshake. So when
 		 * the peer times out, we need to unset its discriminator. */
-		dsess->remote.discr = 0;
+		dsess->remote.discr = dsess->user_remote_discr;
 
 		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 	}

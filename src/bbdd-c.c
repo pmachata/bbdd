@@ -936,6 +936,10 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 		printf("discr %u ", csess->discr);
 		seen = true;
 	}
+	if (csess->remote_discr_seen) {
+		printf("remote-discr %u ", csess->remote_discr);
+		seen = true;
+	}
 	if (csess->src.unset) {
 		if (bbdd_env.verbosity > 0) {
 			printf("no src ");
@@ -1196,16 +1200,17 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | no UNSET-KEY | [ no ] FLAG }\n"
-		"	KEY ::= { discr | src | dst | min-tx | min-rx | hold-time | ttl |\n"
-		"	          detect-mult | netif | netif-index | vrf | vrf-index |\n"
-		"	          vrf-table }\n"
-		"	UNSET-KEY ::= { src | netif | vrf }\n"
+		"	KEY ::= { discr | remote-discr | src | dst | min-tx | min-rx |\n"
+		"	          hold-time | ttl | detect-mult | netif | netif-index |\n"
+		"	          vrf | vrf-index | vrf-table }\n"
+		"	UNSET-KEY ::= { remote-discr | src | netif | vrf }\n"
 		"	FLAG ::= { multihop | cpi | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value\n"
 		"	no NETIF-KEY	-- unset a given key\n"
 		"\n"
 		"Parameter KEY and VALUE details:\n"
 		"	discr U32 	-- session discriminator\n"
+		"	remote-discr U32 -- default remote discriminator\n"
 		"	src ADDR	-- source address\n"
 		"	dst ADDR	-- destination address\n"
 		"	min-tx TIME	-- minimum tx interval (e.g. 100us, 10ms, 1s)\n"
@@ -1436,6 +1441,31 @@ static int bbdd_c_parse_kw_u32(int *up_argc, char ***up_argv, const char *kw,
 {
 	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_seen,
 			       bbdd_c_parse_u32);
+}
+
+/* Like bbdd_c_parse_kw_u32, but also accepts `no KW' as a synonym for the
+ * value 0. */
+static int bbdd_c_parse_kw_u32_no(int *up_argc, char ***up_argv, const char *kw,
+				  uint32_t *ret, int *ret_seen)
+{
+	struct bbdd_flag flag = {
+		.seen = *ret_seen,
+		.value = false,
+	};
+	int rc;
+
+	rc = bbdd_c_parse_kw_u32(up_argc, up_argv, kw, ret, ret_seen);
+	if (rc != 0)
+		return rc;
+
+	rc = bbdd_c_parse_kw_flag(up_argc, up_argv, kw, &flag);
+	if (rc <= 0)
+		return rc;
+
+	assert(flag.value == false);
+	*ret = 0;
+	*ret_seen = 1;
+	return 1;
 }
 
 static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
@@ -1726,6 +1756,9 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 
 	if ((csess->discr_seen &&
 	     bbdd_jrpc_append_int(params_obj, "discr", csess->discr)) ||
+	    (csess->remote_discr_seen &&
+	     bbdd_jrpc_append_int(params_obj, "remote_discr",
+				  csess->remote_discr)) ||
 	    (csess->min_tx_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_tx_us", csess->min_tx_us)) ||
 	    (csess->min_rx_us_seen &&
@@ -1930,6 +1963,9 @@ int bbdd_c_session(int argc, char **argv)
 		    (rc = bbdd_c_parse_kw_u32(&argc, &argv, "discr",
 					      &csess->discr,
 					      &csess->discr_seen)) ||
+		    (rc = bbdd_c_parse_kw_u32_no(&argc, &argv, "remote-discr",
+						 &csess->remote_discr,
+						 &csess->remote_discr_seen)) ||
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-tx",
 						  &csess->min_tx_us,
 						  &csess->min_tx_us_seen)) ||

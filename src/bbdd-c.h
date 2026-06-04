@@ -33,6 +33,7 @@ struct bbdd_c_session_addr {
 struct bbdd_c_session {
 	struct bbdd_sess_flags flags;
 	uint32_t discr;			int discr_seen;
+	uint32_t remote_discr;		int remote_discr_seen;
 	uint32_t min_tx_us;		int min_tx_us_seen;
 	uint32_t min_rx_us;		int min_rx_us_seen;
 	uint32_t hold_time_us;		int hold_time_us_seen;

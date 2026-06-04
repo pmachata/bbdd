@@ -395,6 +395,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_POL_IX)
 
 		pol_discr,
+		pol_remote_discr,
 
 		pol_src,
 		pol_dst,
@@ -416,6 +417,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_POLICY)
 
 		[pol_discr] = { .key = "discr", .type = json_type_int },
+		[pol_remote_discr] = { .key = "remote_discr",
+				       .type = json_type_int },
 
 		[pol_dst] = { .key = "dst", .type = json_type_object },
 		[pol_src] = { .key = "src", .type = json_type_object,
@@ -509,6 +512,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #define DISSECT_U8(NAME) DISSECT(NAME, NAME, bbdd_jrpc_get_uint8)
 
 	DISSECT(discr, discr, bbdd_jrpc_get_uint32_non0);
+	DISSECT_U32(remote_discr);
 	DISSECT_U32(min_tx_us);
 	DISSECT_U32(min_rx_us);
 	DISSECT_U32(hold_time_us);
@@ -707,6 +711,7 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	} while (0)
 
 	ASSIGN(discr, local.discr);
+	ASSIGN_NON0(remote_discr, user_remote_discr);
 	ASSIGN_NON0(hold_time_us, hold_time_us);
 	ASSIGN_NON0(ttl, ttl);
 	ASSIGN_NON0(netif.ifindex, ifindex);
@@ -1179,6 +1184,10 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 		if (digest->ttl < dsess->ttl)
 			continue;
 
+		if (dsess->user_remote_discr != 0 &&
+		    digest->my_disc != dsess->user_remote_discr)
+			continue;
+
 		/* This is incoming packet aimed at us, so we need to match
 		 * packet DST vs. session SRC and vice versa. */
 
@@ -1303,6 +1312,11 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	ASSIGN(vrf_table, vrf.table);
 
 #undef ASSIGN
+
+	if (csess->remote_discr_seen) {
+		dsess->remote.discr = csess->remote_discr;
+		dsess->user_remote_discr = csess->remote_discr;
+	}
 }
 
 static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
@@ -1512,6 +1526,10 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 	FIELD(vrf_table, vrf.table);
 #undef FIELD
 
+	if (query->remote_discr_seen &&
+	    dsess->remote.discr != query->remote_discr)
+		return 0;
+
 	return 1;
 }
 
@@ -1586,7 +1604,6 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	dsess->local.timing.min_rx_us = bbdd_prog_slow_interval_us;
 	dsess->local.timing.min_tx_us = bbdd_prog_slow_interval_us;
 
-	dsess->remote.discr = 0;
 	dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 	dsess->remote.timing = dsess->local.timing;
