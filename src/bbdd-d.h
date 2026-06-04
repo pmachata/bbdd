@@ -77,10 +77,6 @@ struct bbdd_d_session {
 
 	struct bbdd_d_session_data local;
 	struct bbdd_d_session_data remote;
-
-	/* Non-NULL while the session hold timer is active. The session is not
-	 * yet projected to BPF during this time. */
-	struct bbdd_d_hold *hold;
 };
 
 int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics);

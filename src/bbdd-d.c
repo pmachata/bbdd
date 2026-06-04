@@ -1235,6 +1235,12 @@ bbdd_d_find_session_cb(uint32_t discr, void *data)
 	return bbdd_sess_dir_get_session(d->sdir, discr);
 }
 
+static void bbdd_d_session_post_hold_cb(struct bbdd_d_session *dsess)
+{
+	/* Don't report hold time anymore now that it expired. */
+	dsess->hold_time_us = 0;
+}
+
 static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 				     const struct bbdd_c_session *csess,
 				     bool set_src, struct bbdd_sockaddr *src,
@@ -1550,106 +1556,6 @@ oom:
 	return -1;
 }
 
-struct bbdd_d_hold {
-	struct bbdd_d_session *dsess;
-	struct bbdd_poll_ctx *pctx;
-	struct bbdd_bpf *bpf;
-	struct bbdd_mon *mon;
-	struct bbdd_bfdd **bfdd;
-	int timer_fd;
-};
-
-static void bbdd_d_hold_destroy(struct bbdd_d_hold *hold)
-{
-	bbdd_poll_unset_fd(hold->pctx, hold->timer_fd);
-	close(hold->timer_fd);
-	free(hold);
-}
-
-static int bbdd_d_hold_timer_cb(struct bbdd_poll_ctx *, short,
-				void *data, char **)
-{
-	struct bbdd_d_hold *hold = data;
-	struct bbdd_d_session *dsess = hold->dsess;
-	uint64_t expirations;
-	char *error;
-	int rc;
-
-	/* Drain the timerfd so poll does not fire again. */
-	(void) read(hold->timer_fd, &expirations, sizeof(expirations));
-
-	rc = bbdd_bpf_session_activate(hold->bpf, dsess, &error);
-	if (rc != 0) {
-		bbdd_mon_senderr(hold->mon, &error, "session %u: failed to activate",
-				 dsess->local.discr);
-		goto out;
-	}
-
-	/* Don't report hold time anymore now that it expired. */
-	dsess->hold_time_us = 0;
-	bbdd_d_session_state_changed(dsess, hold->bpf, hold->mon, *hold->bfdd);
-
-out:
-	bbdd_d_hold_destroy(hold);
-	dsess->hold = NULL;
-	return 0;
-}
-
-static struct bbdd_d_hold *
-bbdd_d_hold_create(struct bbdd_d *d, struct bbdd_d_session *dsess, char **error)
-{
-	struct itimerspec ts = {
-		.it_value = {
-			.tv_sec  = dsess->hold_time_us / 1'000'000,
-			.tv_nsec = (dsess->hold_time_us % 1'000'000) * 1000,
-		},
-	};
-	struct bbdd_d_hold *hold;
-	int timer_fd;
-	int rc;
-
-	*error = NULL;
-
-	hold = malloc(sizeof(*hold));
-	if (hold == NULL)
-		goto err;
-
-	/* Bump by 1 ns to avoid hold_time_us of 0 meaning timer disarm. */
-	ts.it_value.tv_nsec++;
-
-	timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	if (timer_fd < 0)
-		goto free_hold;
-
-	rc = timerfd_settime(timer_fd, 0, &ts, NULL);
-	if (rc < 0)
-		goto close_timer_fd;
-
-	rc = bbdd_poll_set_fd(d->pctx, timer_fd, POLLIN,
-			      bbdd_d_hold_timer_cb, hold, error);
-	if (rc != 0)
-		goto close_timer_fd;
-
-	*hold = (struct bbdd_d_hold) {
-		.dsess = dsess,
-		.pctx = d->pctx,
-		.bpf = d->bpf,
-		.mon = d->mon,
-		.bfdd = &d->bfdd,
-		.timer_fd = timer_fd,
-	};
-	return hold;
-
-close_timer_fd:
-	close(timer_fd);
-free_hold:
-	free(hold);
-err:
-	if (*error == NULL)
-		bbdd_util_fmterr(error, "%m");
-	return NULL;
-}
-
 static int bbdd_d_session_add(struct bbdd_d *d,
 			      const struct bbdd_c_session *csess, char **error)
 {
@@ -1693,14 +1599,8 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	if (rc != 0)
 		goto sess_dir_del_session;
 
-	dsess->hold = bbdd_d_hold_create(d, dsess, error);
-	if (dsess->hold == NULL)
-		goto sess_bpf_session_del;
-
 	return 0;
 
-sess_bpf_session_del:
-	bbdd_bpf_session_del(d->bpf, dsess);
 sess_dir_del_session:
 	bbdd_sess_dir_del_session(d->sdir, dsess);
 put_port:
@@ -1826,16 +1726,13 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 		set = true;
 
-		if (dsess->hold != NULL)
-			continue;
-
 		rc = bbdd_bpf_session_update(d->bpf, dsess, &error);
 		if (rc != 0) {
 			bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 			goto free_discrs;
 		}
 
-		if (changed)
+		if (changed && !bbdd_bpf_session_is_on_hold(d->bpf, dsess))
 			bbdd_d_session_state_changed(dsess, d->bpf, d->mon, d->bfdd);
 	}
 
@@ -1862,9 +1759,6 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 		bbdd_util_fmterr(error, "Failed to look up session %u", discr);
 		return -1;
 	}
-
-	if (dsess->hold != NULL)
-		bbdd_d_hold_destroy(dsess->hold);
 
 	bbdd_bpf_session_del(d->bpf, dsess);
 
@@ -2129,14 +2023,11 @@ static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	if (rc != 0)
 		goto interr;
 
-	if (dsess->hold != NULL)
-		return 0;
-
 	rc = bbdd_bpf_session_update(d->bpf, dsess, error);
 	if (rc != 0)
 		goto interr;
 
-	if (changed)
+	if (changed && !bbdd_bpf_session_is_on_hold(d->bpf, dsess))
 		bbdd_d_session_state_changed(dsess, d->bpf, d->mon, d->bfdd);
 	return 0;
 
@@ -2925,6 +2816,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		.session_state_changed = bbdd_d_session_state_changed_cb,
 		.match_session = bbdd_d_match_session_cb,
 		.find_session = bbdd_d_find_session_cb,
+		.session_post_hold = bbdd_d_session_post_hold_cb,
 	};
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;

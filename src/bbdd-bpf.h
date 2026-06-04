@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <json-c/json_object.h>
 
@@ -36,6 +37,8 @@ struct bbdd_bpf_cbs {
 			     char **error);
 
 	struct bbdd_d_session *(*find_session)(uint32_t discr, void *data);
+
+	void (*session_post_hold)(struct bbdd_d_session *dsess);
 };
 
 struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
@@ -66,12 +69,11 @@ int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
 				char **error);
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 const struct bbdd_d_session *dsess,
+			 struct bbdd_d_session *dsess,
 			 char **error);
 
-int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
-			      const struct bbdd_d_session *dsess,
-			      char **error);
+bool bbdd_bpf_session_is_on_hold(struct bbdd_bpf *bpf,
+				 const struct bbdd_d_session *dsess);
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			    struct bbdd_d_session *dsess,

@@ -84,6 +84,13 @@ struct bbdd_bpf_shwait {
 	int timer_fd;
 };
 
+struct bbdd_bpf_hold {
+	struct bbdd_bpf *bpf;
+	struct bbdd_d_session *dsess;
+	struct bbdd_bpf_session *bsess;
+	int timer_fd;
+};
+
 enum bbdd_bpf_session_state {
 	BBDD_BPF_SESSION_STATE_ON_HOLD,
 	BBDD_BPF_SESSION_STATE_STABLE,
@@ -142,6 +149,7 @@ struct bbdd_bpf_session {
 	struct bbdd_bpf_session_data dfr_data;
 	bool qd_change;
 	struct bbdd_bpf_shwait *shwait;
+	struct bbdd_bpf_hold *hold;
 
 	bool timer_armed;
 
@@ -1028,6 +1036,110 @@ bbdd_bpf_user_bdata(const struct bbdd_d_session *dsess)
 		.timing = dsess->local.timing,
 		.shutdown = dsess->local.flags.shutdown,
 	};
+}
+
+static void bbdd_bpf_hold_destroy(struct bbdd_bpf_hold *hold)
+{
+	bbdd_poll_unset_fd(hold->bpf->pctx, hold->timer_fd);
+	close(hold->timer_fd);
+	free(hold);
+}
+
+static void bbdd_bpf_hold_stop(struct bbdd_bpf_session *bsess)
+{
+	bbdd_bpf_hold_destroy(bsess->hold);
+	bsess->hold = NULL;
+}
+
+static int bbdd_bpf_hold_timer_cb(struct bbdd_poll_ctx *, short,
+				  void *data, char **)
+{
+	struct bbdd_bpf_hold *hold = data;
+	struct bbdd_d_session *dsess = hold->dsess;
+	struct bbdd_bpf_session *bsess = hold->bsess;
+	struct bbdd_bpf *bpf = hold->bpf;
+	uint64_t expirations;
+
+	/* Drain the timerfd so poll does not fire again. */
+	(void) read(hold->timer_fd, &expirations, sizeof(expirations));
+
+	bsess->eff_data = bbdd_bpf_user_bdata(dsess);
+	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
+
+	bpf->rb_ctx->cbs->session_post_hold(dsess);
+	bbdd_bpf_session_state_changed(bpf, dsess, bsess);
+
+	bbdd_bpf_hold_stop(bsess);
+	return 0;
+}
+
+static struct bbdd_bpf_hold *
+bbdd_bpf_hold_create(struct bbdd_bpf *bpf, struct bbdd_d_session *dsess,
+		     struct bbdd_bpf_session *bsess, char **error)
+{
+	struct itimerspec ts = {
+		.it_value = {
+			.tv_sec  = dsess->hold_time_us / 1'000'000,
+			.tv_nsec = (dsess->hold_time_us % 1'000'000) * 1000,
+		},
+	};
+	struct bbdd_bpf_hold *hold;
+	int timer_fd;
+	int rc;
+
+	*error = NULL;
+
+	hold = malloc(sizeof(*hold));
+	if (hold == NULL)
+		goto err;
+
+	/* Bump by 1 ns to avoid hold_time_us of 0 meaning timer disarm. */
+	ts.it_value.tv_nsec++;
+
+	timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+	if (timer_fd < 0)
+		goto free_hold;
+
+	rc = timerfd_settime(timer_fd, 0, &ts, NULL);
+	if (rc < 0)
+		goto close_timer_fd;
+
+	rc = bbdd_poll_set_fd(bpf->pctx, timer_fd, POLLIN,
+			      bbdd_bpf_hold_timer_cb, hold, error);
+	if (rc != 0)
+		goto close_timer_fd;
+
+	*hold = (struct bbdd_bpf_hold) {
+		.bpf = bpf,
+		.dsess = dsess,
+		.bsess = bsess,
+		.timer_fd = timer_fd,
+	};
+	return hold;
+
+close_timer_fd:
+	close(timer_fd);
+free_hold:
+	free(hold);
+err:
+	if (*error == NULL)
+		bbdd_util_fmterr(error, "%m");
+	return NULL;
+}
+
+static int bbdd_bpf_hold_start(struct bbdd_bpf *bpf,
+			       struct bbdd_d_session *dsess,
+			       struct bbdd_bpf_session *bsess,
+			       char **error)
+{
+	struct bbdd_bpf_hold *hold;
+
+	hold = bbdd_bpf_hold_create(bpf, dsess, bsess, error);
+	if (hold == NULL)
+		return -1;
+
+	bsess->hold = hold;
+	return 0;
 }
 
 static int bbdd_bpf_handle_session_update(struct bbdd_bpf *bpf,
@@ -2268,6 +2380,8 @@ err:
 static void __bbdd_bpf_session_del(struct bbdd_bpf *bpf,
 				   struct bbdd_bpf_session *bsess)
 {
+	if (bsess->hold != NULL)
+		bbdd_bpf_hold_stop(bsess);
 	if (bsess->shwait != NULL)
 		bbdd_bpf_shwait_stop(bpf, bsess);
 
@@ -2624,7 +2738,7 @@ close_fd:
 }
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
-			 const struct bbdd_d_session *dsess,
+			 struct bbdd_d_session *dsess,
 			 char **error)
 {
 	struct bbdd_bpf_session *bsess;
@@ -2652,13 +2766,19 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		.qd_change = false,
 	};
 
-	err = bbdd_bpf_session_conf_add(bpf, dsess, bsess, error);
+	err = bbdd_bpf_hold_start(bpf, dsess, bsess, error);
 	if (err != 0)
 		goto close_sock;
+
+	err = bbdd_bpf_session_conf_add(bpf, dsess, bsess, error);
+	if (err != 0)
+		goto hold_stop;
 
 	HASH_ADD_INT(bpf->sdir, discr, bsess);
 	return 0;
 
+hold_stop:
+	bbdd_bpf_hold_stop(bsess);
 close_sock:
 	close(sock_fd);
 free_bsess:
@@ -2666,25 +2786,16 @@ free_bsess:
 	return -1;
 }
 
-int bbdd_bpf_session_activate(struct bbdd_bpf *bpf,
-			      const struct bbdd_d_session *dsess,
-			      char **error)
+bool bbdd_bpf_session_is_on_hold(struct bbdd_bpf *bpf,
+				 const struct bbdd_d_session *dsess)
 {
-	uint32_t discr = dsess->local.discr;
 	struct bbdd_bpf_session *bsess;
 
-	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
-	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
-		return -1;
-	}
+	bsess = bbdd_bpf_sdir_get_session(bpf, dsess->local.discr);
+	if (bsess == NULL)
+		return false;
 
-	assert(bsess->bstate == BBDD_BPF_SESSION_STATE_ON_HOLD);
-	bsess->eff_data = bbdd_bpf_user_bdata(dsess);
-	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
-
-	return __bbdd_bpf_session_update(bpf, dsess, bsess, error);
+	return bsess->bstate == BBDD_BPF_SESSION_STATE_ON_HOLD;
 }
 
 int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
@@ -2700,6 +2811,19 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		bbdd_util_fmterr(error, "No BPF session found for discr %u",
 				 discr);
 		return -1;
+	}
+
+	switch (bsess->bstate) {
+	case BBDD_BPF_SESSION_STATE_ON_HOLD:
+		/* While on hold, the canonical configuration lives on dsess;
+		 * the BPF session is initialised from it once the hold
+		 * expires. */
+		return 0;
+	case BBDD_BPF_SESSION_STATE_STABLE:
+        case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
+	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
+	case BBDD_BPF_SESSION_STATE_SHUTTING_DOWN:
+		break;
 	}
 
 	rc = bbdd_bpf_handle_session_update(bpf, dsess, bsess, error);
