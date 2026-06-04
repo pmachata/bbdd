@@ -21,6 +21,7 @@ source ${tests_dir}/lib.sh
 	vrf-bridge4.sh
 	vrf-bridge6.sh
 	vrf-ifbound.sh
+	vrf-scale.sh
 	ns-delay.sh
 	err.sh
 	cli.sh

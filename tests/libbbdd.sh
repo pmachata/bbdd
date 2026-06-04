@@ -262,6 +262,42 @@ nsessions_test()
 	Bbdd_log_test "$xN ${descr}session$pl reported"
 }
 
+# Count sessions whose local & remote states both equal $goal.
+Bbdd_nsessions_in_state()
+{
+	local goal=$1; shift
+
+	Bbdd --json session show | jq "
+		[.sessions[] |
+		 select(.state.local.state == \"$goal\" and
+			.state.remote.state == \"$goal\")] |
+		 length"
+}
+
+Bbdd_nsessions_in_state_is()
+{
+	local goal=$1; shift
+	local xN=$1; shift
+	local N
+
+	N=$(Bbdd_nsessions_in_state "$goal")
+	((N == xN))
+}
+
+# Wait for exactly $xN sessions to reach $goal state. Single jq pass per
+# poll, so this scales to many sessions.
+nsessions_state_test()
+{
+	local goal=$1; shift
+	local xN=$1; shift
+
+	slowwait ${BBDD_SESSION_WAIT_TIME-2} \
+		 Bbdd_nsessions_in_state_is "$goal" "$xN"
+	check_err $? "$xN sessions reach $goal"
+
+	Bbdd_log_test "$xN sessions reach $goal"
+}
+
 session_value_check()
 {
 	local key=$1; shift
