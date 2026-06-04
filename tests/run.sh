@@ -16,6 +16,8 @@ source ${tests_dir}/lib.sh
 	ns-bridge4.sh
 	ns-bridge6.sh
 	ns-gone.sh
+	ns-ttl4.sh
+	ns-ttl6.sh
 	vrf-bridge4.sh
 	vrf-bridge6.sh
 	vrf-ifbound.sh

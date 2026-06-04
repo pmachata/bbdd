@@ -542,7 +542,7 @@ __Bbdd_IP6_mask()
 {
 	local n=$1; shift
 
-	echo $(__Bbdd_IP6 "$n")/64
+	echo $(__Bbdd_IP6 "$n")/124
 }
 
 Bbdd_IP()
