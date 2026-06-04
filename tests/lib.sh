@@ -747,6 +747,11 @@ Sysctl()
 	$(nspfx) sysctl "$@"
 }
 
+Tcpdump()
+{
+	$(nspfx) tcpdump "$@"
+}
+
 in_ns()
 {
 	local NS=$1; shift

@@ -462,6 +462,8 @@ Bbdd_connect_ns()
 		local ns2_link=$1; shift
 		local ns2_addr=$1; shift
 
+		local do_ping=1
+
 		ip link add name "$ns1_link" netns "${!ns1_name}" type veth \
 		   peer name "$ns2_link" netns "${!ns2_name}"
 		defer in_ns "$ns1_name" Ip link del dev "$ns1_link"
@@ -469,12 +471,22 @@ Bbdd_connect_ns()
 		in_ns "$ns1_name" adf_ip_link_set_up "$ns1_link"
 		in_ns "$ns2_name" adf_ip_link_set_up "$ns2_link"
 
-		in_ns "$ns1_name" adf_ip_addr_add "$ns1_link" "$ns1_addr"
-		in_ns "$ns2_name" adf_ip_addr_add "$ns2_link" "$ns2_addr"
+		if [[ "$ns1_addr" != - ]]; then
+			in_ns "$ns1_name" adf_ip_addr_add "$ns1_link" "$ns1_addr"
+		else
+			do_ping=0
+		fi
+		if [[ "$ns2_addr" != - ]]; then
+			in_ns "$ns2_name" adf_ip_addr_add "$ns2_link" "$ns2_addr"
+		else
+			do_ping=0
+		fi
 
-		sleep 2
-		in_ns "$ns1_name" ping_test "${ns2_addr%/*}"
-		in_ns "$ns2_name" ping_test "${ns1_addr%/*}"
+		if ((do_ping)); then
+			sleep 2
+			in_ns "$ns1_name" ping_test "${ns2_addr%/*}"
+			in_ns "$ns2_name" ping_test "${ns1_addr%/*}"
+		fi
 	done
 }
 

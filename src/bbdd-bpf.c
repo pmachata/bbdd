@@ -1452,6 +1452,13 @@ bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
 		dsess->remote.state.state = BBDD_BFD_PKT_STATE_DOWN;
 		dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_TIME_EXPIRED;
 
+		/* The peer could go away, change its discriminator, re-sync
+		 * with another BFD peer, and then come back. At that point both
+		 * us and the peer would have a completely incompatible non-0
+		 * discriminators and would fail to make a handshake. So when
+		 * the peer times out, we need to unset its discriminator. */
+		dsess->remote.discr = 0;
+
 		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 	}
 }
