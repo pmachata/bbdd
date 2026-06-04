@@ -24,13 +24,22 @@ source ${tests_dir}/lib.sh
 	cli.sh
 }"
 
+printf -v divider '%*s' 74 ''
+
 for t in $TESTS; do
-	echo "== $t =="
+	echo
+	echo "$t"
+	echo "${divider// /-}"
 
 	${tests_dir}/run1.sh "${tests_dir}/$t"
 	check_err $? "$t"
 
+	echo "${divider// /-}"
 	log_test "$t"
 done
 
+echo
+echo "${divider// /=}"
+RET=$EXIT_STATUS
+log_test "bbdd tests"
 exit "$EXIT_STATUS"

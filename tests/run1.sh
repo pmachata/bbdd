@@ -18,6 +18,10 @@ if [[ "$(id -u)" -ne 0 ]]; then
 	exit "$EXIT_STATUS"
 fi
 
-source "$T"
+if [[ ! -e "$T" ]]; then
+	log_test_skip "The test file $T does not exist"
+else
+	source "$T"
+fi
 
 exit "$EXIT_STATUS"
