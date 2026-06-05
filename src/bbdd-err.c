@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bbdd.h"
+int bbdd_err_verbosity;
 
 int bbdd_err_vfmt(char **strp, const char *fmt, va_list ap)
 {
@@ -90,7 +90,7 @@ int bbdd_err_app(char **error, const char *fmt, ...)
 
 static void bbdd_err_vprinterr(char **error, const char *fmt, va_list ap)
 {
-	if (bbdd_env.verbosity < 0)
+	if (bbdd_err_verbosity < 0)
 		return;
 
 	if (fmt != NULL)
@@ -107,11 +107,6 @@ __attribute__((format(printf, 2, 3)))
 void bbdd_err_print(char **error, const char *fmt, ...)
 {
 	va_list ap;
-
-	if (bbdd_env.verbosity < 0) {
-		free(*error);
-		return;
-	}
 
 	va_start(ap, fmt);
 	bbdd_err_vprinterr(error, fmt, ap);

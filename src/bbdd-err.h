@@ -2,6 +2,8 @@
 #pragma once
 #include <stdarg.h>
 
+extern int bbdd_err_verbosity;
+
 int bbdd_err_vfmt(char **strp, const char *fmt, va_list ap);
 
 /* Format an error into *strp. *strp is initialized to NULL on out of

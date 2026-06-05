@@ -11,6 +11,7 @@
 
 #include "bbdd-c.h"
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-mon.h"
 #include "config.h"
 
@@ -145,6 +146,7 @@ int main(int argc, char **argv)
 	if (verbosity >= 1)
 		topics.enabled[BBDD_MON_TOPIC_debug] = true;
 	bbdd_env.verbosity = verbosity;
+	bbdd_err_verbosity = verbosity;
 
 	rc = bbdd_cmd(argc, argv, &topics);
 	if (rc != 0)
