@@ -18,10 +18,8 @@
 #include <linux/if_ether.h>
 #include <linux/types.h>
 
-#include "bbdd-util.h" // xxx util has drifted away from being very low-level
-		       // library into a catch-all of utilities. I think we need
-		       // a bbdd-fmt or bbdd-err for the error-formatting stuff.
-		       // Or these high-level things could be in bbdd maybe.
+#include "bbdd-err.h"
+#include "bbdd-util.h"
 
 static int bbdd_sock_parse_range(const char *str, long long *ret,
 				 long long min, long long max,
@@ -36,8 +34,8 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 	/* No conversion performed. */
 	if (rv == 0 && errno == EINVAL) {
 	invalid:
-		bbdd_util_fmterr(error, "Invalid %s `%s'. Expected integer [%lld,%lld] (decimal or 0x-hex)",
-				 what, str, min, max);
+		bbdd_err_fmt(error, "Invalid %s `%s'. Expected integer [%lld,%lld] (decimal or 0x-hex)",
+			     what, str, min, max);
 		return -1;
 	}
 	/* Invalid number range. */
@@ -46,8 +44,8 @@ static int bbdd_sock_parse_range(const char *str, long long *ret,
 
 	/* There was garbage at the end of the string. */
 	if (*nulbyte != 0) {
-		bbdd_util_fmterr(error, "Invalid %s: value `%lld' followed by garbage",
-				 what, rv);
+		bbdd_err_fmt(error, "Invalid %s: value `%lld' followed by garbage",
+			     what, rv);
 		return -1;
 	}
 
@@ -113,11 +111,11 @@ static int bbdd_sock_parse_addrstr_unix(const char *sockdir,
 	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
 		       "%s%s%s", sockdir, maybe_slash, addr);
 	if (len < 0) {
-		bbdd_util_fmterr(error, "Failed to parse UNIX domain socket address: %m");
+		bbdd_err_fmt(error, "Failed to parse UNIX domain socket address: %m");
 		return len;
 	}
 	if ((unsigned) len >= sizeof(bsa->sun.sun_path)) {
-		bbdd_util_fmterr(error, "UNIX domain socket address too long");
+		bbdd_err_fmt(error, "UNIX domain socket address too long");
 		return -ENOBUFS;
 	}
 
@@ -134,17 +132,17 @@ int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 		return 0;
 
 	if (rc == -1) {
-		bbdd_util_fmterr(error, "Invalid address family `%d'", af);
+		bbdd_err_fmt(error, "Invalid address family `%d'", af);
 		return -1;
 	}
 
-	bbdd_util_fmterr(error, "Invalid address: `%s'", addr);
+	bbdd_err_fmt(error, "Invalid address: `%s'", addr);
 	return -1;
 }
 
 static int bbdd_sock_unsupported_family(int af, char **error)
 {
-	bbdd_util_fmterr(error, "Unsupported address family %d", af);
+	bbdd_err_fmt(error, "Unsupported address family %d", af);
 	return -1;
 }
 
@@ -219,7 +217,7 @@ int bbdd_sockaddr_ntop(socklen_t bufsize;
 
 	ret = inet_ntop(af, addrbuf, buf, bufsize);
 	if (ret == NULL) {
-		bbdd_util_fmterr(error, "Failed to format address: %m");
+		bbdd_err_fmt(error, "Failed to format address: %m");
 		return -1;
 	}
 
@@ -245,7 +243,7 @@ static int bbdd_sock_split_addr_ipv4(char *addr, bool allow_port,
 	port = allow_port ? strchr(addr, ':') : NULL;
 	if (port != NULL) {
 		if (!allow_port) {
-			bbdd_util_fmterr(error, "Port disallowed");
+			bbdd_err_fmt(error, "Port disallowed");
 			return -EINVAL;
 		}
 		*port++ = '\0';
@@ -268,7 +266,7 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 	/* Check & skip '['. */
 	if (*addr++ != '[') {
 	no_brackets:
-		bbdd_util_fmterr(error, "IPv6 address needs to be []-enclosed");
+		bbdd_err_fmt(error, "IPv6 address needs to be []-enclosed");
 		return -1;
 	}
 
@@ -283,8 +281,8 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 		saux++;
 		port = saux;
 	} else if (*saux != '\0') {
-		bbdd_util_fmterr(error, "Invalid address `%s': Garbage after closing bracket",
-				 addr);
+		bbdd_err_fmt(error, "Invalid address `%s': Garbage after closing bracket",
+			     addr);
 		return -EINVAL;
 	}
 
@@ -301,7 +299,7 @@ static int bbdd_sock_split_addr_ipv6_port(char *addr,
 		const char *str = (STR);				\
 		char *ret = NULL;					\
 		if (strlen(str) > len)					\
-			bbdd_util_fmterr((ERROR), "IPv address too long"); \
+			bbdd_err_fmt((ERROR), "IPv address too long"); \
 		else							\
 			ret = strdupa(str);				\
 		ret;							\
@@ -355,7 +353,7 @@ int bbdd_sock_af_from_str(const char *proto, char **error)
 		if (strcmp(proto, bbdd_sock_protos[i].name) == 0)
 			return bbdd_sock_protos[i].af;
 
-	bbdd_util_fmterr(error, "invalid socket protocol `%s'", proto);
+	bbdd_err_fmt(error, "invalid socket protocol `%s'", proto);
 	return -1;
 }
 
@@ -379,7 +377,7 @@ static int __bbdd_sock_split_addr_proto(char *arg, int *ret_af,
 
 	colon = strchr(arg, ':');
 	if (colon == NULL) {
-		bbdd_util_fmterr(error, "Invalid address format: %s", arg);
+		bbdd_err_fmt(error, "Invalid address format: %s", arg);
 		return -1;
 	}
 
@@ -488,7 +486,7 @@ static int bbdd_cli_sockaddr(const char *sockdir,
 
 	rc = asprintf(&sockname, "bbdd.cli.%d", getpid());
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return rc;
 	}
 
@@ -507,7 +505,7 @@ static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 
 	fd = socket(bsa->sa.sa_family, type, 0);
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "Failed to open socket: %m");
+		bbdd_err_fmt(error, "Failed to open socket: %m");
 		return -1;
 	}
 
@@ -565,7 +563,7 @@ int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 
 	rc = bind(sock->fd, &bsa->sa, bsa->len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to bind socket: %m");
+		bbdd_err_fmt(error, "Failed to bind socket: %m");
 		goto close_sock;
 	}
 
@@ -592,7 +590,7 @@ int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error)
 	return 0;
 
 err:
-	bbdd_util_appenderr(error, "Failed to open daemon socket");
+	bbdd_err_app(error, "Failed to open daemon socket");
 	return rc;
 }
 
@@ -628,8 +626,8 @@ int bbdd_sock_open_c(struct bbdd_sock *cli,
 	};
 	rc = connect(peer->fd, &peer->sa.sa, peer->sa.len);
 	if (rc != 0) {
-		bbdd_util_fmterr(error, "Failed to connect to socket `%s': %m",
-				 peer->sa.sun.sun_path);
+		bbdd_err_fmt(error, "Failed to connect to socket `%s': %m",
+			     peer->sa.sun.sun_path);
 		goto close_cli;
 	}
 
@@ -659,15 +657,15 @@ int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 	case AF_INET6:
 		break;
 	default:
-		bbdd_util_fmterr(error, "bbdd_sock_open_udp: family `%d' not supported",
-				 addr.sa.sa_family);
+		bbdd_err_fmt(error, "bbdd_sock_open_udp: family `%d' not supported",
+			     addr.sa.sa_family);
 		return -1;
 	}
 
 	fd = socket(addr.sa.sa_family, SOCK_DGRAM, 0);
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "socket(af=%d, SOCK_DGRAM): %s",
-				 addr.sa.sa_family, strerror(errno));
+		bbdd_err_fmt(error, "socket(af=%d, SOCK_DGRAM): %s",
+			     addr.sa.sa_family, strerror(errno));
 		return -1;
 	}
 
@@ -675,15 +673,15 @@ int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		rc = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
 				&one, sizeof(one));
 		if (rc < 0) {
-			bbdd_util_fmterr(error, "IPV6_V6ONLY: %s",
-					 strerror(errno));
+			bbdd_err_fmt(error, "IPV6_V6ONLY: %s",
+				     strerror(errno));
 			goto close_fd;
 		}
 	}
 
 	rc = bind(fd, &addr.sa, addr.len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "bind: %m");
+		bbdd_err_fmt(error, "bind: %m");
 		goto close_fd;
 	}
 
@@ -722,19 +720,19 @@ int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
 	msgsz = recvfrom(sock->fd, NULL, 0, MSG_PEEK | MSG_TRUNC,
 			 (struct sockaddr *) &peer->sa, &peer->sa.len);
 	if (msgsz < 0) {
-		bbdd_util_fmterr(error, "recvfrom: %m");
+		bbdd_err_fmt(error, "recvfrom: %m");
 		return -1;
 	}
 
 	buf = calloc(1, (size_t)msgsz + 1);
 	if (buf == NULL) {
-		bbdd_util_fmterr(error, "calloc: %m");
+		bbdd_err_fmt(error, "calloc: %m");
 		return -1;
 	}
 
 	n = recv(sock->fd, buf, (size_t)msgsz, 0);
 	if (n < 0) {
-		bbdd_util_fmterr(error, "recv: %m");
+		bbdd_err_fmt(error, "recv: %m");
 		rc = -1;
 		goto free_buf;
 	}

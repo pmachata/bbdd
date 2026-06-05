@@ -13,6 +13,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/veth.h>
 
+#include "bbdd-err.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
 
@@ -41,7 +42,7 @@ static int bbdd_nl_extack_attr(const struct nlattr *attr, void *data)
 	struct bbdd_nl_cb *cb = data;
 
 	if (mnl_attr_get_type(attr) == NLMSGERR_ATTR_MSG)
-		bbdd_util_fmterr(&cb->extack, "%s", mnl_attr_get_str(attr));
+		bbdd_err_fmt(&cb->extack, "%s", mnl_attr_get_str(attr));
 	return MNL_CB_OK;
 }
 
@@ -148,21 +149,21 @@ struct bbdd_nl *bbdd_nl_create(char **error)
 	/* The macro MNL_SOCKET_BUFFER_SIZE involves sysconf() calls. */
 	sz = MNL_SOCKET_BUFFER_SIZE;
 	if (sz < 0) {
-		bbdd_util_fmterr(error, "Failed to determine netlink socket buffer size: %m");
+		bbdd_err_fmt(error, "Failed to determine netlink socket buffer size: %m");
 		return NULL;
 	}
 
 	bufsize = (unsigned long) sz;
 	nl = malloc(sizeof(*nl) + bufsize);
 	if (nl == NULL) {
-		bbdd_util_fmterr(error, "Failed to create netlink context: %m");
+		bbdd_err_fmt(error, "Failed to create netlink context: %m");
 		return NULL;
 	}
 
 	nl->bufsize = bufsize;
 	nl->sk = bbdd_nl_socket_open(NETLINK_ROUTE);
 	if (nl->sk == NULL) {
-		bbdd_util_fmterr(error, "Failed to open netlink socket: %m");
+		bbdd_err_fmt(error, "Failed to open netlink socket: %m");
 		goto free_nl;
 	}
 
@@ -187,8 +188,8 @@ static int bbdd_nl_maybe_get_ifindex(uint32_t *ifindex, const char *name,
 
 	*ifindex = if_nametoindex(name);
 	if (!*ifindex) {
-		bbdd_util_fmterr(error, "Failed to find ifindex of a just-created interface `%s'",
-				 name);
+		bbdd_err_fmt(error, "Failed to find ifindex of a just-created interface `%s'",
+			     name);
 		return -1;
 	}
 
@@ -238,14 +239,14 @@ int bbdd_nl_add_veth(struct bbdd_nl *nl,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_err_fmt(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_xferr(error, &nlcb.extack);
-		bbdd_util_appenderr(error, "Failed to get netlink response");
+		bbdd_err_xfer(error, &nlcb.extack);
+		bbdd_err_app(error, "Failed to get netlink response");
 		return -1;
 	}
 
@@ -279,15 +280,15 @@ int bbdd_nl_del_if(struct bbdd_nl *nl, const char *name, char **error)
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_err_fmt(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_xferr(error, &nlcb.extack);
-		bbdd_util_appenderr(error, "Failed to delete interface `%s': %m",
-				    name);
+		bbdd_err_xfer(error, &nlcb.extack);
+		bbdd_err_app(error, "Failed to delete interface `%s': %m",
+			     name);
 		return -1;
 	}
 
@@ -314,15 +315,15 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_err_fmt(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_xferr(error, &nlcb.extack);
-		bbdd_util_appenderr(error, "Failed to bring up interface %u: %m",
-				    ifindex);
+		bbdd_err_xfer(error, &nlcb.extack);
+		bbdd_err_app(error, "Failed to bring up interface %u: %m",
+			     ifindex);
 		return -1;
 	}
 
@@ -359,15 +360,15 @@ static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send netlink message: %m");
+		bbdd_err_fmt(error, "Failed to send netlink message: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq, NULL, &nlcb);
 	if (rc < 0) {
-		bbdd_util_xferr(error, &nlcb.extack);
-		bbdd_util_appenderr(error, "Failed to create `%s' qdisc on ifindex %u: %m",
-				    kind, ifindex);
+		bbdd_err_xfer(error, &nlcb.extack);
+		bbdd_err_app(error, "Failed to create `%s' qdisc on ifindex %u: %m",
+			     kind, ifindex);
 		return -1;
 	}
 
@@ -489,16 +490,16 @@ int bbdd_nl_get_ifinfo(struct bbdd_nl *nl, uint32_t ifindex,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send RTM_GETLINK: %m");
+		bbdd_err_fmt(error, "Failed to send RTM_GETLINK: %m");
 		return -1;
 	}
 
 	rc = bbdd_socket_recv_run(nl, nl->sk, nlh->nlmsg_seq,
 				  bbdd_nl_vrf_table_cb_fn, &vrfcb);
 	if (rc < 0) {
-		bbdd_util_xferr(error, &vrfcb.base.extack);
-		bbdd_util_appenderr(error, "Failed to get link info for ifindex %u: %m",
-				    ifindex);
+		bbdd_err_xfer(error, &vrfcb.base.extack);
+		bbdd_err_app(error, "Failed to get link info for ifindex %u: %m",
+			     ifindex);
 		return -1;
 	}
 
@@ -516,8 +517,8 @@ int bbdd_nl_get_vrf_table(struct bbdd_nl *nl, uint32_t ifindex,
 		return rc;
 
 	if (ifinfo.table == 0) {
-		bbdd_util_fmterr(error, "Interface %u is not a VRF device",
-				 ifindex);
+		bbdd_err_fmt(error, "Interface %u is not a VRF device",
+			     ifindex);
 		return -1;
 	}
 
@@ -554,7 +555,7 @@ int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to send RTM_NEWNEIGH: %m");
+		bbdd_err_fmt(error, "Failed to send RTM_NEWNEIGH: %m");
 		return -errno;
 	}
 
@@ -564,8 +565,8 @@ int bbdd_nl_refresh_neigh(struct bbdd_nl *nl, uint32_t ifindex,
 			free(nlcb.extack);
 			return 0;
 		}
-		bbdd_util_xferr(error, &nlcb.extack);
-		bbdd_util_appenderr(error, "Failed to refresh neighbor: %m");
+		bbdd_err_xfer(error, &nlcb.extack);
+		bbdd_err_app(error, "Failed to refresh neighbor: %m");
 		return -1;
 	}
 

@@ -28,6 +28,7 @@
 
 #include "bbdd.h"
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
@@ -362,7 +363,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 	}
 
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "sendto(bfd_tx): %d %m", errno);
+		bbdd_err_fmt(error, "sendto(bfd_tx): %d %m", errno);
 		return -1;
 	}
 	return 0;
@@ -557,7 +558,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 	int err;
 
 	if (af != dst->sa.sa_family) {
-		bbdd_util_fmterr(error, "Mismatch in families of source and destination addresses");
+		bbdd_err_fmt(error, "Mismatch in families of source and destination addresses");
 		return -1;
 	}
 
@@ -573,8 +574,8 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		       sizeof(config.fib_lookup.ipv6_dst));
 		break;
 	default:
-		bbdd_util_fmterr(error, "Unsupported session address family %d",
-				 af);
+		bbdd_err_fmt(error, "Unsupported session address family %d",
+			     af);
 		return -1;
 	}
 
@@ -583,8 +584,8 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 				   &config, sizeof(config),
 				   BPF_ANY);
 	if (err) {
-		bbdd_util_fmterr(error, "Failed to insert / update BPF session config: %s",
-				 strerror(-err));
+		bbdd_err_fmt(error, "Failed to insert / update BPF session config: %s",
+			     strerror(-err));
 		return -1;
 	}
 
@@ -612,8 +613,8 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 				   &data, sizeof(data),
 				   BPF_ANY);
 	if (err) {
-		bbdd_util_fmterr(error, "Failed to insert session data: %s",
-				 strerror(-err));
+		bbdd_err_fmt(error, "Failed to insert session data: %s",
+			     strerror(-err));
 		goto delete;
 	}
 
@@ -651,7 +652,7 @@ static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
 	rc = setsockopt(bsess->sock_fd, SOL_SOCKET, SO_MARK,
 			&mark, sizeof(mark));
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "setsockopt(SO_MARK): %m");
+		bbdd_err_fmt(error, "setsockopt(SO_MARK): %m");
 		return -1;
 	}
 	return 0;
@@ -825,7 +826,7 @@ bbdd_bpf_addr_to_sockaddr(uint16_t ethtype,
 		return 0;
 	}
 
-	bbdd_util_fmterr(error, "%s: invalid ethtype %#x", context, ethtype);
+	bbdd_err_fmt(error, "%s: invalid ethtype %#x", context, ethtype);
 	return -EPROTO;
 }
 
@@ -1007,7 +1008,7 @@ free_shwait:
 	free(shwait);
 err:
 	if (*error == NULL)
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 	return NULL;
 }
 
@@ -1123,7 +1124,7 @@ free_hold:
 	free(hold);
 err:
 	if (*error == NULL)
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 	return NULL;
 }
 
@@ -1686,7 +1687,7 @@ put_bitarr:
 put_obj:
 	json_object_put(obj);
 oom:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return NULL;
 }
 
@@ -1719,7 +1720,7 @@ put_params:
 	json_object_put(params);
 put_addr_obj:
 	json_object_put(addr_obj);
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1771,7 +1772,7 @@ put_dst_obj:
 	json_object_put(dst_obj);
 put_src_obj:
 	json_object_put(src_obj);
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1805,7 +1806,7 @@ put_params:
 	json_object_put(params);
 put_pkt_obj:
 	json_object_put(pkt_obj);
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1831,7 +1832,7 @@ bbdd_bpf_rb_format_rx_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1857,7 +1858,7 @@ bbdd_bpf_rb_format_unknown(enum bbdd_bpf_rb_elem_type type,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1949,14 +1950,14 @@ bbdd_bpf_rb_init(const struct bbdd_bpf_cbs *cbs, struct bbdd_prog *skel,
 
 	rb_ctx = malloc(sizeof(*rb_ctx));
 	if (rb_ctx == NULL) {
-		bbdd_util_fmterr(error, "bbdd_bpf_rb_setup: %m");
+		bbdd_err_fmt(error, "bbdd_bpf_rb_setup: %m");
 		return NULL;
 	}
 
 	rb = ring_buffer__new(bpf_map__fd(skel->maps.bbdd_bpf_rb),
 			      bbdd_bpf_rb_handle, rb_ctx, NULL);
 	if (!rb) {
-		bbdd_util_fmterr(error, "ring_buffer__new: %m");
+		bbdd_err_fmt(error, "ring_buffer__new: %m");
 		goto free_ctx;
 	}
 
@@ -2000,8 +2001,7 @@ static int bbdd_bpf_hook_create(int ifindex, char **error)
 
 	err = bpf_tc_hook_create(&hook);
 	if (err != 0)
-		bbdd_util_fmterr(error, "bpf_tc_hook_create: %s",
-				 strerror(-err));
+		bbdd_err_fmt(error, "bpf_tc_hook_create: %s", strerror(-err));
 	return err;
 }
 
@@ -2037,8 +2037,8 @@ static int bbdd_bpf_attach(struct bpf_program *prog, int ifindex,
 
 	err = bpf_tc_attach(&hook, &opts);
 	if (err != 0)
-		bbdd_util_fmterr(error, "bpf_tc_attach(ifindex=%u): %s",
-				 ifindex, strerror(-err));
+		bbdd_err_fmt(error, "bpf_tc_attach(ifindex=%u): %s",
+			     ifindex, strerror(-err));
 	return err;
 }
 
@@ -2159,7 +2159,7 @@ static int bbdd_bpf_sockets_attach(struct bbdd_bpf *bpf, char **error)
 	return 0;
 
 cleanup:
-	bbdd_util_fmterr(error, "Failed to attach socket program: %m");
+	bbdd_err_fmt(error, "Failed to attach socket program: %m");
 	BBDD_PROG_RECV_SOCKETS(DETACH);
 	return err;
 
@@ -2202,8 +2202,8 @@ static int bbdd_bpf_sockmap_init(struct bbdd_bpf *bpf, char **error)
 	return 0;
 
 err:
-	bbdd_util_fmterr(error, "Failed to insert socket into sockmap: %s",
-			 strerror(-err));
+	bbdd_err_fmt(error, "Failed to insert socket into sockmap: %s",
+		     strerror(-err));
 	return err;
 
 #undef UPDATE
@@ -2237,7 +2237,7 @@ static int bbdd_bpf_sk_lookup_attach(struct bbdd_bpf *bpf, char **error)
 
 	netns_fd = open("/proc/self/ns/net", O_RDONLY | O_CLOEXEC);
 	if (netns_fd < 0) {
-		bbdd_util_fmterr(error, "open(/proc/self/ns/net): %m");
+		bbdd_err_fmt(error, "open(/proc/self/ns/net): %m");
 		err = netns_fd;
 		goto sockmap_fini;
 	}
@@ -2245,7 +2245,7 @@ static int bbdd_bpf_sk_lookup_attach(struct bbdd_bpf *bpf, char **error)
 	bpf->sk_lookup_link = bpf_program__attach_netns(
 			bpf->skel->progs.bbdd_sk_lookup, netns_fd);
 	if (!bpf->sk_lookup_link) {
-		bbdd_util_fmterr(error, "Failed to attach socket lookup program: %m");
+		bbdd_err_fmt(error, "Failed to attach socket lookup program: %m");
 		err = -1;
 		goto close_netns_fd;
 	}
@@ -2284,7 +2284,7 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 
 	bpf = calloc(1, sizeof(*bpf));
 	if (bpf == NULL) {
-		bbdd_util_fmterr(error, "calloc: %m");
+		bbdd_err_fmt(error, "calloc: %m");
 		goto err;
 	}
 
@@ -2296,7 +2296,7 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 
 	bpf->skel = bbdd_prog__open_and_load();
 	if (!bpf->skel) {
-		bbdd_util_fmterr(error, "bbdd_prog__open_and_load: %m");
+		bbdd_err_fmt(error, "bbdd_prog__open_and_load: %m");
 		goto free_bpf;
 	}
 
@@ -2374,7 +2374,7 @@ destroy_prog:
 free_bpf:
 	free(bpf);
 err:
-	bbdd_util_appenderr(error, "Failed to initialize BPF");
+	bbdd_err_app(error, "Failed to initialize BPF");
 	return NULL;
 }
 
@@ -2424,7 +2424,7 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 
 static void bbdd_bpf_stat_fmterr(char **error)
 {
-	bbdd_util_fmterr(error, "Failed to format stats to JSON: %m");
+	bbdd_err_fmt(error, "Failed to format stats to JSON: %m");
 }
 
 static int bbdd_bpf_add_stat(struct json_object *obj,
@@ -2479,9 +2479,8 @@ static int bbdd_bpf_sess_data_lookup(struct bbdd_bpf *bpf,
 				   &discr, sizeof(discr),
 				   data, sizeof(*data), 0);
 	if (err != 0)
-		bbdd_util_fmterr(error,
-				 "Failed to look up BPF session data for discr %u: %s",
-				 discr, strerror(-err));
+		bbdd_err_fmt(error, "Failed to look up BPF session data for discr %u: %s",
+			     discr, strerror(-err));
 
 	return err;
 }
@@ -2497,8 +2496,8 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
+		bbdd_err_fmt(error, "No BPF session found for discr %u",
+			     discr);
 		return NULL;
 	}
 
@@ -2540,8 +2539,8 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
+		bbdd_err_fmt(error, "No BPF session found for discr %u",
+			     discr);
 		return NULL;
 	}
 
@@ -2608,8 +2607,8 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
+		bbdd_err_fmt(error, "No BPF session found for discr %u",
+			     discr);
 		return -1;
 	}
 
@@ -2660,7 +2659,7 @@ put_timing_obj:
 	json_object_put(timing_obj);
 put_bpf_obj:
 	json_object_put(bpf_obj);
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -2674,8 +2673,8 @@ int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
+		bbdd_err_fmt(error, "No BPF session found for discr %u",
+			     discr);
 		return -1;
 	}
 
@@ -2710,14 +2709,14 @@ static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
 		proto = ETH_P_IPV6;
 		break;
 	default:
-		bbdd_util_fmterr(error, "Unsupported address family %d",
-				 dsess->src.sa.sa_family);
+		bbdd_err_fmt(error, "Unsupported address family %d",
+			     dsess->src.sa.sa_family);
 		return -1;
 	}
 
 	fd = socket(AF_PACKET, SOCK_DGRAM, htons(proto));
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "socket(AF_PACKET): %m");
+		bbdd_err_fmt(error, "socket(AF_PACKET): %m");
 		return -1;
 	}
 
@@ -2727,7 +2726,7 @@ static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
 
 	rc = bind(fd, &sa.sa, sizeof(sa));
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "bind(AF_PACKET): %m");
+		bbdd_err_fmt(error, "bind(AF_PACKET): %m");
 		goto close_fd;
 	}
 
@@ -2748,7 +2747,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 
 	bsess = malloc(sizeof(*bsess));
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return -1;
 	}
 
@@ -2809,8 +2808,8 @@ int bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 	bsess = bbdd_bpf_sdir_get_session(bpf, discr);
 	if (bsess == NULL) {
-		bbdd_util_fmterr(error, "No BPF session found for discr %u",
-				 discr);
+		bbdd_err_fmt(error, "No BPF session found for discr %u",
+			     discr);
 		return -1;
 	}
 

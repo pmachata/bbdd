@@ -17,6 +17,7 @@
 #include "bbdd-bfdd.h"
 #include "bbdd-c.h"
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
@@ -54,7 +55,7 @@ static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
 
 	stats = malloc(sizeof(*stats));
 	if (stats == NULL) {
-		bbdd_util_fmterr(error, "Could not allocate stats context: %m");
+		bbdd_err_fmt(error, "Could not allocate stats context: %m");
 		return NULL;
 	}
 
@@ -199,7 +200,7 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 
 	rc = bbdd_util_jrpc_send(&br->stats->peer, resp, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to send session counters response");
+		bbdd_err_print(&error, "Failed to send session counters response");
 
 	json_object_put(resp);
 	bbdd_br_stats_free(br->stats);
@@ -421,8 +422,8 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	int rc;
 
 	if (msg->header.version != 1) {
-		bbdd_util_fmterr(&error, "Wrong message version number %d",
-				 msg->header.version);
+		bbdd_err_fmt(&error, "Wrong message version number %d",
+			     msg->header.version);
 		goto senderr;
 	}
 
@@ -447,7 +448,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	case DP_DELETE_SESSION:
 	case DP_REQUEST_SESSION_COUNTERS:
 	default:
-		bbdd_util_fmterr(&error, "Invalid message type %d", bmt);
+		bbdd_err_fmt(&error, "Invalid message type %d", bmt);
 		break;
 	}
 
@@ -492,7 +493,7 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short,
 	fd = accept4(br->bfdd_server.fd, NULL, NULL,
 		     SOCK_NONBLOCK | SOCK_CLOEXEC);
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "accept4: %m");
+		bbdd_err_fmt(error, "accept4: %m");
 		goto err;
 	}
 
@@ -515,7 +516,7 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short,
 fd_close:
 	close(fd);
 err:
-	bbdd_util_appenderr(error, "BFDD client accept");
+	bbdd_err_app(error, "BFDD client accept");
 	return -1;
 }
 
@@ -530,7 +531,7 @@ static int bbdd_br_open_bfdd_server(const struct bbdd_sockaddr *bsa,
 
 	rc = listen(sock->fd, SOMAXCONN);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "listen: %m");
+		bbdd_err_fmt(error, "listen: %m");
 		goto close_sock;
 	}
 
@@ -556,7 +557,7 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	err = bbdd_sock_parse_addr(addr, &bfdd_bsa, BFD_DATA_PLANE_DEFAULT_PORT,
 				   &error);
 	if (err != 0) {
-		bbdd_util_appenderr(&error, "Failed to parse BFDD address");
+		bbdd_err_app(&error, "Failed to parse BFDD address");
 		goto out;
 	}
 
@@ -579,20 +580,20 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	err = bbdd_mon_subscribe_cb(br.mon, bbdd_c_monitor_dispatch, NULL,
 				    topics, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to subscribe to monitor");
+		bbdd_err_print(&error, "Failed to subscribe to monitor");
 		goto mon_fini;
 	}
 
 	err = bbdd_br_open_bfdd_server(&bfdd_bsa, &br.bfdd_server, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to open BFDD server socket");
+		bbdd_err_print(&error, "Failed to open BFDD server socket");
 		goto mon_fini;
 	}
 
 	err = bbdd_poll_set_fd(br.pctx, br.bfdd_server.fd, POLLIN,
 			       bbdd_br_bfdd_client_accept, &br, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to register BFDD server socket");
+		bbdd_err_print(&error, "Failed to register BFDD server socket");
 		goto bfdd_server_close;
 	}
 
@@ -603,19 +604,19 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	err = bbdd_poll_set_fd(br.pctx, br.ctl.fd, POLLIN,
 			       bbdd_br_ctl_recv, &br, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to register socket for events");
+		bbdd_err_print(&error, "Failed to register socket for events");
 		goto sock_close_d;
 	}
 
 	err = bbdd_poll_set_signals(br.pctx, &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Failed to set up signal handling");
+		bbdd_err_print(&error, "Failed to set up signal handling");
 		goto sock_close_d;
 	}
 
 	err = bbdd_poll_loop(br.pctx, &error);
 	if (err != 0)
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_print(&error, NULL);
 
 	if (br.bfdd != NULL)
 		bbdd_br_bfdd_client_close(&br);

@@ -17,6 +17,7 @@
 #include "bbdd-bfdd.h"
 #include "bbdd-br.h"
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
@@ -59,7 +60,7 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 	err = bbdd_jrpc_dissect_error(error_obj, &code, &message, &data,
 				      &error);
 	if (err != 0) {
-		bbdd_util_printerr(&error, "Invalid error object");
+		bbdd_err_print(&error, "Invalid error object");
 		return;
 	}
 
@@ -86,14 +87,14 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 
 	err = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, &error);
 	if (err) {
-		bbdd_util_printerr(&error, "Invalid response object");
+		bbdd_err_print(&error, "Invalid response object");
 		return false;
 	}
 
 	if (!bbdd_c_validate_id(id, expect_id)) {
-		bbdd_util_fmterr(&error, "Unknown response ID: %s",
-				 json_object_to_json_string(id));
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_fmt(&error, "Unknown response ID: %s",
+			     json_object_to_json_string(id));
+		bbdd_err_print(&error, NULL);
 		return false;
 	}
 
@@ -103,10 +104,10 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 	}
 
 	if (json_object_get_type(result) != result_type) {
-		bbdd_util_fmterr(&error, "Unexpected result type: %s expected, got %s",
-				 json_type_to_name(result_type),
-				 json_type_to_name(json_object_get_type(result)));
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_fmt(&error, "Unexpected result type: %s expected, got %s",
+			     json_type_to_name(result_type),
+			     json_type_to_name(json_object_get_type(result)));
+		bbdd_err_print(&error, NULL);
 		return false;
 	}
 
@@ -143,20 +144,20 @@ static struct json_object *bbdd_c_send_request_on(struct json_object *request,
 
 	err = bbdd_util_jrpc_send(peer, request, &error);
 	if (err < 0) {
-		bbdd_util_printerr(&error, "Failed to send the RPC message");
+		bbdd_err_print(&error, "Failed to send the RPC message");
 		return NULL;
 	}
 
 	err = bbdd_sock_recv(cli, peer, &response, &error);
 	if (err < 0) {
-		bbdd_util_printerr(&error, "Failed to receive an RPC response");
+		bbdd_err_print(&error, "Failed to receive an RPC response");
 		return NULL;
 	}
 
 	response_obj = json_tokener_parse(response);
 	if (response_obj == NULL) {
-		bbdd_util_fmterr(&error, "Failed to parse RPC response as JSON.");
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_fmt(&error, "Failed to parse RPC response as JSON.");
+		bbdd_err_print(&error, NULL);
 		goto free_response;
 	}
 
@@ -175,7 +176,7 @@ static struct json_object *bbdd_c_send_request(struct json_object *request)
 
 	err = bbdd_sock_open_c(&cli, &peer, bbdd_env.sockdir, &error);
 	if (err < 0) {
-		bbdd_util_printerr(&error, "Failed to open a socket");
+		bbdd_err_print(&error, "Failed to open a socket");
 		return NULL;
 	}
 
@@ -265,7 +266,7 @@ static int bbdd_c_echo_jrpc(const char *method)
 	rc = bbdd_jrpc_dissect(result, policy, seen, values,
 			       ARRAY_SIZE(policy), &error);
 	if (rc != 0) {
-		bbdd_util_fmterr(&error, "Invalid echo response");
+		bbdd_err_fmt(&error, "Invalid echo response");
 		goto put_result;
 	}
 
@@ -495,16 +496,14 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 	state_str = json_object_get_string(values[pol_state]);
 	rc = bbdd_d_bfd_state_from_str(state_str, &data->state.state);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Invalid session state `%s'",
-				 state_str);
+		bbdd_err_fmt(error, "Invalid session state `%s'", state_str);
 		return rc;
 	}
 
 	diag_str = json_object_get_string(values[pol_diag]);
 	rc = bbdd_d_bfd_diag_from_str(diag_str, &data->state.diag);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Invalid session diag `%s'",
-				 diag_str);
+		bbdd_err_fmt(error, "Invalid session diag `%s'", diag_str);
 		return rc;
 	}
 
@@ -745,13 +744,13 @@ bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
 
 	sessions = calloc(sess_array_len, sizeof(*sessions));
 	if (sessions == NULL) {
-		bbdd_util_fmterr(error, "Couldn't allocate sessions: %m");
+		bbdd_err_fmt(error, "Couldn't allocate sessions: %m");
 		return -1;
 	}
 
 	states = calloc(sess_array_len, sizeof(*states));
 	if (states == NULL) {
-		bbdd_util_fmterr(error, "Couldn't allocate session states: %m");
+		bbdd_err_fmt(error, "Couldn't allocate session states: %m");
 		goto free_sessions;
 	}
 
@@ -1366,7 +1365,7 @@ static int bbdd_c_parse_u8(const char *str, void *ret, const char *what)
 
 	rc = bbdd_sock_parse_u8(str, u8_ret, what, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_print(&error, NULL);
 	return rc;
 }
 
@@ -1378,7 +1377,7 @@ static int bbdd_c_parse_u32(const char *str, void *ret, const char *what)
 
 	rc = bbdd_sock_parse_u32(str, u32_ret, what, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, NULL);
+		bbdd_err_print(&error, NULL);
 	return rc;
 }
 
@@ -2113,7 +2112,7 @@ static int bbdd_c_bfdd_connect(int argc, char **argv)
 	copy = strdup(arg);
 	rc = bbdd_sock_split_addr_proto(copy, &proto, &addr, &port, &error);
 	if (rc < 0) {
-		bbdd_util_printerr(&error, "bfdd connect");
+		bbdd_err_print(&error, "bfdd connect");
 		goto out;
 	}
 
@@ -2722,7 +2721,7 @@ bbdd_c_monitor_handle_session_change(struct json_object *params, char **error)
 		rc = bbdd_c_jrpc_dissect_session_elem(values[pol_session],
 						      &csess, &state, error);
 		if (rc != 0) {
-			bbdd_util_printerr(error, NULL);
+			bbdd_err_print(error, NULL);
 			goto try_discr;
 		}
 		bbdd_c_session_show_one(&csess, &state);
@@ -2835,7 +2834,7 @@ static enum bbdd_c_monitor_print_rc
 bbdd_c_monitor_handle_bfdd_empty(struct json_object *params, char **error)
 {
 	if (params != NULL) {
-		bbdd_util_fmterr(error, "parameters expected to be nil");
+		bbdd_err_fmt(error, "parameters expected to be nil");
 		return BBDD_C_MONITOR_PRINT_ERROR;
 	}
 
@@ -2969,8 +2968,8 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 
 	switch (rc) {
 	case BBDD_C_MONITOR_PRINT_ERROR:
-		bbdd_util_printerr(&error, "Failed to dissect monitor event `%s'",
-				   method);
+		bbdd_err_print(&error, "Failed to dissect monitor event `%s'",
+			       method);
 		/* Fall through. */
 	case BBDD_C_MONITOR_PRINT_UNHANDLED:
 		__bbdd_c_result_show_json(params);
@@ -3003,7 +3002,7 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 
 	err = bbdd_sock_recv(&ctx->cli, &sender, &msg, &error);
 	if (err < 0) {
-		bbdd_util_printerr(&error, "Failed to receive monitor message");
+		bbdd_err_print(&error, "Failed to receive monitor message");
 		bbdd_poll_request_quit(pctx);
 		return 0;
 	}
@@ -3016,7 +3015,7 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 
 	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
 	if (err) {
-		bbdd_util_printerr(&error, "Failed to dissect monitor event");
+		bbdd_err_print(&error, "Failed to dissect monitor event");
 		goto put_notif_obj;
 	}
 
@@ -3103,21 +3102,21 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 
 	request = bbdd_c_monitor_build_request(remote_topics, id);
 	if (request == NULL) {
-		bbdd_util_fmterr(&error, "Failed to build monitor request");
+		bbdd_err_fmt(&error, "Failed to build monitor request");
 		err = -1;
 		goto close_cli;
 	}
 
 	response = bbdd_c_send_request_on(request, &mctx.cli, &peer);
 	if (response == NULL) {
-		bbdd_util_fmterr(&error, "Failed to send monitor request");
+		bbdd_err_fmt(&error, "Failed to send monitor request");
 		err = -1;
 		goto put_request;
 	}
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
 					    &result)) {
-		bbdd_util_fmterr(&error, "Failed to parse monitor response");
+		bbdd_err_fmt(&error, "Failed to parse monitor response");
 		err = -1;
 		goto put_response;
 	}
@@ -3168,7 +3167,7 @@ close_cli:
 	bbdd_sock_close_c(&mctx.cli);
 err:
 	if (err != 0)
-		bbdd_util_printerr(&error, "Monitor error");
+		bbdd_err_print(&error, "Monitor error");
 	return err;
 }
 
@@ -3236,7 +3235,7 @@ void bbdd_c_monitor_dispatch(struct json_object *msg, void *)
 
 	err = bbdd_jrpc_dissect_notif(msg, &method, &params, &error);
 	if (err) {
-		bbdd_util_printerr(&error, "Failed to dissect monitor event");
+		bbdd_err_print(&error, "Failed to dissect monitor event");
 		return;
 	}
 

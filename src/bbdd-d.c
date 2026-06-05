@@ -27,6 +27,7 @@
 #include "bbdd-bfdd.h"
 #include "bbdd-c.h"
 #include "bbdd-bpf.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
@@ -137,7 +138,7 @@ void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
 
 static void bbdd_d_stat_fmterr(char **error)
 {
-	bbdd_util_fmterr(error, "Failed to format stats to JSON: %m");
+	bbdd_err_fmt(error, "Failed to format stats to JSON: %m");
 }
 
 static int bbdd_d_add_stat(struct json_object *obj,
@@ -201,7 +202,7 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
+		bbdd_err_print(&error, "Failed to receive response");
 
 	json_object_put(obj);
 	return;
@@ -224,9 +225,8 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 
 	if (netif->ifindex_seen) {
 		if (!if_indextoname(netif->ifindex, ifname)) {
-			bbdd_util_fmterr(error,
-					 "No interface with ifindex %u found",
-					 netif->ifindex);
+			bbdd_err_fmt(error, "No interface with ifindex %u found",
+				     netif->ifindex);
 			return -1;
 		}
 	}
@@ -235,9 +235,8 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 		if (netif->name[0] != '\0') {
 			ifindex = if_nametoindex(netif->name);
 			if (ifindex == 0) {
-				bbdd_util_fmterr(error,
-						 "No interface named `%s' found",
-						 netif->name);
+				bbdd_err_fmt(error, "No interface named `%s' found",
+					     netif->name);
 				return -1;
 			}
 		} else {
@@ -247,16 +246,14 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 
 	if (netif->ifindex_seen && netif->name_seen) {
 		if (netif->name[0] == '\0') {
-			bbdd_util_fmterr(error,
-					 "Interface ifindex `%u' given together with request to unset interface",
-					 netif->ifindex);
+			bbdd_err_fmt(error, "Interface ifindex `%u' given together with request to unset interface",
+				     netif->ifindex);
 			return -1;
 		}
 		if (netif->ifindex != ifindex ||
 		    strcmp(ifname, netif->name) != 0) {
-			bbdd_util_fmterr(error,
-					 "No interface with ifindex `%u' and name `%s' found",
-					 netif->ifindex, netif->name);
+			bbdd_err_fmt(error, "No interface with ifindex `%u' and name `%s' found",
+				     netif->ifindex, netif->name);
 			return -1;
 		}
 	}
@@ -301,9 +298,8 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 		sess_vrf->table = table;
 		sess_vrf->table_seen = 1;
 	} else if (sess_vrf->table != table) {
-		bbdd_util_fmterr(error, "VRF x table mismatch: VRF `%s' has table %d, but %d given",
-				 sess_vrf->netif.name, table,
-				 sess_vrf->table);
+		bbdd_err_fmt(error, "VRF x table mismatch: VRF `%s' has table %d, but %d given",
+			     sess_vrf->netif.name, table, sess_vrf->table);
 		return -1;
 	}
 
@@ -362,8 +358,7 @@ static int bbdd_d_jrpc_dissect_addr_obj(struct bbdd_c_session_addr *addr,
 	else if (strcmp(family_str, "ipv6") == 0)
 		addr->af = AF_INET6;
 	else {
-		bbdd_util_fmterr(error, "Unknown address family `%s'",
-				 family_str);
+		bbdd_err_fmt(error, "Unknown address family `%s'", family_str);
 		return -1;
 	}
 
@@ -540,8 +535,8 @@ int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 	int rc;
 
 	if (obj == NULL) {
-		bbdd_util_fmterr(error, "RPC method doesn't allow session %s",
-				 what);
+		bbdd_err_fmt(error, "RPC method doesn't allow session %s",
+			     what);
 		return -1;
 	}
 
@@ -608,7 +603,7 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 
 	if (seen[pol_bulk]) {
 		if (bulk == NULL) {
-			bbdd_util_fmterr(error, "RPC method doesn't allow bulk operations");
+			bbdd_err_fmt(error, "RPC method doesn't allow bulk operations");
 			return -1;
 		}
 
@@ -1076,7 +1071,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
+		bbdd_err_print(&error, "Failed to receive response");
 
 	json_object_put(obj);
 	return;
@@ -1353,7 +1348,7 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 	if (csess->discr_seen && dsess->local.discr != 0 &&
 	    csess->discr != dsess->local.discr) {
-		bbdd_util_fmterr(error, "Session discriminator change is not allowed");
+		bbdd_err_fmt(error, "Session discriminator change is not allowed");
 		return -1;
 	}
 
@@ -1370,7 +1365,7 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			new_dst_af = dsess->dst.sin46.family;
 
 		if (new_dst_af == 0) {
-			bbdd_util_fmterr(error, "No destination address");
+			bbdd_err_fmt(error, "No destination address");
 			return -1;
 		}
 
@@ -1382,9 +1377,9 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			new_src_af = dsess->src.sin46.family;
 
 		if (new_src_af != 0 && new_src_af != new_dst_af) {
-			bbdd_util_fmterr(error, "%s destination but %s source address",
-					 bbdd_sock_af_to_str(new_dst_af),
-					 bbdd_sock_af_to_str(new_src_af));
+			bbdd_err_fmt(error, "%s destination but %s source address",
+				     bbdd_sock_af_to_str(new_dst_af),
+				     bbdd_sock_af_to_str(new_src_af));
 			return -1;
 		}
 	}
@@ -1429,7 +1424,7 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 #define MANDATORY_NON0(NAME, NS) do {					\
 		if ((!csess->NAME ## _seen && dsess->NS NAME == 0) ||	\
 		    (csess->NAME ## _seen && csess->NAME == 0))	{	\
-			bbdd_util_fmterr(error, #NAME " needs to be non-0"); \
+			bbdd_err_fmt(error, #NAME " needs to be non-0"); \
 			return -1;					\
 		}							\
 	} while (0)
@@ -1569,7 +1564,7 @@ static int bbdd_d_select_sessions(struct bbdd_sess_dir *sdir,
 
 oom:
 	errno = -ENOMEM;
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	free(discrs);
 	return -1;
 }
@@ -1583,13 +1578,13 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 
 	rc = bbdd_d_sport_get(&d->spa, &sport);
 	if (rc) {
-		bbdd_util_fmterr(error, "Failed to allocate a unique source port for the new session");
+		bbdd_err_fmt(error, "Failed to allocate a unique source port for the new session");
 		return -1;
 	}
 
 	dsess = bbdd_sess_dir_add_session(d->sdir, csess->discr);
 	if (dsess == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		goto put_port;
 	}
 
@@ -1735,8 +1730,8 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &changed,
 					    &error);
 		if (rc != 0) {
-			bbdd_util_wraperr(&error, "Session %u: %s",
-					  dsess->local.discr, error);
+			bbdd_err_wrap(&error, "Session %u: %s",
+				      dsess->local.discr, error);
 			bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 			goto free_discrs;
 		}
@@ -1773,7 +1768,7 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
-		bbdd_util_fmterr(error, "Failed to look up session %u", discr);
+		bbdd_err_fmt(error, "Failed to look up session %u", discr);
 		return -1;
 	}
 
@@ -1859,7 +1854,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
+		bbdd_err_print(&error, "Failed to receive response");
 
 	json_object_put(obj);
 	return;
@@ -2008,7 +2003,7 @@ static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	 * mechanism to report back to bfdd what value we assigned. So best to
 	 * just expect the value to be given. */
 	if (!csess->discr_seen) {
-		bbdd_util_fmterr(error, "missing local discriminator");
+		bbdd_err_fmt(error, "missing local discriminator");
 		rc = -EINVAL;
 		goto invalid;
 	}
@@ -2088,8 +2083,8 @@ __bbdd_d_bfdd_check_length(struct bbdd_d_global_diag_stats *diag_stats,
 		return 0;
 
 	++diag_stats->dp_invalid_message_length;
-	bbdd_util_fmterr(error, "%s: Invalid length: got %u, expected %u",
-			 where, length, exp_len);
+	bbdd_err_fmt(error, "%s: Invalid length: got %u, expected %u",
+		     where, length, exp_len);
 	return -EINVAL;
 }
 
@@ -2123,7 +2118,7 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 	rc = bbdd_d_handle_session_del_one(d, discr, error);
 	if (rc != 0) {
 		++d->diag_stats.dp_no_session;
-		bbdd_util_appenderr(error, "DP_DELETE_SESSION");
+		bbdd_err_app(error, "DP_DELETE_SESSION");
 	}
 	return rc;
 }
@@ -2158,8 +2153,8 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	dsess = bbdd_sess_dir_get_session(d->sdir, discr);
 	if (dsess == NULL) {
 		++d->diag_stats.dp_no_session;
-		bbdd_util_fmterr(error1, "DP_REQUEST_SESSION_COUNTERS: no session for discr %u",
-				 discr);
+		bbdd_err_fmt(error1, "DP_REQUEST_SESSION_COUNTERS: no session for discr %u",
+			     discr);
 		rc1 = -ENOENT;
 		goto reply;
 	}
@@ -2167,7 +2162,7 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	rc1 = bbdd_bpf_session_stats_fill(d->bpf, discr, &stats, error1);
 	if (rc1 != 0) {
 		++d->diag_stats.dp_internal_error;
-		bbdd_util_appenderr(error1, "DP_REQUEST_SESSION_COUNTERS");
+		bbdd_err_app(error1, "DP_REQUEST_SESSION_COUNTERS");
 		goto reply;
 	}
 
@@ -2176,10 +2171,10 @@ reply:
 				       discr, &stats, &error2);
 	if (rc2 != 0) {
 		++d->diag_stats.dp_buffer_error;
-		bbdd_util_appenderr(&error2, "reply DP_REQUEST_SESSION_COUNTERS");
+		bbdd_err_app(&error2, "reply DP_REQUEST_SESSION_COUNTERS");
 	}
 
-	return bbdd_util_pickerr(rc1, error1, rc2, &error2);
+	return bbdd_err_pick(rc1, error1, rc2, &error2);
 }
 
 int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
@@ -2207,8 +2202,8 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 
 	if (msg->header.version != 1) {
 		++d->diag_stats.dp_wrong_version_number;
-		bbdd_util_fmterr(&error, "bfdd: Wrong message version number %d",
-				 msg->header.version);
+		bbdd_err_fmt(&error, "bfdd: Wrong message version number %d",
+			     msg->header.version);
 		goto senderr;
 	}
 
@@ -2247,7 +2242,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	/* Whatever this is. */
 	default:
 		++d->diag_stats.dp_invalid_message_type;
-		bbdd_util_fmterr(&error, "bfdd: Invalid message type %d", bmt);
+		bbdd_err_fmt(&error, "bfdd: Invalid message type %d", bmt);
 		goto senderr;
 	}
 
@@ -2338,13 +2333,13 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	int rc;
 
 	if (d->bfdd) {
-		bbdd_util_fmterr(error, "Already connected to a BFD daemon");
+		bbdd_err_fmt(error, "Already connected to a BFD daemon");
 		return -1;
 	}
 
 	cctx = malloc(sizeof(*cctx));
 	if (cctx == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return -ENOMEM;
 	}
 	*cctx = (struct bbdd_d_bfdd_connect_ctx) {
@@ -2460,7 +2455,7 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to receive response");
+		bbdd_err_print(&error, "Failed to receive response");
 
 	json_object_put(obj);
 }
@@ -2538,7 +2533,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 		BBDD_MON_TOPICS(MATCH_TOPIC)
 #undef MATCH_TOPIC
 
-		bbdd_util_fmterr(&error, "Unknown topic `%s'", name);
+		bbdd_err_fmt(&error, "Unknown topic `%s'", name);
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	}
 
@@ -2610,13 +2605,13 @@ static int bbdd_d_raise_nofile(char **error)
 	struct rlimit rlim;
 
 	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		bbdd_util_fmterr(error, "Failed to get RLIMIT_NOFILE: %m");
+		bbdd_err_fmt(error, "Failed to get RLIMIT_NOFILE: %m");
 		return -1;
 	}
 
 	rlim.rlim_cur = rlim.rlim_max;
 	if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		bbdd_util_fmterr(error, "Failed to set RLIMIT_NOFILE: %m");
+		bbdd_err_fmt(error, "Failed to set RLIMIT_NOFILE: %m");
 		return -1;
 	}
 
@@ -2640,7 +2635,7 @@ static int bbdd_d_num_cpus(char **error)
 
 	n = sysconf(_SC_NPROCESSORS_ONLN);
 	if (n < 0) {
-		bbdd_util_fmterr(error, "Failed to determine number of CPUs: %m");
+		bbdd_err_fmt(error, "Failed to determine number of CPUs: %m");
 		return -1;
 	}
 
@@ -2659,7 +2654,7 @@ static char *bbdd_d_cpu_mask(unsigned int i, unsigned int n, char **error)
 
 	buf = malloc(len);
 	if (!buf) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return NULL;
 	}
 
@@ -2687,14 +2682,14 @@ static int bbdd_d_set_q_cpu_map(const char *path,
 
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
-		bbdd_util_fmterr(error, "Failed to open `%s': %m", path);
+		bbdd_err_fmt(error, "Failed to open `%s': %m", path);
 		err = -1;
 		goto free_mask;
 	}
 
 	rc = write(fd, mask, strlen(mask));
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to write to `%s': %m", path);
+		bbdd_err_fmt(error, "Failed to write to `%s': %m", path);
 		err = -1;
 	}
 
@@ -2735,7 +2730,7 @@ static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 	/* Note: the peer is autodeleted when the first endpoint is deleted. */
 	err = bbdd_nl_del_if(nl, bbdd_d_veth_rx_name, &error);
 	if (err)
-		bbdd_util_printerr(&error, "Failed to clean up veth pair");
+		bbdd_err_print(&error, "Failed to clean up veth pair");
 }
 
 static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
@@ -2820,8 +2815,8 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 fini_veth:
 	bbdd_d_start_fini_veth(nl);
 err:
-	bbdd_util_appenderr(error, "Failed to create veth pair `%s'<->`%s'",
-			    bbdd_d_veth_rx_name, bbdd_d_veth_tx_name);
+	bbdd_err_app(error, "Failed to create veth pair `%s'<->`%s'",
+		     bbdd_d_veth_rx_name, bbdd_d_veth_tx_name);
 	return err;
 }
 
@@ -2923,7 +2918,7 @@ closelog:
 	closelog();
 
 	if (failed)
-		bbdd_util_printerr(&error, "Error");
+		bbdd_err_print(&error, "Error");
 	return err;
 }
 

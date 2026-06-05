@@ -8,6 +8,7 @@
 #include <utlist.h>
 
 #include "bbdd.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-sock.h"
 #include "bbdd-util.h"
@@ -44,7 +45,7 @@ struct bbdd_mon *bbdd_mon_init(char **error)
 
 	mon = malloc(sizeof(*mon));
 	if (mon == NULL) {
-		bbdd_util_fmterr(error, "Failed to create monitor server: %m");
+		bbdd_err_fmt(error, "Failed to create monitor server: %m");
 		return NULL;
 	}
 
@@ -72,7 +73,7 @@ bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
 
 	cli = malloc(sizeof(*cli));
 	if (cli == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return NULL;
 	}
 
@@ -97,7 +98,7 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL) {
-		bbdd_util_appenderr(error, "Failed to subscribe to monitor");
+		bbdd_err_app(error, "Failed to subscribe to monitor");
 		return -1;
 	}
 
@@ -115,7 +116,7 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 	topics.enabled[BBDD_MON_TOPIC_monitor] = false;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL) {
-		bbdd_util_appenderr(error, "Failed to subscribe to monitor");
+		bbdd_err_app(error, "Failed to subscribe to monitor");
 		return -1;
 	}
 
@@ -243,7 +244,7 @@ static void bbdd_mon_send_vfmt(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	rc = bbdd_util_vfmterr(&msg, fmt, ap);
+	rc = bbdd_err_vfmt(&msg, fmt, ap);
 	if (rc < 0)
 		return;
 
@@ -274,7 +275,7 @@ void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
 	errmsg = *error ?: "(unknown error)";
 
 	va_start(ap, fmt);
-	rc = bbdd_util_vfmterr(&str, fmt, ap);
+	rc = bbdd_err_vfmt(&str, fmt, ap);
 	va_end(ap);
 
 	if (rc < 0) {
@@ -284,7 +285,7 @@ void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
 
 	if (*error != NULL)
 		/* str is unchanged if the formatting fails. */
-		bbdd_util_wraperr(&str, "%s: %s", str, *error);
+		bbdd_err_wrap(&str, "%s: %s", str, *error);
 
 	bbdd_mon_send_str(mon, topic, method, str);
 

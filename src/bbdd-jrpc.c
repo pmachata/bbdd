@@ -13,6 +13,7 @@
 #include <json-c/json_object_iterator.h>
 #include <json-c/json_util.h>
 
+#include "bbdd-err.h"
 #include "bbdd-util.h"
 
 static int bbdd_jrpc_object_add_error(struct json_object *obj,
@@ -210,8 +211,8 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 		enum json_type type = json_object_get_type(obj);
 
 		if (type != json_type_object) {
-			bbdd_util_fmterr(error, "Value expected to be an object, but is %s",
-					 json_type_to_name(type));
+			bbdd_err_fmt(error, "Value expected to be an object, but is %s",
+				     json_type_to_name(type));
 			return -1;
 		}
 	}
@@ -237,17 +238,17 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 					goto skip_type_check;
 
 				if (pol->type != type) {
-					bbdd_util_fmterr(error, "The member %s is expected to be a %s, but is %s",
-						    key,
-						    json_type_to_name(pol->type),
-						    json_type_to_name(type));
+					bbdd_err_fmt(error, "The member %s is expected to be a %s, but is %s",
+						     key,
+						     json_type_to_name(pol->type),
+						     json_type_to_name(type));
 					return -1;
 				}
 
 			skip_type_check:
 				if (seen[i]) {
-					bbdd_util_fmterr(error, "Duplicate member %s",
-							 key);
+					bbdd_err_fmt(error, "Duplicate member %s",
+						     key);
 					return -1;
 				}
 
@@ -259,8 +260,8 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 		}
 
 		if (!found) {
-			bbdd_util_fmterr(error, "The member %s is not expected",
-					 key);
+			bbdd_err_fmt(error, "The member %s is not expected",
+				     key);
 			return -1;
 		}
 	}
@@ -269,8 +270,8 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 		struct bbdd_jrpc_policy *pol = &policy[i];
 
 		if (!seen[i] && pol->required) {
-			bbdd_util_fmterr(error, "Required member %s not present",
-					 pol->key);
+			bbdd_err_fmt(error, "Required member %s not present",
+				     pol->key);
 			return -1;
 		}
 	}
@@ -286,7 +287,7 @@ static bool bbdd_jrpc_validate_version(struct json_object *ver_obj,
 	assert(json_object_get_type(ver_obj) == json_type_string);
 	ver = json_object_get_string(ver_obj);
 	if (strcmp(ver, "2.0") != 0) {
-		bbdd_util_fmterr(error, "Unsupported jsonrpc version: %s", ver);
+		bbdd_err_fmt(error, "Unsupported jsonrpc version: %s", ver);
 		return false;
 	}
 
@@ -378,10 +379,10 @@ int bbdd_jrpc_dissect_response(struct json_object *obj,
 		return -1;
 
 	if (seen[pol_error] && seen[pol_result]) {
-		bbdd_util_fmterr(error, "Both error and result present in jsonrpc response");
+		bbdd_err_fmt(error, "Both error and result present in jsonrpc response");
 		return -1;
 	} else if (!seen[pol_error] && !seen[pol_result]) {
-		bbdd_util_fmterr(error, "Neither error nor result present in jsonrpc response");
+		bbdd_err_fmt(error, "Neither error nor result present in jsonrpc response");
 		return -1;
 	}
 
@@ -448,8 +449,8 @@ int bbdd_jrpc_validate_array(struct json_object *obj, enum json_type elm_type,
 		enum json_type type = json_object_get_type(obj);
 
 		if (type != json_type_array) {
-			bbdd_util_fmterr(error, "Value expected to be an array, but is %s",
-					 json_type_to_name(type));
+			bbdd_err_fmt(error, "Value expected to be an array, but is %s",
+				     json_type_to_name(type));
 			return -1;
 		}
 	}
@@ -459,9 +460,9 @@ int bbdd_jrpc_validate_array(struct json_object *obj, enum json_type elm_type,
 		enum json_type type = json_object_get_type(elm);
 
 		if (type != elm_type) {
-			bbdd_util_fmterr(error, "Array element %zd is expected to be a %s, but is %s",
-					 i, json_type_to_name(elm_type),
-					 json_type_to_name(type));
+			bbdd_err_fmt(error, "Array element %zd is expected to be a %s, but is %s",
+				     i, json_type_to_name(elm_type),
+				     json_type_to_name(type));
 			return -1;
 		}
 	}
@@ -477,13 +478,13 @@ static int bbdd_jrpc_get_uint(struct json_object *obj, uint32_t *ret,
 	errno = 0;
 	v = json_object_get_int64(obj);
 	if (errno) {
-		bbdd_util_fmterr(error, "Value expected to be an integer: %m");
+		bbdd_err_fmt(error, "Value expected to be an integer: %m");
 		return -1;
 	}
 
 	if (v < 0 || v > (int64_t) max) {
-		bbdd_util_fmterr(error, "Expected uint with maximum value `%ud', got %" PRIi64,
-				 max, v);
+		bbdd_err_fmt(error, "Expected uint with maximum value `%ud', got %" PRIi64,
+			     max, v);
 		return -1;
 	}
 
@@ -502,7 +503,7 @@ int bbdd_jrpc_get_uint32_non0(struct json_object *obj, uint32_t *ret,
 	if (bbdd_jrpc_get_uint32(obj, ret, error) < 0)
 		return -1;
 	if (*ret == 0) {
-		bbdd_util_fmterr(error, "Expected non-zero uint32, got 0");
+		bbdd_err_fmt(error, "Expected non-zero uint32, got 0");
 		return -1;
 	}
 	return 0;
@@ -529,8 +530,8 @@ int bbdd_jrpc_strcpy(size_t buf_len;
 
 	str = json_object_get_string(obj);
 	if (strlen(str) >= buf_len) {
-		bbdd_util_fmterr(error, "String `%s' too long: %zd >= %zd",
-				 str, strlen(str), buf_len);
+		bbdd_err_fmt(error, "String `%s' too long: %zd >= %zd",
+			     str, strlen(str), buf_len);
 		return -1;
 	}
 

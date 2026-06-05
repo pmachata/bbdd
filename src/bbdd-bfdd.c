@@ -10,6 +10,7 @@
 #include "bbdd.h"
 #include "bbdd-c.h"
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
@@ -73,7 +74,7 @@ static int bbdd_bfdd_fmterr_errno(char **error)
 	if (errno == 0)
 		*error = NULL;
 	else
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -141,7 +142,7 @@ static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
 	rc = bbdd_poll_set_fd(pctx, bfdd->fd, events,
 			      bbdd_bfdd_event, bfdd, &error);
 	if (rc < 0) {
-		bbdd_util_printerr(&error, "Failed to reset BFD poll FD");
+		bbdd_err_print(&error, "Failed to reset BFD poll FD");
 		goto error;
 	}
 
@@ -172,7 +173,7 @@ static int bbdd_bfdd_connected(struct bbdd_poll_ctx *pctx, short,
 		return 0;
 
 	if (rv == -1) {
-		bbdd_util_fmterr(&error, "Error connecting to the BFD DP socket");
+		bbdd_err_fmt(&error, "Error connecting to the BFD DP socket");
 		goto error;
 	}
 
@@ -213,26 +214,26 @@ struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
 
 	bctx = bfddp_new(4096, 4096);
 	if (bctx == NULL) {
-		bbdd_util_fmterr(error, "Failed to open libbfd context");
+		bbdd_err_fmt(error, "Failed to open libbfd context");
 		return NULL;
 	}
 
 	rc = bfddp_connect(bctx, &sa.sa, sa.len);
 	if (rc < 0) {
-		bbdd_util_fmterr(error, "Failed to connect to bfd datapath socket");
+		bbdd_err_fmt(error, "Failed to connect to bfd datapath socket");
 		goto free_bfddp;
 	}
 
 	fd = bfddp_get_fd(bctx);
 	if (fd < 0) {
 		/* This shouldn't happen. */
-		bbdd_util_fmterr(error, "libbfd socket closed");
+		bbdd_err_fmt(error, "libbfd socket closed");
 		goto free_bfddp;
 	}
 
 	bfdd = malloc(sizeof(*bfdd));
 	if (bfdd == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		goto free_bfddp;
 	}
 	*bfdd = (struct bbdd_bfdd) {
@@ -270,7 +271,7 @@ struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 
 	bctx = bfddp_new(4096, 4096);
 	if (bctx == NULL) {
-		bbdd_util_fmterr(error, "Failed to open libbfd context");
+		bbdd_err_fmt(error, "Failed to open libbfd context");
 		return NULL;
 	}
 
@@ -278,7 +279,7 @@ struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
 
 	bfdd = malloc(sizeof(*bfdd));
 	if (bfdd == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		goto free_bfddp;
 	}
 	*bfdd = (struct bbdd_bfdd) {
@@ -323,7 +324,7 @@ static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
 	/* returns 0 on full buffer or the number of bytes buffered. */
 	written = bfddp_write_enqueue(bfdd->bctx, msg);
 	if (written == 0) {
-		bbdd_util_fmterr(error, "bfdd: Buffer full");
+		bbdd_err_fmt(error, "bfdd: Buffer full");
 		return -1;
 	}
 
@@ -366,7 +367,7 @@ static struct bbdd_bfdd_echo *bbdd_bfdd_echo_alloc(struct bbdd_sock *peer,
 
 	echo = malloc(sizeof(*echo));
 	if (echo == NULL) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		return NULL;
 	}
 
@@ -523,8 +524,8 @@ static int bbdd_bfdd_msg_fill_netif(int ifindex, char *buf, char **error)
 	if (if_indextoname(ifindex, buf) != NULL)
 		return 0;
 
-	bbdd_util_fmterr(error, "Could not translate ifindex %d to interface name: %m",
-			 ifindex);
+	bbdd_err_fmt(error, "Could not translate ifindex %d to interface name: %m",
+		     ifindex);
 	return -EINVAL;
 }
 
@@ -703,7 +704,7 @@ static int bbdd_bfdd_session_to_c_addr(struct bbdd_c_session_addr *to,
 
 	ret = inet_ntop(af, from, to->str, sizeof(to->str));
 	if (ret == NULL) {
-		bbdd_util_fmterr(error, "Failed to convert address: %m");
+		bbdd_err_fmt(error, "Failed to convert address: %m");
 		return -1;
 	}
 
@@ -723,12 +724,12 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	int rc;
 
 	if (flags & SESSION_ECHO) {
-		bbdd_util_fmterr(error, "Echo not supported");
+		bbdd_err_fmt(error, "Echo not supported");
 		return -1;
 	}
 
 	if (flags & SESSION_DEMAND) {
-		bbdd_util_fmterr(error, "Demand mode not supported");
+		bbdd_err_fmt(error, "Demand mode not supported");
 		return -1;
 	}
 
@@ -858,8 +859,8 @@ int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 					      csess, error);
 	}
 
-	bbdd_util_fmterr(error, "DP_ADD_SESSION: Invalid length: got %u, expected %u or %u",
-			 length, std_len, cml_len);
+	bbdd_err_fmt(error, "DP_ADD_SESSION: Invalid length: got %u, expected %u or %u",
+		     length, std_len, cml_len);
 	return -EMSGSIZE;
 }
 
@@ -899,7 +900,7 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -977,7 +978,7 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1003,7 +1004,7 @@ static int bbdd_bfdd_format_lid_msg(uint32_t lid, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1032,7 +1033,7 @@ bbdd_bfdd_format_echo(const struct bfddp_echo *echo, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -1067,7 +1068,7 @@ bbdd_bfdd_format_unknown(enum bfddp_message_type bmt,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 

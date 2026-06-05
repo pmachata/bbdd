@@ -11,6 +11,7 @@
 #include <sys/signalfd.h>
 
 #include "bbdd.h"
+#include "bbdd-err.h"
 #include "bbdd-mon.h"
 #include "bbdd-util.h"
 
@@ -40,7 +41,7 @@ struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error)
 
 	pctx = malloc(sizeof(*pctx));
 	if (pctx == NULL) {
-		bbdd_util_fmterr(error, "Failed to allocate poll context: %m");
+		bbdd_err_fmt(error, "Failed to allocate poll context: %m");
 		return NULL;
 	}
 	*pctx = (struct bbdd_poll_ctx){
@@ -98,7 +99,7 @@ static ssize_t __bbdd_poll_reserve(struct bbdd_poll_ctx *pctx, int fd,
 new_fds:
 	free(new_fds);
 error:
-	bbdd_util_fmterr(error, "%m");
+	bbdd_err_fmt(error, "%m");
 	return -1;
 }
 
@@ -137,7 +138,7 @@ int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 
 	rc = __bbdd_poll_set_fd(pctx, fd, events, fn, data, error);
 	if (rc != 0)
-		bbdd_util_appenderr(error, "Failed to register socket for events");
+		bbdd_err_app(error, "Failed to register socket for events");
 	return rc;
 }
 
@@ -189,7 +190,7 @@ int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
 
 	sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 	if (sig_fd < 0) {
-		bbdd_util_fmterr(error, "%m");
+		bbdd_err_fmt(error, "%m");
 		goto err;
 	}
 
@@ -204,7 +205,7 @@ int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
 close_sig_fd:
 	close(sig_fd);
 err:
-	bbdd_util_appenderr(error, "Failed to set up signal handling");
+	bbdd_err_app(error, "Failed to set up signal handling");
 	return err;
 }
 
@@ -227,7 +228,7 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 
 		nfds = poll(pctx->fds, pctx->num, -1);
 		if (nfds < 0 && errno != EINTR) {
-			bbdd_util_fmterr(error, "Failed to poll: %m");
+			bbdd_err_fmt(error, "Failed to poll: %m");
 			err = nfds;
 			goto out;
 		}
@@ -245,8 +246,8 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 					goto out;
 			} else if (pollfd->revents & (POLLERR | POLLHUP |
 						      POLLNVAL)) {
-				bbdd_util_fmterr(error, "Problem on pollfd #%zd: %m",
-						 i);
+				bbdd_err_fmt(error, "Problem on pollfd #%zd: %m",
+					     i);
 				err = -1;
 				goto out;
 			}

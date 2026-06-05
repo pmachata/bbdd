@@ -7,6 +7,7 @@
 #include <sys/random.h>
 
 #include "bbdd-d.h"
+#include "bbdd-err.h"
 #include "bbdd-util.h"
 
 #define BBDD_SESS_EXPAND_NAME_STR(NAME, name, ...)	#name,
@@ -40,7 +41,7 @@ struct bbdd_sess_dir *bbdd_sess_dir_create(char **error)
 
 	sdir = malloc(sizeof(*sdir));
 	if (!sdir) {
-		bbdd_util_fmterr(error, "Failed to create session directory: %m");
+		bbdd_err_fmt(error, "Failed to create session directory: %m");
 		return NULL;
 	}
 
