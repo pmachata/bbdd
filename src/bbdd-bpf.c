@@ -151,7 +151,7 @@ struct bbdd_bpf_session {
 	struct bbdd_bpf_shwait *shwait;
 	struct bbdd_bpf_hold *hold;
 
-	bool timer_armed;
+	bool timer_armed; // xxx it should rather be the last configured period
 
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
@@ -789,6 +789,9 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			return rc;
 	}
 
+	// xxx we might in fact do != instead of > and cancel existing timer
+	// xxx this could also be a custom ad-hoc protocol, because we don't
+	//     expect to see normal BFD packets on that interface
 	if (rearm_timer > bsess->timer_armed) {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
 				    dsess->local.discr);
@@ -1224,6 +1227,9 @@ apply:
 
 	case BBDD_BPF_SESSION_STATE_SHUTTING_DOWN:
 		if (stop_shwait) {
+			// xxx I think we need to set bdata->shutdown maybe? If we are
+			// in shwait, bdata refers to dfr_data and we should get to
+			// stable?
 			bbdd_bpf_shwait_stop(bpf, bsess);
 			bsess->bstate = BBDD_BPF_SESSION_STATE_AWAIT_FINAL;
 		}
