@@ -19,8 +19,10 @@
 
 /* Tracking an in-flight bfdd-echo until ECHO_REPLY arrives. */
 struct bbdd_bfdd_echo {
+	struct bbdd_bfdd *bfdd;
 	struct bbdd_sock peer;
 	struct json_object *id;
+	void *close_hook;
 	bool is_dp; /* true when we sent as data plane, false when as
 		     * BFDD/bridge */
 };
@@ -380,8 +382,26 @@ static struct bbdd_bfdd_echo *bbdd_bfdd_echo_alloc(struct bbdd_sock *peer,
 
 static void bbdd_bfdd_echo_free(struct bbdd_bfdd_echo *echo)
 {
+	if (echo->close_hook != NULL && echo->peer.peer != NULL)
+		bbdd_sock_peer_remove_close_hook(echo->peer.peer,
+						 echo->close_hook);
 	json_object_put(echo->id);
 	free(echo);
+}
+
+static void bbdd_bfdd_echo_stop(struct bbdd_bfdd *bfdd)
+{
+	bbdd_bfdd_echo_free(bfdd->echo);
+	bfdd->echo = NULL;
+}
+
+static void bbdd_bfdd_echo_on_peer_close(void *data)
+{
+	struct bbdd_bfdd_echo *echo = data;
+
+	/* Don't touch the peer; it is being torn down. */
+	echo->close_hook = NULL;
+	bbdd_bfdd_echo_stop(echo->bfdd);
 }
 
 void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
@@ -408,7 +428,16 @@ void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
 	if (echo == NULL)
 		goto err;
 
+	echo->bfdd = bfdd;
 	echo->is_dp = is_dp;
+	if (peer->peer != NULL) {
+		echo->close_hook = bbdd_sock_peer_add_close_hook(
+			peer->peer, bbdd_bfdd_echo_on_peer_close, echo);
+		if (echo->close_hook == NULL) {
+			bbdd_util_fmterr(&error, "%m");
+			goto echo_free;
+		}
+	}
 	ts = bbdd_util_now();
 	rc = bbdd_bfdd_send_echo(bfdd, 1, ts, is_dp, &error);
 	if (rc != 0)
@@ -421,12 +450,6 @@ echo_free:
 	bbdd_bfdd_echo_free(echo);
 err:
 	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
-}
-
-static void bbdd_bfdd_echo_stop(struct bbdd_bfdd *bfdd)
-{
-	bbdd_bfdd_echo_free(bfdd->echo);
-	bfdd->echo = NULL;
 }
 
 void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,

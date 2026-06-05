@@ -27,9 +27,11 @@
 #include "bfddp_packet.h"
 
 struct bbdd_br_stats {
+	struct bbdd_br *br;
 	struct bbdd_sock peer;
 	struct json_object *id;
 	uint32_t discr;
+	void *close_hook;
 };
 
 struct bbdd_br {
@@ -45,7 +47,16 @@ struct bbdd_br {
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
+static void bbdd_br_stats_on_peer_close(void *data)
+{
+	struct bbdd_br_stats *stats = data;
+
+	stats->close_hook = NULL;
+	stats->peer.peer = NULL;
+}
+
+static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_br *br,
+						  struct bbdd_sock *peer,
 						  struct json_object *id,
 						  uint32_t discr,
 						  char **error)
@@ -59,22 +70,38 @@ static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_sock *peer,
 	}
 
 	*stats = (struct bbdd_br_stats) {
+		.br = br,
 		.peer = *peer,
 		.id = json_object_get(id),
 		.discr = discr,
 	};
+
+	if (peer->peer != NULL) {
+		stats->close_hook = bbdd_sock_peer_add_close_hook(
+			peer->peer, bbdd_br_stats_on_peer_close, stats);
+		if (stats->close_hook == NULL) {
+			bbdd_util_fmterr(error, "%m");
+			json_object_put(stats->id);
+			free(stats);
+			return NULL;
+		}
+	}
 	return stats;
 }
 
 static void bbdd_br_stats_free(struct bbdd_br_stats *stats)
 {
+	if (stats->close_hook != NULL && stats->peer.peer != NULL)
+		bbdd_sock_peer_remove_close_hook(stats->peer.peer,
+						 stats->close_hook);
 	json_object_put(stats->id);
 	free(stats);
 }
 
 static void bbdd_br_stats_close(struct bbdd_br_stats *stats, const char *msg)
 {
-	bbdd_util_jrpc_respond_interr(&stats->peer, stats->id, msg);
+	if (stats->peer.peer != NULL)
+		bbdd_util_jrpc_respond_interr(&stats->peer, stats->id, msg);
 	bbdd_br_stats_free(stats);
 }
 
@@ -197,9 +224,11 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 	    bbdd_jrpc_append_obj(resp, "result", &result_obj))
 		goto put_stats_obj;
 
-	rc = bbdd_util_jrpc_send(&br->stats->peer, resp, &error);
-	if (rc != 0)
-		bbdd_util_printerr(&error, "Failed to send session counters response");
+	if (br->stats->peer.peer != NULL) {
+		rc = bbdd_util_jrpc_send(&br->stats->peer, resp, &error);
+		if (rc != 0)
+			bbdd_util_printerr(&error, "Failed to send session counters response");
+	}
 
 	json_object_put(resp);
 	bbdd_br_stats_free(br->stats);
@@ -217,7 +246,8 @@ put_result_obj:
 put_resp:
 	json_object_put(resp);
 err:
-	bbdd_util_jrpc_respond_memerr(&br->stats->peer, br->stats->id);
+	if (br->stats->peer.peer != NULL)
+		bbdd_util_jrpc_respond_memerr(&br->stats->peer, br->stats->id);
 	bbdd_br_stats_free(br->stats);
 	br->stats = NULL;
 }
@@ -319,7 +349,7 @@ static void bbdd_br_handle_session_stats(struct bbdd_br *br,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	br->stats = bbdd_br_stats_alloc(peer, id, discr, &error);
+	br->stats = bbdd_br_stats_alloc(br, peer, id, discr, &error);
 	if (br->stats == NULL)
 		goto err;
 
@@ -369,14 +399,14 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_unhandled(peer, method, id);
 }
 
-static int bbdd_br_ctl_recv(struct bbdd_poll_ctx *, short revents,
-			    void *data, char **)
+static void bbdd_br_ctl_dispatch(struct bbdd_sock *peer,
+				 struct json_object *request_obj,
+				 void *data)
 {
 	struct bbdd_br *br = data;
 
-	assert(revents == POLLIN);
-	bbdd_util_ctl_activity(&br->ctl, br->mon, bbdd_br_handle_method, br);
-	return 0;
+	bbdd_util_dispatch_request(peer, request_obj, br->mon,
+				   bbdd_br_handle_method, br);
 }
 
 static void __bbdd_br_bfdd_hangup(struct bbdd_br *br, struct bbdd_bfdd *bfdd)
@@ -600,8 +630,8 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 	if (err != 0)
 		goto bfdd_server_close;
 
-	err = bbdd_poll_set_fd(br.pctx, br.ctl.fd, POLLIN,
-			       bbdd_br_ctl_recv, &br, &error);
+	err = bbdd_sock_listen_register(&br.ctl, br.pctx, br.mon,
+					bbdd_br_ctl_dispatch, &br, &error);
 	if (err != 0) {
 		bbdd_util_printerr(&error, "Failed to register socket for events");
 		goto sock_close_d;

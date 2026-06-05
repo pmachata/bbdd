@@ -75,13 +75,16 @@ void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
 
 struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af);
 
-void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
-			    struct bbdd_mon *mon,
-			    void (*cb)(struct bbdd_sock *peer,
-				       const char *method,
-				       struct json_object *params_obj,
-				       struct json_object *id,
-				       void *data),
-			    void *data);
+/* Dispatch a fully-parsed JRPC request object. Used as the body of the
+ * stream-peer dispatch callback. */
+void bbdd_util_dispatch_request(struct bbdd_sock *peer,
+				struct json_object *request_obj,
+				struct bbdd_mon *mon,
+				void (*cb)(struct bbdd_sock *peer,
+					   const char *method,
+					   struct json_object *params_obj,
+					   struct json_object *id,
+					   void *data),
+				void *data);
 
 uint64_t bbdd_util_now(void);

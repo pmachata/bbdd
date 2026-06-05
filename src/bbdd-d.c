@@ -2294,7 +2294,25 @@ struct bbdd_d_bfdd_connect_ctx {
 	struct bbdd_d *d;
 	struct bbdd_sock peer;
 	struct json_object *id;
+	void *close_hook;
 };
+
+static void bbdd_d_bfdd_connect_on_peer_close(void *data)
+{
+	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+
+	cctx->close_hook = NULL;
+	cctx->peer.peer = NULL;	/* peer is gone; subsequent respond is a no-op */
+}
+
+static void bbdd_d_bfdd_connect_clear_hook(struct bbdd_d_bfdd_connect_ctx *cctx)
+{
+	if (cctx->close_hook != NULL && cctx->peer.peer != NULL) {
+		bbdd_sock_peer_remove_close_hook(cctx->peer.peer,
+						 cctx->close_hook);
+		cctx->close_hook = NULL;
+	}
+}
 
 static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
 {
@@ -2302,7 +2320,9 @@ static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
 	struct bbdd_d *d = cctx->d;
 
 	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
-	bbdd_util_jrpc_respond_empty(&cctx->peer, cctx->id);
+	if (cctx->peer.peer != NULL)
+		bbdd_util_jrpc_respond_empty(&cctx->peer, cctx->id);
+	bbdd_d_bfdd_connect_clear_hook(cctx);
 }
 
 static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
@@ -2311,7 +2331,9 @@ static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 	struct bbdd_d *d = cctx->d;
 
-	bbdd_util_jrpc_respond_interr(&cctx->peer, cctx->id, *error);
+	if (cctx->peer.peer != NULL)
+		bbdd_util_jrpc_respond_interr(&cctx->peer, cctx->id, *error);
+	bbdd_d_bfdd_connect_clear_hook(cctx);
 	bbdd_mon_senderr(d->mon, error, "Failed to connect to BFD");
 
 	assert(d->bfdd == bfdd);
@@ -2323,6 +2345,7 @@ static void bbdd_d_bfdd_connect_free_cb(void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 
+	bbdd_d_bfdd_connect_clear_hook(cctx);
 	json_object_put(cctx->id);
 	free(cctx);
 }
@@ -2353,6 +2376,16 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 		.id = json_object_get(id),
 	};
 
+	if (peer->peer != NULL) {
+		cctx->close_hook = bbdd_sock_peer_add_close_hook(
+			peer->peer, bbdd_d_bfdd_connect_on_peer_close, cctx);
+		if (cctx->close_hook == NULL) {
+			bbdd_util_fmterr(error, "%m");
+			rc = -ENOMEM;
+			goto cctx_free;
+		}
+	}
+
 	cbs = (struct bbdd_bfdd_cbs) {
 		.conn_cb_data = cctx,
 		.connected_cb = bbdd_d_bfdd_connected_cb,
@@ -2375,6 +2408,8 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	return 0;
 
 cctx_free:
+	bbdd_d_bfdd_connect_clear_hook(cctx);
+	json_object_put(cctx->id);
 	free(cctx);
 	return rc;
 }
@@ -2596,13 +2631,14 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 		bbdd_d_handle_unhandled(peer, method, id);
 }
 
-static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *, short, void *arg,
-			   char **)
+static void bbdd_d_ctl_dispatch(struct bbdd_sock *peer,
+				struct json_object *request_obj,
+				void *data)
 {
-	struct bbdd_d *d = arg;
+	struct bbdd_d *d = data;
 
-	bbdd_util_ctl_activity(&d->ctl, d->mon, bbdd_d_handle_method, d);
-	return 0;
+	bbdd_util_dispatch_request(peer, request_obj, d->mon,
+				   bbdd_d_handle_method, d);
 }
 
 static int bbdd_d_raise_nofile(char **error)
@@ -2883,8 +2919,8 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (err != 0)
 		goto bpf_destroy;
 
-	err = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
-			       bbdd_d_ctl_recv, &d, &error);
+	err = bbdd_sock_listen_register(&d.ctl, d.pctx, d.mon,
+					bbdd_d_ctl_dispatch, &d, &error);
 	if (err != 0)
 		goto sock_close_d;
 

@@ -156,28 +156,7 @@ void bbdd_util_xferr(char **error, char **src)
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
 			char **error)
 {
-	const char *str;
-	size_t len;
-	ssize_t rc;
-
-	str = json_object_to_json_string(obj);
-	if (str == NULL) {
-		bbdd_util_fmterr(error, "Failed to serialize JSON object");
-		return -1;
-	}
-
-	len = strlen(str);
-	rc = sendto(sock->fd, str, len, 0,
-		    (struct sockaddr *) &sock->sa, sock->sa.len);
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "sendto: %m");
-		return -1;
-	}
-	if ((size_t)rc != len) {
-		bbdd_util_fmterr(error, "sendto: Failed to write the full message");
-		return -1;
-	}
-	return 0;
+	return bbdd_sock_send(sock, obj, error);
 }
 
 void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj)
@@ -371,57 +350,39 @@ static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 	bbdd_mon_send(mon, &mon_msg, topic);
 }
 
-void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
-			    struct bbdd_mon *mon,
-			    void (*cb)(struct bbdd_sock *peer,
-				       const char *method,
-				       struct json_object *params_obj,
-				       struct json_object *id,
-				       void *data),
-			    void *data)
+void bbdd_util_dispatch_request(struct bbdd_sock *peer,
+				struct json_object *request_obj,
+				struct bbdd_mon *mon,
+				void (*cb)(struct bbdd_sock *peer,
+					   const char *method,
+					   struct json_object *params_obj,
+					   struct json_object *id,
+					   void *data),
+				void *data)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_jrpc;
-	struct json_object *request_obj;
 	struct json_object *params;
-	struct bbdd_sock peer;
 	struct json_object *id;
-	char *request = NULL;
 	const char *method;
 	char *error;
 	int err;
 
-	err = bbdd_sock_recv(ctl, &peer, &request, &error);
-	if (err < 0) {
-		bbdd_util_printerr(&error, "Failed to receive response");
-		return;
-	}
+	if (bbdd_mon_topic_active(mon, topic)) {
+		const char *str = json_object_to_json_string(request_obj);
 
-	request_obj = json_tokener_parse(request);
-
-	if (bbdd_mon_topic_active(mon, topic))
-		bbdd_util_ctl_mon_send(mon, topic, request, request_obj);
-
-	if (request_obj == NULL) {
-		bbdd_util_jrpc_respond(&peer,
-				       bbdd_jrpc_new_error_inv_request(NULL));
-		goto free_req;
+		bbdd_util_ctl_mon_send(mon, topic, str, request_obj);
 	}
 
 	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
 					&error);
 	if (err) {
-		bbdd_util_jrpc_respond(&peer,
+		bbdd_util_jrpc_respond(peer,
 				       bbdd_jrpc_new_error_inv_request(error));
 		free(error);
-		goto put_req_obj;
+		return;
 	}
 
-	cb(&peer, method, params, id, data);
-
-put_req_obj:
-	json_object_put(request_obj);
-free_req:
-	free(request);
+	cb(peer, method, params, id, data);
 }
 
 uint64_t bbdd_util_now(void)

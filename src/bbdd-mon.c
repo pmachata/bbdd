@@ -23,9 +23,13 @@ struct bbdd_mon_cli {
 
 	struct bbdd_mon_topics topics;
 
+	struct bbdd_mon *mon;	/* back-ref for the close hook */
 	enum bbdd_mon_cli_kind kind;
 	union {
-		struct bbdd_sock sock;
+		struct {
+			struct bbdd_sock sock;
+			void *close_hook;
+		};
 		struct {
 			void (*cb)(struct json_object *, void *);
 			void *data;
@@ -89,6 +93,16 @@ bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
 	return cli;
 }
 
+static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli);
+
+static void bbdd_mon_cli_on_peer_close(void *data)
+{
+	struct bbdd_mon_cli *cli = data;
+
+	cli->close_hook = NULL; /* freed by the hook caller */
+	bbdd_mon_unsubscribe(cli->mon, cli);
+}
+
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error)
 {
@@ -102,7 +116,19 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	}
 
 	cli->kind = BBDD_MON_CLI_KIND_SOCK;
+	cli->mon = mon;
 	cli->sock = *sock;
+	cli->close_hook = NULL;
+	if (sock->peer != NULL) {
+		cli->close_hook = bbdd_sock_peer_add_close_hook(
+			sock->peer, bbdd_mon_cli_on_peer_close, cli);
+		if (cli->close_hook == NULL) {
+			bbdd_util_fmterr(error, "%m");
+			DL_DELETE(mon->head, cli);
+			free(cli);
+			return -1;
+		}
+	}
 	return 0;
 }
 
@@ -130,6 +156,10 @@ static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
 	for (int i = 0; i < bbdd_mon_ntopics; i++)
 		if (cli->topics.enabled[i])
 			mon->active[i]--;
+
+	if (cli->kind == BBDD_MON_CLI_KIND_SOCK && cli->close_hook != NULL)
+		bbdd_sock_peer_remove_close_hook(cli->sock.peer,
+						 cli->close_hook);
 
 	DL_DELETE(mon->head, cli);
 	free(cli);

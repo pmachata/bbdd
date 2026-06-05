@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,8 +18,67 @@
 #include <sys/un.h>
 #include <linux/if_ether.h>
 #include <linux/types.h>
+#include <json-c/json_tokener.h>
+#include <utlist.h>
 
-#include "bbdd-util.h" // xxx util has drifted away from being very low-level
+#include "bbdd-mon.h"
+#include "bbdd-poll.h"
+#include "bbdd-util.h"
+
+struct bbdd_sock_peer_close_hook {
+	void (*fn)(void *data);
+	void *data;
+	struct bbdd_sock_peer_close_hook *prev, *next;
+};
+
+/* Per-connection state. Allocated by accept() on the server, by connect()
+ * on the client. */
+struct bbdd_sock_peer {
+	int fd;
+
+	/* Server-side bookkeeping (NULL on client side). */
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	bbdd_sock_dispatch_fn dispatch;
+	void *dispatch_data;
+	struct bbdd_sock_peer *prev, *next;	/* in listener->peers */
+	bool pollout_armed;
+
+	/* TX side. Pending bytes waiting to go to the wire. */
+	char *tx_buf;
+	size_t tx_cap;
+	size_t tx_len;	/* bytes in tx_buf */
+	size_t tx_pos;	/* bytes already written */
+
+	/* RX side. */
+	struct json_tokener *tok;
+	bool rx_error;
+
+	/* Disconnect hooks: fired in reverse-registration order before the
+	 * peer is destroyed. */
+	struct bbdd_sock_peer_close_hook *close_hooks;
+
+	/* For the listening socket to find us back. */
+	struct bbdd_sock *listener;
+};
+
+/* Per-listener bookkeeping kept on the listening bbdd_sock. */
+struct bbdd_sock_listener_state {
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	bbdd_sock_dispatch_fn dispatch;
+	void *dispatch_data;
+	struct bbdd_sock_peer *peers;	/* DList of accepted peers */
+};
+
+/* Forward declarations. */
+static struct bbdd_sock_peer *bbdd_sock_peer_alloc(int fd, char **error);
+static void bbdd_sock_peer_free(struct bbdd_sock_peer *peer);
+static int bbdd_sock_peer_poll_cb(struct bbdd_poll_ctx *pctx, short revents,
+				  void *data, char **error);
+static int bbdd_sock_set_nonblock(int fd, char **error);
+static struct bbdd_sock_listener_state *
+bbdd_sock_listener_state_of(struct bbdd_sock *listener); // xxx util has drifted away from being very low-level
 		       // library into a catch-all of utilities. I think we need
 		       // a bbdd-fmt or bbdd-err for the error-formatting stuff.
 		       // Or these high-level things could be in bbdd maybe.
@@ -480,22 +540,6 @@ static int bbdd_ctl_sockaddr(const char *sockdir,
 					    error);
 }
 
-static int bbdd_cli_sockaddr(const char *sockdir,
-			     struct bbdd_sockaddr *cli_bsa, char **error)
-{
-	char *sockname;
-	int rc;
-
-	rc = asprintf(&sockname, "bbdd.cli.%d", getpid());
-	if (rc < 0) {
-		bbdd_util_fmterr(error, "%m");
-		return rc;
-	}
-
-	rc = bbdd_sock_parse_addrstr_unix(sockdir, sockname, cli_bsa, error);
-	free(sockname);
-	return rc;
-}
 
 static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 				    int type, struct bbdd_sock *sock,
@@ -585,12 +629,24 @@ int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error)
 	if (rc != 0)
 		goto err;
 
-	rc = bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl, error);
+	rc = bbdd_sock_open_sa(&bsa, SOCK_STREAM, ctl, error);
 	if (rc != 0)
 		goto err;
 
+	rc = bbdd_sock_set_nonblock(ctl->fd, error);
+	if (rc != 0)
+		goto close_sock;
+
+	rc = listen(ctl->fd, SOMAXCONN);
+	if (rc < 0) {
+		bbdd_util_fmterr(error, "listen: %m");
+		goto close_sock;
+	}
+
 	return 0;
 
+close_sock:
+	bbdd_sock_close(ctl);
 err:
 	bbdd_util_appenderr(error, "Failed to open daemon socket");
 	return rc;
@@ -598,52 +654,59 @@ err:
 
 void bbdd_sock_close_d(struct bbdd_sock *ctl)
 {
+	bbdd_sock_listen_close_peers(ctl);
+	free(bbdd_sock_listener_state_of(ctl));
+	ctl->peer = NULL;
 	bbdd_sock_close(ctl);
 }
 
-int bbdd_sock_open_c(struct bbdd_sock *cli,
-		     struct bbdd_sock *peer,
+int bbdd_sock_open_c(struct bbdd_sock *peer,
 		     const char *sockdir,
 		     char **error)
 {
 	struct bbdd_sockaddr ctl_bsa;
-	struct bbdd_sockaddr cli_bsa;
 	int rc;
 
 	rc = bbdd_ctl_sockaddr(sockdir, &ctl_bsa, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_cli_sockaddr(sockdir, &cli_bsa, error);
+	rc = bbdd_sock_open_sa_nobind(&ctl_bsa, SOCK_STREAM, peer, error);
 	if (rc != 0)
 		return rc;
 
-	rc = bbdd_sock_open_sa(&cli_bsa, SOCK_DGRAM, cli, error);
-	if (rc != 0)
-		return rc;
-
-	*peer = (struct bbdd_sock) {
-		.fd = cli->fd,
-		.sa = ctl_bsa,
-	};
-	rc = connect(peer->fd, &peer->sa.sa, peer->sa.len);
+	rc = connect(peer->fd, &ctl_bsa.sa, ctl_bsa.len);
 	if (rc != 0) {
 		bbdd_util_fmterr(error, "Failed to connect to socket `%s': %m",
-				 peer->sa.sun.sun_path);
-		goto close_cli;
+				 ctl_bsa.sun.sun_path);
+		goto close;
 	}
+
+	peer->peer = bbdd_sock_peer_alloc(peer->fd, error);
+	if (peer->peer == NULL)
+		goto close;
 
 	return 0;
 
-close_cli:
-	bbdd_sock_close_c(cli);
+close:
+	close(peer->fd);
+	peer->fd = -1;
 	return -1;
-
 }
 
 void bbdd_sock_close_c(struct bbdd_sock *cli)
 {
-	bbdd_sock_close(cli);
+	if (cli->peer != NULL)
+		bbdd_sock_peer_free(cli->peer);
+	cli->peer = NULL;
+	if (cli->fd >= 0)
+		close(cli->fd);
+	cli->fd = -1;
+}
+
+int bbdd_sock_set_nonblocking(struct bbdd_sock *peer, char **error)
+{
+	return bbdd_sock_set_nonblock(peer->fd, error);
 }
 
 int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
@@ -704,46 +767,585 @@ void bbdd_sock_close_udp(struct bbdd_sock *sock)
 	close(sock->fd);
 }
 
-int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
-		   char **bufp, char **error)
+/* ===== stream peer machinery ===== */
+
+static int bbdd_sock_set_nonblock(int fd, char **error)
 {
-	ssize_t msgsz;
-	char *buf;
+	int flags;
+
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0) {
+		bbdd_util_fmterr(error, "fcntl(F_GETFL): %m");
+		return -1;
+	}
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+		bbdd_util_fmterr(error, "fcntl(F_SETFL O_NONBLOCK): %m");
+		return -1;
+	}
+	return 0;
+}
+
+static struct bbdd_sock_peer *bbdd_sock_peer_alloc(int fd, char **error)
+{
+	struct bbdd_sock_peer *peer;
+
+	peer = malloc(sizeof(*peer));
+	if (peer == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		return NULL;
+	}
+
+	*peer = (struct bbdd_sock_peer) {
+		.fd = fd,
+	};
+
+	peer->tok = json_tokener_new();
+	if (peer->tok == NULL) {
+		bbdd_util_fmterr(error, "json_tokener_new: %m");
+		free(peer);
+		return NULL;
+	}
+
+	return peer;
+}
+
+static void bbdd_sock_peer_free(struct bbdd_sock_peer *peer)
+{
+	struct bbdd_sock_peer_close_hook *hook, *tmp;
+
+	if (peer == NULL)
+		return;
+
+	/* Run close hooks in reverse-registration order. */
+	while (peer->close_hooks != NULL) {
+		hook = peer->close_hooks->prev;
+		DL_DELETE(peer->close_hooks, hook);
+		hook->fn(hook->data);
+		free(hook);
+	}
+
+	if (peer->tok != NULL)
+		json_tokener_free(peer->tok);
+	free(peer->tx_buf);
+	free(peer);
+
+	(void) tmp;
+}
+
+void *bbdd_sock_peer_add_close_hook(struct bbdd_sock_peer *peer,
+				    void (*fn)(void *data), void *data)
+{
+	struct bbdd_sock_peer_close_hook *hook;
+
+	hook = malloc(sizeof(*hook));
+	if (hook == NULL)
+		return NULL;
+	*hook = (struct bbdd_sock_peer_close_hook) {
+		.fn = fn,
+		.data = data,
+	};
+	DL_APPEND(peer->close_hooks, hook);
+	return hook;
+}
+
+void bbdd_sock_peer_remove_close_hook(struct bbdd_sock_peer *peer,
+				      void *handle)
+{
+	struct bbdd_sock_peer_close_hook *hook = handle;
+
+	if (hook == NULL)
+		return;
+	DL_DELETE(peer->close_hooks, hook);
+	free(hook);
+}
+
+bool bbdd_sock_peer_eq(const struct bbdd_sock *a, const struct bbdd_sock *b)
+{
+	return a->peer != NULL && a->peer == b->peer;
+}
+
+static int bbdd_sock_peer_arm_pollout(struct bbdd_sock_peer *peer,
+				      char **error)
+{
+	int rc;
+
+	if (peer->pollout_armed)
+		return 0;
+	rc = bbdd_poll_set_fd(peer->pctx, peer->fd, POLLIN | POLLOUT,
+			      bbdd_sock_peer_poll_cb, peer, error);
+	if (rc != 0)
+		return rc;
+	peer->pollout_armed = true;
+	return 0;
+}
+
+static int bbdd_sock_peer_disarm_pollout(struct bbdd_sock_peer *peer,
+					 char **error)
+{
+	int rc;
+
+	if (!peer->pollout_armed)
+		return 0;
+	rc = bbdd_poll_set_fd(peer->pctx, peer->fd, POLLIN,
+			      bbdd_sock_peer_poll_cb, peer, error);
+	if (rc != 0)
+		return rc;
+	peer->pollout_armed = false;
+	return 0;
+}
+
+/* Best-effort drain of the peer's TX buffer. With pctx set (server-side
+ * non-blocking peer), short writes leave bytes in the buffer and POLLOUT
+ * is armed. Without pctx (client-side blocking peer), this loops until
+ * fully drained or a hard error occurs. */
+static int bbdd_sock_peer_drain_tx(struct bbdd_sock_peer *peer, char **error)
+{
+	while (peer->tx_pos < peer->tx_len) {
+		ssize_t n;
+
+		n = send(peer->fd, peer->tx_buf + peer->tx_pos,
+			 peer->tx_len - peer->tx_pos, MSG_NOSIGNAL);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				break;
+			bbdd_util_fmterr(error, "write: %m");
+			return -1;
+		}
+		peer->tx_pos += (size_t)n;
+	}
+
+	if (peer->tx_pos >= peer->tx_len) {
+		peer->tx_len = 0;
+		peer->tx_pos = 0;
+		if (peer->pctx != NULL)
+			return bbdd_sock_peer_disarm_pollout(peer, error);
+		return 0;
+	}
+
+	/* Partial drain. Arm POLLOUT to be notified when more can be
+	 * written. */
+	if (peer->pctx != NULL)
+		return bbdd_sock_peer_arm_pollout(peer, error);
+	return 0;
+}
+
+static int bbdd_sock_peer_enqueue(struct bbdd_sock_peer *peer,
+				  const char *buf, size_t len, char **error)
+{
+	size_t need;
+
+	/* Compact head if we can without growing. */
+	if (peer->tx_pos > 0) {
+		memmove(peer->tx_buf,
+			peer->tx_buf + peer->tx_pos,
+			peer->tx_len - peer->tx_pos);
+		peer->tx_len -= peer->tx_pos;
+		peer->tx_pos = 0;
+	}
+
+	need = peer->tx_len + len;
+	if (need > peer->tx_cap) {
+		size_t new_cap = peer->tx_cap ? peer->tx_cap : 4096;
+		char *new_buf;
+
+		while (new_cap < need)
+			new_cap *= 2;
+		new_buf = realloc(peer->tx_buf, new_cap);
+		if (new_buf == NULL) {
+			bbdd_util_fmterr(error, "%m");
+			return -1;
+		}
+		peer->tx_buf = new_buf;
+		peer->tx_cap = new_cap;
+	}
+
+	memcpy(peer->tx_buf + peer->tx_len, buf, len);
+	peer->tx_len += len;
+	return 0;
+}
+
+int bbdd_sock_send(struct bbdd_sock *sock, struct json_object *obj,
+		   char **error)
+{
+	struct bbdd_sock_peer *peer = sock->peer;
+	const char *str;
+	size_t len;
+	int rc;
+
+	if (peer == NULL) {
+		bbdd_util_fmterr(error, "bbdd_sock_send on a non-stream socket");
+		return -1;
+	}
+
+	str = json_object_to_json_string(obj);
+	if (str == NULL) {
+		bbdd_util_fmterr(error, "Failed to serialize JSON object");
+		return -1;
+	}
+	len = strlen(str);
+
+	rc = bbdd_sock_peer_enqueue(peer, str, len, error);
+	if (rc != 0)
+		return rc;
+	return bbdd_sock_peer_drain_tx(peer, error);
+}
+
+/* Feed `len' bytes from `buf' to the tokener. If a complete object lands,
+ * call `dispatch'. Returns 0 on clean progress, -1 on protocol error. */
+static int bbdd_sock_peer_feed(struct bbdd_sock_peer *peer,
+			       const char *buf, size_t len,
+			       void (*dispatch)(struct json_object *obj,
+						void *data),
+			       void *data, char **error)
+{
+	const char *cursor = buf;
+	size_t left = len;
+
+	while (left > 0) {
+		struct json_object *obj;
+		size_t consumed;
+		int err;
+
+		obj = json_tokener_parse_ex(peer->tok, cursor, (int) left);
+		err = json_tokener_get_error(peer->tok);
+
+		if (obj == NULL && err == json_tokener_continue) {
+			/* Need more bytes; the tokener has buffered what we
+			 * fed it. */
+			break;
+		}
+
+		if (obj == NULL) {
+			bbdd_util_fmterr(error, "JSON parse error: %s",
+					 json_tokener_error_desc(err));
+			peer->rx_error = true;
+			return -1;
+		}
+
+		consumed = (size_t) json_tokener_get_parse_end(peer->tok);
+		assert(consumed <= left);
+		cursor += consumed;
+		left -= consumed;
+
+		dispatch(obj, data);
+		json_object_put(obj);
+
+		json_tokener_reset(peer->tok);
+	}
+
+	return 0;
+}
+
+struct bbdd_sock_dispatch_ctx {
+	struct bbdd_sock *peer_sock;
+	bbdd_sock_dispatch_fn fn;
+	void *data;
+};
+
+static void bbdd_sock_dispatch_trampoline(struct json_object *obj, void *data)
+{
+	struct bbdd_sock_dispatch_ctx *ctx = data;
+
+	ctx->fn(ctx->peer_sock, obj, ctx->data);
+}
+
+static int bbdd_sock_peer_read_some(struct bbdd_sock_peer *peer,
+				    void (*dispatch)(struct json_object *,
+						     void *),
+				    void *data, bool *got_eof, char **error)
+{
+	char buf[4096];
 	ssize_t n;
 	int rc;
 
-	*bufp = NULL;
-	*peer = (struct bbdd_sock) {
-		.fd = sock->fd,
-		.sa = {
-			.len = sizeof(peer->sa),
-		},
+	*got_eof = false;
+
+	for (;;) {
+		n = read(peer->fd, buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return 0;
+			bbdd_util_fmterr(error, "read: %m");
+			return -1;
+		}
+		if (n == 0) {
+			*got_eof = true;
+			return 0;
+		}
+
+		rc = bbdd_sock_peer_feed(peer, buf, (size_t) n,
+					 dispatch, data, error);
+		if (rc != 0)
+			return rc;
+	}
+}
+
+static struct bbdd_sock_listener_state *
+bbdd_sock_listener_state_of(struct bbdd_sock *listener)
+{
+	/* The listener bbdd_sock stores its state via the `peer' pointer
+	 * slot (which is otherwise unused on a listening socket). */
+	return (struct bbdd_sock_listener_state *) listener->peer;
+}
+
+static int bbdd_sock_peer_poll_cb(struct bbdd_poll_ctx *pctx, short revents,
+				  void *data, char **out_error)
+{
+	struct bbdd_sock_peer *peer = data;
+	struct bbdd_sock *listener = peer->listener;
+	struct bbdd_sock_listener_state *st = NULL;
+	struct bbdd_sock peer_sock = {
+		.fd = peer->fd,
+		.peer = peer,
 	};
-	msgsz = recvfrom(sock->fd, NULL, 0, MSG_PEEK | MSG_TRUNC,
-			 (struct sockaddr *) &peer->sa, &peer->sa.len);
-	if (msgsz < 0) {
-		bbdd_util_fmterr(error, "recvfrom: %m");
-		return -1;
+	struct bbdd_sock_dispatch_ctx dctx;
+	char *error = NULL;
+	bool got_eof = false;
+	int rc;
+
+	(void) pctx;
+	(void) out_error;
+
+	if (listener != NULL)
+		st = bbdd_sock_listener_state_of(listener);
+
+	if (revents & POLLOUT) {
+		rc = bbdd_sock_peer_drain_tx(peer, &error);
+		if (rc != 0)
+			goto teardown;
 	}
 
-	buf = calloc(1, (size_t)msgsz + 1);
-	if (buf == NULL) {
-		bbdd_util_fmterr(error, "calloc: %m");
-		return -1;
+	if (revents & POLLIN) {
+		dctx = (struct bbdd_sock_dispatch_ctx) {
+			.peer_sock = &peer_sock,
+			.fn = peer->dispatch,
+			.data = peer->dispatch_data,
+		};
+		rc = bbdd_sock_peer_read_some(peer,
+					      bbdd_sock_dispatch_trampoline,
+					      &dctx, &got_eof, &error);
+		if (rc != 0)
+			goto teardown;
+		if (got_eof)
+			goto teardown;
 	}
 
-	n = recv(sock->fd, buf, (size_t)msgsz, 0);
-	if (n < 0) {
-		bbdd_util_fmterr(error, "recv: %m");
-		rc = -1;
-		goto free_buf;
-	}
-	buf[n] = '\0';
+	if (revents & (POLLERR | POLLHUP | POLLNVAL))
+		goto teardown;
 
-	*bufp = buf;
 	return 0;
 
-free_buf:
-	free(buf);
-	return rc;
+teardown:
+	if (error != NULL) {
+		bbdd_mon_senderr(peer->mon, &error, "peer fd %d", peer->fd);
+		/* bbdd_mon_senderr consumes and frees *error. */
+	}
+	if (st != NULL)
+		DL_DELETE(st->peers, peer);
+	bbdd_poll_unset_fd(peer->pctx, peer->fd);
+	close(peer->fd);
+	bbdd_sock_peer_free(peer);
+	return 0;
+}
+
+static int bbdd_sock_listen_accept_cb(struct bbdd_poll_ctx *pctx, short revents,
+				      void *data, char **error)
+{
+	struct bbdd_sock *listener = data;
+	struct bbdd_sock_listener_state *st = bbdd_sock_listener_state_of(listener);
+
+	(void) pctx;
+	(void) revents;
+
+	for (;;) {
+		struct bbdd_sock_peer *peer;
+		int fd;
+
+		fd = accept4(listener->fd, NULL, NULL,
+			     SOCK_NONBLOCK | SOCK_CLOEXEC);
+		if (fd < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return 0;
+			if (errno == EINTR)
+				continue;
+			bbdd_util_fmterr(error, "accept: %m");
+			return -1;
+		}
+
+		peer = bbdd_sock_peer_alloc(fd, error);
+		if (peer == NULL) {
+			close(fd);
+			return -1;
+		}
+
+		peer->pctx = st->pctx;
+		peer->mon = st->mon;
+		peer->dispatch = st->dispatch;
+		peer->dispatch_data = st->dispatch_data;
+		peer->listener = listener;
+
+		if (bbdd_poll_set_fd(peer->pctx, peer->fd, POLLIN,
+				     bbdd_sock_peer_poll_cb, peer,
+				     error) != 0) {
+			close(fd);
+			bbdd_sock_peer_free(peer);
+			return -1;
+		}
+
+		DL_APPEND(st->peers, peer);
+	}
+}
+
+int bbdd_sock_listen_register(struct bbdd_sock *ctl,
+			      struct bbdd_poll_ctx *pctx,
+			      struct bbdd_mon *mon,
+			      bbdd_sock_dispatch_fn dispatch,
+			      void *dispatch_data,
+			      char **error)
+{
+	struct bbdd_sock_listener_state *st;
+	int rc;
+
+	st = malloc(sizeof(*st));
+	if (st == NULL) {
+		bbdd_util_fmterr(error, "%m");
+		return -1;
+	}
+	*st = (struct bbdd_sock_listener_state) {
+		.pctx = pctx,
+		.mon = mon,
+		.dispatch = dispatch,
+		.dispatch_data = dispatch_data,
+	};
+	ctl->peer = (struct bbdd_sock_peer *) st;
+
+	rc = bbdd_poll_set_fd(pctx, ctl->fd, POLLIN,
+			      bbdd_sock_listen_accept_cb, ctl, error);
+	if (rc != 0) {
+		free(st);
+		ctl->peer = NULL;
+		return -1;
+	}
+	return 0;
+}
+
+/* Best-effort: switch the fd back to blocking and write the rest of the
+ * TX buffer. Used at shutdown so the last response (e.g. to `stop')
+ * actually reaches the client. */
+static void bbdd_sock_peer_flush_blocking(struct bbdd_sock_peer *peer)
+{
+	int flags;
+
+	if (peer->tx_pos >= peer->tx_len)
+		return;
+
+	flags = fcntl(peer->fd, F_GETFL, 0);
+	if (flags >= 0)
+		fcntl(peer->fd, F_SETFL, flags & ~O_NONBLOCK);
+
+	while (peer->tx_pos < peer->tx_len) {
+		ssize_t n = send(peer->fd, peer->tx_buf + peer->tx_pos,
+				 peer->tx_len - peer->tx_pos, MSG_NOSIGNAL);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		peer->tx_pos += (size_t)n;
+	}
+}
+
+void bbdd_sock_listen_close_peers(struct bbdd_sock *ctl)
+{
+	struct bbdd_sock_listener_state *st;
+	struct bbdd_sock_peer *peer, *tmp;
+
+	if (ctl->peer == NULL)
+		return;
+	st = (struct bbdd_sock_listener_state *) ctl->peer;
+
+	DL_FOREACH_SAFE(st->peers, peer, tmp) {
+		DL_DELETE(st->peers, peer);
+		if (peer->pctx != NULL)
+			bbdd_poll_unset_fd(peer->pctx, peer->fd);
+		bbdd_sock_peer_flush_blocking(peer);
+		close(peer->fd);
+		bbdd_sock_peer_free(peer);
+	}
+
+	if (st->pctx != NULL)
+		bbdd_poll_unset_fd(st->pctx, ctl->fd);
+}
+
+static struct bbdd_sock_peer *bbdd_sock_is_stream(struct bbdd_sock *sock)
+{
+	struct bbdd_sock_peer *peer = sock->peer;
+
+	/* peer is NULL only on a non-stream socket. */
+	assert(peer != NULL);
+	return peer;
+}
+
+int bbdd_sock_recv_obj(struct bbdd_sock *sock,
+		       struct json_object **obj_out, char **error)
+{
+	struct bbdd_sock_peer *peer = bbdd_sock_get_peer(sock);
+	char buf[4096];
+
+	for (;;) {
+		struct json_object *obj;
+		ssize_t n;
+		int err;
+
+		n = read(peer->fd, buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			bbdd_util_fmterr(error, "read: %m");
+			return -1;
+		}
+		if (n == 0) {
+			bbdd_util_fmterr(error, "Peer closed connection");
+			return -1;
+		}
+
+		obj = json_tokener_parse_ex(peer->tok, buf, (int) n);
+		err = json_tokener_get_error(peer->tok);
+
+		if (obj == NULL && err == json_tokener_continue)
+			continue;
+
+		if (obj == NULL) {
+			bbdd_util_fmterr(error, "JSON parse error: %s",
+					 json_tokener_error_desc(err));
+			return -1;
+		}
+
+		/* Note: leftover bytes after the parse are dropped here. The
+		 * synchronous client path expects exactly one response per
+		 * request. */
+		json_tokener_reset(peer->tok);
+		*obj_out = obj;
+		return 0;
+	}
+}
+
+int bbdd_sock_drain_into(struct bbdd_sock *sock,
+			 void (*dispatch)(struct json_object *obj, void *data),
+			 void *data, char **error)
+{
+	struct bbdd_sock_peer *peer = bbdd_sock_get_peer(sock);
+	bool got_eof = false;
+	int rc;
+
+	rc = bbdd_sock_peer_read_some(peer, dispatch, data, &got_eof, error);
+	if (rc != 0)
+		return rc;
+	if (got_eof)
+		return 0;
+	return 1;
 }

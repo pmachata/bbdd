@@ -133,11 +133,9 @@ static bool bbdd_c_result_show_json(struct json_object *result)
 }
 
 static struct json_object *bbdd_c_send_request_on(struct json_object *request,
-						  struct bbdd_sock *cli,
 						  struct bbdd_sock *peer)
 {
 	struct json_object *response_obj = NULL;
-	char *response;
 	char *error;
 	int err;
 
@@ -147,21 +145,12 @@ static struct json_object *bbdd_c_send_request_on(struct json_object *request,
 		return NULL;
 	}
 
-	err = bbdd_sock_recv(cli, peer, &response, &error);
+	err = bbdd_sock_recv_obj(peer, &response_obj, &error);
 	if (err < 0) {
 		bbdd_util_printerr(&error, "Failed to receive an RPC response");
 		return NULL;
 	}
 
-	response_obj = json_tokener_parse(response);
-	if (response_obj == NULL) {
-		bbdd_util_fmterr(&error, "Failed to parse RPC response as JSON.");
-		bbdd_util_printerr(&error, NULL);
-		goto free_response;
-	}
-
-free_response:
-	free(response);
 	return response_obj;
 }
 
@@ -169,19 +158,18 @@ static struct json_object *bbdd_c_send_request(struct json_object *request)
 {
 	struct json_object *response_obj = NULL;
 	struct bbdd_sock peer;
-	struct bbdd_sock cli;
 	char *error;
 	int err;
 
-	err = bbdd_sock_open_c(&cli, &peer, bbdd_env.sockdir, &error);
+	err = bbdd_sock_open_c(&peer, bbdd_env.sockdir, &error);
 	if (err < 0) {
 		bbdd_util_printerr(&error, "Failed to open a socket");
 		return NULL;
 	}
 
-	response_obj = bbdd_c_send_request_on(request, &cli, &peer);
+	response_obj = bbdd_c_send_request_on(request, &peer);
 
-	bbdd_sock_close_c(&cli);
+	bbdd_sock_close_c(&peer);
 	return response_obj;
 }
 
@@ -2987,52 +2975,46 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 
 struct bbdd_c_monitor_ctx {
 	struct bbdd_sock cli;
+	struct bbdd_poll_ctx *pctx;
 };
+
+static void bbdd_c_monitor_notif_cb(struct json_object *notif_obj, void *data)
+{
+	struct bbdd_c_monitor_ctx *ctx = data;
+	struct json_object *params;
+	const char *method;
+	char *error;
+	int err;
+
+	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
+	if (err) {
+		bbdd_util_printerr(&error, "Failed to dissect monitor event");
+		return;
+	}
+
+	if (strcmp(method, "monitor-end") == 0) {
+		bbdd_poll_request_quit(ctx->pctx);
+		return;
+	}
+
+	bbdd_c_monitor_handle_notif(method, params);
+}
 
 static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
 				  char **)
 {
 	struct bbdd_c_monitor_ctx *ctx = arg;
-	struct json_object *notif_obj;
-	struct json_object *params;
-	struct bbdd_sock sender;
-	const char *method;
 	char *error;
-	char *msg;
-	int err;
+	int rc;
 
-	err = bbdd_sock_recv(&ctx->cli, &sender, &msg, &error);
-	if (err < 0) {
+	rc = bbdd_sock_drain_into(&ctx->cli, bbdd_c_monitor_notif_cb, ctx,
+				  &error);
+	if (rc < 0) {
 		bbdd_util_printerr(&error, "Failed to receive monitor message");
 		bbdd_poll_request_quit(pctx);
-		return 0;
-	}
-
-	notif_obj = json_tokener_parse(msg);
-	if (notif_obj == NULL) {
-		fprintf(stderr, "Monitor message not JSON: `%s'\n", msg);
-		goto free_msg;
-	}
-
-	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
-	if (err) {
-		bbdd_util_printerr(&error, "Failed to dissect monitor event");
-		goto put_notif_obj;
-	}
-
-	if (strcmp(method, "monitor-end") == 0) {
-		json_object_put(notif_obj);
-		free(msg);
+	} else if (rc == 0) {
 		bbdd_poll_request_quit(pctx);
-		return 0;
 	}
-
-	bbdd_c_monitor_handle_notif(method, params);
-
-put_notif_obj:
-	json_object_put(notif_obj);
-free_msg:
-	free(msg);
 	return 0;
 }
 
@@ -3091,13 +3073,12 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
-	struct bbdd_sock peer;
 	struct bbdd_mon *mon;
 	const int id = 1;
 	char *error;
 	int err;
 
-	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir, &error);
+	err = bbdd_sock_open_c(&mctx.cli, bbdd_env.sockdir, &error);
 	if (err < 0)
 		goto err;
 
@@ -3108,7 +3089,7 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto close_cli;
 	}
 
-	response = bbdd_c_send_request_on(request, &mctx.cli, &peer);
+	response = bbdd_c_send_request_on(request, &mctx.cli);
 	if (response == NULL) {
 		bbdd_util_fmterr(&error, "Failed to send monitor request");
 		err = -1;
@@ -3142,6 +3123,11 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	err = bbdd_poll_set_signals(pctx, &error);
 	if (err != 0)
 		goto fini_pctx;
+
+	mctx.pctx = pctx;
+	err = bbdd_sock_set_nonblocking(&mctx.cli, &error);
+	if (err != 0)
+		goto unset_signals;
 
 	err = bbdd_poll_set_fd(pctx, mctx.cli.fd, POLLIN,
 			       bbdd_c_monitor_recv_cb, &mctx, &error);
