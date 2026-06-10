@@ -599,7 +599,7 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 
 	err = bbdd_sock_open_d(&br.ctl, bbdd_env.sockdir, &error);
 	if (err != 0)
-		goto bfdd_server_close;
+		goto bfdd_poll_unset_server;
 
 	err = bbdd_poll_set_fd(br.pctx, br.ctl.fd, POLLIN,
 			       bbdd_br_ctl_recv, &br, &error);
@@ -627,6 +627,8 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 
 sock_close_d:
 	bbdd_sock_close_d(&br.ctl);
+bfdd_poll_unset_server:
+	bbdd_poll_unset_fd(br.pctx, br.bfdd_server.fd);
 bfdd_server_close:
 	bbdd_br_close_bfdd_server(&br.bfdd_server);
 poll_fini:
