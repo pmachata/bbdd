@@ -3121,7 +3121,7 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto put_response;
 	}
 
-	mon = bbdd_mon_init(bbdd_env.mon_eager, &error);
+	mon = bbdd_mon_create(bbdd_env.mon_eager, &error);
 	if (mon == NULL) {
 		err = -1;
 		goto put_response;
@@ -3158,7 +3158,7 @@ unset_signals:
 fini_pctx:
 	bbdd_poll_fini(pctx);
 mon_fini:
-	bbdd_mon_fini(mon);
+	bbdd_mon_destroy(mon);
 put_response:
 	json_object_put(response);
 put_request:

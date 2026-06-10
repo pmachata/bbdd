@@ -2845,7 +2845,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (d.nl == NULL)
 		goto closelog;
 
-	d.mon = bbdd_mon_init(bbdd_env.mon_eager, &error);
+	d.mon = bbdd_mon_create(bbdd_env.mon_eager, &error);
 	if (d.mon == NULL)
 		goto nl_destroy;
 
@@ -2911,7 +2911,7 @@ sess_dir_destroy:
 poll_fini:
 	bbdd_poll_fini(d.pctx);
 mon_fini:
-	bbdd_mon_fini(d.mon);
+	bbdd_mon_destroy(d.mon);
 nl_destroy:
 	bbdd_nl_destroy(d.nl);
 closelog:

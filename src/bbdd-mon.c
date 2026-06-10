@@ -39,7 +39,7 @@ struct bbdd_mon {
 	bool eager;
 };
 
-struct bbdd_mon *bbdd_mon_init(bool eager, char **error)
+struct bbdd_mon *bbdd_mon_create(bool eager, char **error)
 {
 	struct bbdd_mon *mon;
 
@@ -55,7 +55,7 @@ struct bbdd_mon *bbdd_mon_init(bool eager, char **error)
 	return mon;
 }
 
-void bbdd_mon_fini(struct bbdd_mon *mon)
+void bbdd_mon_destroy(struct bbdd_mon *mon)
 {
 	struct bbdd_mon_cli *cli, *tmp;
 

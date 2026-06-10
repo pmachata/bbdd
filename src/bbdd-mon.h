@@ -29,8 +29,8 @@ struct bbdd_mon_topics {
 	bool enabled[bbdd_mon_ntopics];
 };
 
-struct bbdd_mon *bbdd_mon_init(bool eager, char **error);
-void bbdd_mon_fini(struct bbdd_mon *mon);
+struct bbdd_mon *bbdd_mon_create(bool eager, char **error);
+void bbdd_mon_destroy(struct bbdd_mon *mon);
 
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error);
