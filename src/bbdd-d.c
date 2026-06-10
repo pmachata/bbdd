@@ -2845,7 +2845,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (d.nl == NULL)
 		goto closelog;
 
-	d.mon = bbdd_mon_init(&error);
+	d.mon = bbdd_mon_init(bbdd_env.mon_eager, &error);
 	if (d.mon == NULL)
 		goto nl_destroy;
 

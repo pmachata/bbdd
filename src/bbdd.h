@@ -19,5 +19,3 @@ extern struct bbdd_env {
 	bool timestamp;
 	bool mon_eager;
 } bbdd_env;
-
-#define bbdd_poison (void *) (uintptr_t) 0xbbdd'dead;

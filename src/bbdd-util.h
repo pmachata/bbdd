@@ -8,6 +8,8 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*(x)))
 
+#define bbdd_poison (void *) (uintptr_t) 0xbbdd'dead;
+
 /* JRPC helpers. */
 
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,

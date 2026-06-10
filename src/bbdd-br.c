@@ -567,7 +567,7 @@ static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
 		goto out;
 	}
 
-	br.mon = bbdd_mon_init(&error);
+	br.mon = bbdd_mon_init(bbdd_env.mon_eager, &error);
 	if (br.mon == NULL)
 		goto nl_destroy;
 

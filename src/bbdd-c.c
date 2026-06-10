@@ -3121,7 +3121,7 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto put_response;
 	}
 
-	mon = bbdd_mon_init(&error);
+	mon = bbdd_mon_init(bbdd_env.mon_eager, &error);
 	if (mon == NULL) {
 		err = -1;
 		goto put_response;

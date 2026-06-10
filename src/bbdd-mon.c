@@ -7,7 +7,6 @@
 #include <time.h>
 #include <utlist.h>
 
-#include "bbdd.h"
 #include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-sock.h"
@@ -37,9 +36,10 @@ struct bbdd_mon_cli {
 struct bbdd_mon {
 	struct bbdd_mon_cli *head;	/* DList of clients. */
 	unsigned int active[bbdd_mon_ntopics];
+	bool eager;
 };
 
-struct bbdd_mon *bbdd_mon_init(char **error)
+struct bbdd_mon *bbdd_mon_init(bool eager, char **error)
 {
 	struct bbdd_mon *mon;
 
@@ -49,7 +49,9 @@ struct bbdd_mon *bbdd_mon_init(char **error)
 		return NULL;
 	}
 
-	*mon = (struct bbdd_mon) {};
+	*mon = (struct bbdd_mon) {
+		.eager = eager,
+	};
 	return mon;
 }
 
@@ -138,7 +140,7 @@ static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
 
 bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic)
 {
-	return bbdd_env.mon_eager || mon->active[topic] > 0;
+	return mon->eager || mon->active[topic] > 0;
 }
 
 static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
