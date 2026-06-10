@@ -495,11 +495,15 @@ static int bbdd_cli_sockaddr(const char *sockdir,
 	return rc;
 }
 
-static int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
-				    int type, struct bbdd_sock *sock,
-				    char **error)
+int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
+			     int type, struct bbdd_sock *sock,
+			     char **error)
 {
 	int fd;
+
+	if (bsa->sa.sa_family != AF_UNIX)
+		/* For now bounce everything non-unix. */
+		return bbdd_sock_unsupported_family(bsa->sa.sa_family, error);
 
 	*sock = (struct bbdd_sock) { .fd = -1 };
 
@@ -548,10 +552,6 @@ int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 		      struct bbdd_sock *sock, char **error)
 {
 	int rc;
-
-	if (bsa->sa.sa_family != AF_UNIX)
-		/* For now bounce everything non-unix. */
-		return bbdd_sock_unsupported_family(bsa->sa.sa_family, error);
 
 	rc = bbdd_sock_open_sa_nobind(bsa, type, sock, error);
 	if (rc != 0)

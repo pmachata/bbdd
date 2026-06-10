@@ -68,6 +68,8 @@ int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
 
 int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 		      struct bbdd_sock *sock, char **error);
+int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa, int type,
+			     struct bbdd_sock *sock, char **error);
 void bbdd_sock_close(struct bbdd_sock *sock);
 
 int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error);
