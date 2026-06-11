@@ -277,11 +277,11 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 				       char **error)
 {
 	uint32_t table;
-	int err;
+	int rc;
 
-	err = bbdd_d_session_validate_netif(&sess_vrf->netif, error);
-	if (err != 0)
-		return err;
+	rc = bbdd_d_session_validate_netif(&sess_vrf->netif, error);
+	if (rc != 0)
+		return rc;
 
 	/* We can't backfill VRF name / ifindex given routing table. */
 	if (!sess_vrf->netif.ifindex_seen)
@@ -290,9 +290,9 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 	/* But we can a) backfill table from VRF, and b) when both are given,
 	 * cross-validate. */
 
-	err = bbdd_nl_get_vrf_table(nl, sess_vrf->netif.ifindex, &table, error);
-	if (err != 0)
-		return err;
+	rc = bbdd_nl_get_vrf_table(nl, sess_vrf->netif.ifindex, &table, error);
+	if (rc != 0)
+		return rc;
 
 	if (!sess_vrf->table_seen) {
 		sess_vrf->table = table;
@@ -1159,7 +1159,7 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 				char **error)
 {
 	int nmatch = 0;
-	int err;
+	int rc;
 
 	for (struct bbdd_d_session *dsess = bbdd_sess_iter_start(sdir);
 	     dsess != NULL; dsess = bbdd_sess_iter_next(dsess)) {
@@ -1192,10 +1192,10 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 		if (ss_src->sa.sa_family != digest->dst.sa.sa_family)
 			continue;
 
-		err = bbdd_sockaddr_eq(ss_src, &digest->dst, error);
-		if (err < 0)
-			return err;
-		if (err == false)
+		rc = bbdd_sockaddr_eq(ss_src, &digest->dst, error);
+		if (rc < 0)
+			return rc;
+		if (rc == false)
 			/* ss_src != pk_dst. */
 			continue;
 
@@ -1207,10 +1207,10 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 		if (ss_dst->sa.sa_family != digest->src.sa.sa_family)
 			continue;
 
-		err = bbdd_sockaddr_eq(ss_dst, &digest->src, error);
-		if (err < 0)
-			return err;
-		if (err == false)
+		rc = bbdd_sockaddr_eq(ss_dst, &digest->src, error);
+		if (rc < 0)
+			return rc;
+		if (rc == false)
 			/* ss_dst != pk_src. */
 			continue;
 
@@ -1341,7 +1341,7 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	struct bbdd_sockaddr src = {};  bool set_src;
 	struct bbdd_sockaddr dst = {};  bool set_dst;
 	struct bbdd_d_session orig_dsess = *dsess;
-	int err;
+	int rc;
 
 	/* Some things cannot be validated during parsing, but only when we see
 	 * the actual data. Validate them here. */
@@ -1385,10 +1385,10 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	}
 
 	/* Parse the addresses.*/
-	err = bbdd_d_session_apply_c_addr(&set_src, &src, &csess->src, error) ?:
-	      bbdd_d_session_apply_c_addr(&set_dst, &dst, &csess->dst, error);
-	if (err)
-		return err;
+	rc = bbdd_d_session_apply_c_addr(&set_src, &src, &csess->src, error) ?:
+	     bbdd_d_session_apply_c_addr(&set_dst, &dst, &csess->dst, error);
+	if (rc)
+		return rc;
 
 	/* To validate VRF, construct a VRF configuration view from the current
 	 * dsess, with the csess changes applied on top, and check that. */
@@ -1414,9 +1414,9 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			sess_vrf.table_seen = 1;
 		}
 
-		err = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
-		if (err != 0)
-			return err;
+		rc = bbdd_d_session_validate_vrf(&sess_vrf, nl, error);
+		if (rc != 0)
+			return rc;
 	}
 
 	/* Some values shouldn't be zero. */
@@ -2672,9 +2672,9 @@ static int bbdd_d_set_q_cpu_map(const char *path,
 				char **error)
 {
 	char *mask;
-	ssize_t rc;
+	ssize_t written;
 	int fd;
-	int err = 0;
+	int rc = 0;
 
 	mask = bbdd_d_cpu_mask(cpu, ncpus, error);
 	if (!mask)
@@ -2683,20 +2683,20 @@ static int bbdd_d_set_q_cpu_map(const char *path,
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
 		bbdd_err_fmt(error, "Failed to open `%s': %m", path);
-		err = -1;
+		rc = -1;
 		goto free_mask;
 	}
 
-	rc = write(fd, mask, strlen(mask));
-	if (rc < 0) {
+	written = write(fd, mask, strlen(mask));
+	if (written < 0) {
 		bbdd_err_fmt(error, "Failed to write to `%s': %m", path);
-		err = -1;
+		rc = -1;
 	}
 
 	close(fd);
 free_mask:
 	free(mask);
-	return err;
+	return rc;
 }
 
 #define BBDD_D_SET_Q_CPU_MAP(FMT, IFNAME, I, N, ERROR)			\
@@ -2725,11 +2725,11 @@ static int bbdd_d_set_rps_queue(const char *ifname, unsigned int cpu,
 static void bbdd_d_start_fini_veth(struct bbdd_nl *nl)
 {
 	char *error;
-	int err;
+	int rc;
 
 	/* Note: the peer is autodeleted when the first endpoint is deleted. */
-	err = bbdd_nl_del_if(nl, bbdd_d_veth_rx_name, &error);
-	if (err)
+	rc = bbdd_nl_del_if(nl, bbdd_d_veth_rx_name, &error);
+	if (rc)
 		bbdd_err_print(&error, "Failed to clean up veth pair");
 }
 
@@ -2738,12 +2738,12 @@ static int bbdd_d_start_init_veth_rx(struct bbdd_nl *nl,
 				     unsigned int ncpus,
 				     char **error)
 {
-	int err;
+	int rc;
 
 	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
-		err = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
-		if (err)
-			return err;
+		rc = bbdd_d_set_rps_queue(name, cpu, ncpus, error);
+		if (rc)
+			return rc;
 	}
 
 	return bbdd_nl_set_if_up(nl, ifindex, error);
@@ -2754,12 +2754,12 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 				     unsigned int ncpus,
 				     char **error)
 {
-	int err;
+	int rc;
 
-	err = bbdd_nl_add_qdisc(nl, ifindex, bbdd_nl_tc_h_root(),
-				bbdd_d_veth_tx_mq_handle, "mq", error);
-	if (err)
-		return err;
+	rc = bbdd_nl_add_qdisc(nl, ifindex, bbdd_nl_tc_h_root(),
+			       bbdd_d_veth_tx_mq_handle, "mq", error);
+	if (rc)
+		return rc;
 
 	for (unsigned int cpu = 0; cpu < ncpus; cpu++) {
 		uint32_t parent;
@@ -2767,13 +2767,13 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 		parent = ((uint32_t) bbdd_d_veth_tx_mq_handle << 16) |
 			(uint32_t)(cpu + 1);
 
-		err = bbdd_nl_add_qdisc_fq(nl, ifindex, parent, 0, error);
-		if (err)
-			return err;
+		rc = bbdd_nl_add_qdisc_fq(nl, ifindex, parent, 0, error);
+		if (rc)
+			return rc;
 
-		err = bbdd_d_set_xps_queue(name, cpu, ncpus, error);
-		if (err)
-			return err;
+		rc = bbdd_d_set_xps_queue(name, cpu, ncpus, error);
+		if (rc)
+			return rc;
 	}
 
 	return bbdd_nl_set_if_up(nl, ifindex, error);
@@ -2785,29 +2785,29 @@ static int bbdd_d_start_init_veth(struct bbdd_nl *nl,
 				  char **error)
 {
 	unsigned int ncpus;
-	int err;
+	int rc;
 
 	/* Note: this returns number of CPUs, or < 0 on failure. */
-	err = bbdd_d_num_cpus(error);
-	if (err < 0)
-		return err;
-	ncpus = (unsigned int) err;
+	rc = bbdd_d_num_cpus(error);
+	if (rc < 0)
+		return rc;
+	ncpus = (unsigned int) rc;
 
-	err = bbdd_nl_add_veth(nl,
-			       bbdd_d_veth_rx_name, rx_ifindex,
-			       bbdd_d_veth_tx_name, tx_ifindex,
-			       ncpus, error);
-	if (err)
+	rc = bbdd_nl_add_veth(nl,
+			      bbdd_d_veth_rx_name, rx_ifindex,
+			      bbdd_d_veth_tx_name, tx_ifindex,
+			      ncpus, error);
+	if (rc)
 		goto err;
 
-	err = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name, *rx_ifindex,
-					ncpus, error);
-	if (err)
+	rc = bbdd_d_start_init_veth_rx(nl, bbdd_d_veth_rx_name, *rx_ifindex,
+				       ncpus, error);
+	if (rc)
 		goto fini_veth;
 
-	err = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name, *tx_ifindex,
-					ncpus, error);
-	if (err)
+	rc = bbdd_d_start_init_veth_tx(nl, bbdd_d_veth_tx_name, *tx_ifindex,
+				       ncpus, error);
+	if (rc)
 		goto fini_veth;
 
 	return 0;
@@ -2817,7 +2817,7 @@ fini_veth:
 err:
 	bbdd_err_app(error, "Failed to create veth pair `%s'<->`%s'",
 		     bbdd_d_veth_rx_name, bbdd_d_veth_tx_name);
-	return err;
+	return rc;
 }
 
 static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
@@ -2834,7 +2834,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	uint32_t veth_tx_ifindex;
 	bool failed = true;
 	char *error;
-	int err = -ENOMEM;
+	int rc = -ENOMEM;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
 
@@ -2857,16 +2857,16 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (d.sdir == NULL)
 		goto poll_fini;
 
-	err = bbdd_mon_subscribe_cb(d.mon, bbdd_c_monitor_dispatch, NULL,
-				    topics, &error);
-	if (err != 0)
+	rc = bbdd_mon_subscribe_cb(d.mon, bbdd_c_monitor_dispatch, NULL,
+				   topics, &error);
+	if (rc != 0)
 		goto sess_dir_destroy;
 
-	err = bbdd_d_start_init_veth(d.nl,
-				     &veth_rx_ifindex,
-				     &veth_tx_ifindex,
-				     &error);
-	if (err)
+	rc = bbdd_d_start_init_veth(d.nl,
+				    &veth_rx_ifindex,
+				    &veth_tx_ifindex,
+				    &error);
+	if (rc)
 		goto sess_dir_destroy;
 
 	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, veth_rx_ifindex,
@@ -2874,21 +2874,21 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (d.bpf == NULL)
 		goto fini_veth;
 
-	err = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
-	if (err != 0)
+	rc = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
+	if (rc != 0)
 		goto bpf_destroy;
 
-	err = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
-			       bbdd_d_ctl_recv, &d, &error);
-	if (err != 0)
+	rc = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
+			      bbdd_d_ctl_recv, &d, &error);
+	if (rc != 0)
 		goto sock_close_d;
 
-	err = bbdd_poll_set_signals(d.pctx, &error);
-	if (err != 0)
+	rc = bbdd_poll_set_signals(d.pctx, &error);
+	if (rc != 0)
 		goto sock_close_d;
 
-	err = bbdd_poll_loop(d.pctx, &error);
-	if (err != 0)
+	rc = bbdd_poll_loop(d.pctx, &error);
+	if (rc != 0)
 		goto cleanup;
 
 	failed = false;
@@ -2919,7 +2919,7 @@ closelog:
 
 	if (failed)
 		bbdd_err_print(&error, "Error");
-	return err;
+	return rc;
 }
 
 int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
