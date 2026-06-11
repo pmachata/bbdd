@@ -104,6 +104,8 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 		return false;
 	}
 
+	*ret_result = json_object_get(result);
+
 	if (json_object_get_type(result) != result_type) {
 		bbdd_err_fmt(&error, "Unexpected result type: %s expected, got %s",
 			     json_type_to_name(result_type),
@@ -112,7 +114,6 @@ static bool bbdd_c_response_extract_result(struct json_object *j,
 		return false;
 	}
 
-	*ret_result = json_object_get(result);
 	return true;
 }
 
@@ -132,6 +133,147 @@ static bool bbdd_c_result_show_json(struct json_object *result)
 
 	__bbdd_c_result_show_json(result);
 	return true;
+}
+
+struct bbdd_c {
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct bbdd_ssk_c ctl;
+
+	int (*cb)(struct json_object *result,
+		  void *data, char **error);
+	void *cb_data;
+	enum json_type cb_expected_type;
+};
+
+static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
+			       struct json_object *response, void *data,
+			       char **error)
+{
+	struct bbdd_c *c = data;
+	struct json_object *result;
+	const int id = 1;
+	int rc;
+
+	// xxx this doesn't work very nicely. Extract result also handles error
+	// responses, and should project to exit code. Leave it for now.
+	if (!bbdd_c_response_extract_result(response, id, c->cb_expected_type,
+					    &result)) {
+		bbdd_err_fmt(error, "Result expected to be %s, but is %s",
+			     json_type_to_name(c->cb_expected_type),
+			     json_type_to_name(json_object_get_type(result)));
+		return -1;
+	}
+
+	if (bbdd_c_result_show_json(result)) {
+		rc = 0;
+		goto put_result;
+	}
+
+	rc = c->cb(result, c->cb_data, error);
+
+put_result:
+	json_object_put(result);
+	return rc;
+}
+
+static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				     struct bbdd_poll_ctx *pctx,
+				     const char *buf, size_t len,
+				     void *data, char **error)
+{
+	struct bbdd_c *c = data;
+
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, pctx, buf, len, c->tkn,
+					    error);
+}
+
+static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_c *c = data;
+
+	bbdd_poll_request_quit(c->pctx);
+}
+
+static int bbdd_c_interact(struct json_object **request,
+			   int (*cb)(struct json_object *response,
+				     void *data, char **error),
+			   void *data, enum json_type cb_expected_type,
+			   char **error)
+{
+	struct bbdd_c c = {
+		.cb = cb,
+		.cb_data = data,
+		.cb_expected_type = cb_expected_type,
+	};
+	struct bbdd_sockaddr bsa;
+	struct bbdd_ssk_cbs cbs;
+	const char *request_str;
+	int rc = -ENOMEM;
+
+	c.mon = bbdd_mon_create(bbdd_env.mon_eager, error);
+	if (c.mon == NULL)
+		return rc;
+
+	c.pctx = bbdd_poll_init(c.mon, error);
+	if (c.pctx == NULL)
+		goto mon_fini;
+
+	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, error);
+	if (rc != 0)
+		goto poll_fini;
+
+	c.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, error);
+	if (c.tkn == NULL) {
+		rc = -1;
+		goto poll_fini;
+	}
+
+	cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = bbdd_c_ssk_json_tkn_rx_cb,
+		.done_cb = bbdd_c_ssk_json_tkn_done_cb,
+		.data = &c,
+	};
+
+	rc = bbdd_ssk_open_c(&c.ctl, &bsa, c.pctx, cbs, error);
+	if (rc != 0)
+		goto tkn_destroy;
+
+	rc = bbdd_poll_set_signals(c.pctx, error);
+	if (rc != 0)
+		goto ssk_close_ctl;
+
+	request_str = json_object_to_json_string(*request);
+	if (request_str == NULL) {
+		bbdd_err_fmt(error, "Failed to serialize JSON object");
+		goto unset_signals;
+	}
+
+	rc = bbdd_ssk_c_nq(&c.ctl, c.pctx, request_str, strlen(request_str),
+			   error);
+	if (rc != 0)
+		goto unset_signals;
+
+	json_object_put(*request);
+	*request = NULL;
+	request_str = NULL;
+
+	rc = bbdd_poll_loop(c.pctx, error);
+
+	bbdd_mon_send_monitor_end(c.mon);
+
+unset_signals:
+	bbdd_poll_unset_signals(c.pctx);
+ssk_close_ctl:
+	bbdd_ssk_close_c(&c.ctl, c.pctx);
+tkn_destroy:
+	bbdd_util_ssk_json_tkn_destroy(c.tkn);
+poll_fini:
+	bbdd_poll_fini(c.pctx);
+mon_fini:
+	bbdd_mon_destroy(c.mon);
+	return rc;
 }
 
 static struct json_object *bbdd_c_send_request_on(struct json_object *request,
@@ -210,7 +352,8 @@ static void bbdd_c_echo_help(void)
 	);
 }
 
-static int bbdd_c_echo_jrpc(const char *method)
+static int bbdd_c_echo_jrpc_res(struct json_object *result,
+				void *, char **error)
 {
 	enum {
 		pol_ts,
@@ -224,17 +367,37 @@ static int bbdd_c_echo_jrpc(const char *method)
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	struct json_object *response;
+	uint64_t reply_ts_us;
+	uint64_t delay_us;
+	uint64_t ts_us;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(result, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0) {
+		bbdd_err_app(error, "echo result");
+		return rc;
+	}
+
+	if (bbdd_env.verbosity <= 0)
+		return rc;
+
+	ts_us = json_object_get_uint64(values[pol_ts]);
+	reply_ts_us = json_object_get_uint64(values[pol_reply_ts]);
+	delay_us = reply_ts_us - ts_us;
+
+	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
+	return 0;
+}
+
+static int bbdd_c_echo_jrpc(const char *method)
+{
 	struct json_object *request;
 	struct json_object *params;
-	struct json_object *result;
-	uint64_t delay_us;
-	uint64_t reply_ts_us;
-	uint64_t ts_us;
 	const int id = 1;
-	int err = -1;
+	uint64_t ts_us;
 	char *error;
-	int rc;
+	int rc = -1;
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL)
@@ -251,46 +414,16 @@ static int bbdd_c_echo_jrpc(const char *method)
 	if (bbdd_jrpc_append_obj(request, "params", &params))
 		goto put_params;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
+	rc = bbdd_c_interact(&request, bbdd_c_echo_jrpc_res, NULL,
+			     json_type_object, &error);
+	if (rc != 0)
+		bbdd_err_print(&error, NULL);
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result))
-		goto put_response;
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
-	rc = bbdd_jrpc_dissect(result, policy, seen, values,
-			       ARRAY_SIZE(policy), &error);
-	if (rc != 0) {
-		bbdd_err_fmt(&error, "Invalid echo response");
-		goto put_result;
-	}
-
-	if (bbdd_env.verbosity <= 0)
-		goto done;
-
-	ts_us = json_object_get_uint64(values[pol_ts]);
-	reply_ts_us = json_object_get_uint64(values[pol_reply_ts]);
-	delay_us = reply_ts_us - ts_us;
-
-	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
-
-done:
-	err = 0;
-put_result:
-	json_object_put(result);
-put_response:
-	json_object_put(response);
 put_params:
 	json_object_put(params);
 put_request:
 	json_object_put(request);
-	return err;
+	return rc;
 }
 
 int bbdd_c_echo(int argc, char **argv)
@@ -312,144 +445,11 @@ static void bbdd_c_stop_help(void)
 	);
 }
 
-struct bbdd_c {
-	struct bbdd_poll_ctx *pctx;
-	struct bbdd_mon *mon;
-	struct bbdd_util_ssk_json_tkn *tkn;
-	struct bbdd_ssk_c ctl;
-	int (*cb)(struct json_object *response,
-		  void *data, char **error);
-	void *cb_data;
-};
-
-static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
-			       struct json_object *response_obj, void *data,
-			       char **error)
+static int bbdd_c_stop_jrpc_res(struct json_object *, void *, char **)
 {
-	struct bbdd_c *c = data;
-
-	return c->cb(response_obj, c->cb_data, error);
-}
-
-static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
-				     struct bbdd_poll_ctx *pctx,
-				     const char *buf, size_t len,
-				     void *data, char **error)
-{
-	struct bbdd_c *c = data;
-
-	return bbdd_util_ssk_json_tkn_rx_cb(peer, pctx, buf, len, c->tkn,
-					    error);
-}
-
-static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
-{
-	struct bbdd_c *c = data;
-
-	bbdd_poll_request_quit(c->pctx);
-}
-
-static int bbdd_c_interact(struct json_object *request,
-			   int (*cb)(struct json_object *response,
-				     void *data, char **error),
-			   void *data, char **error)
-{
-	struct bbdd_c c = {
-		.cb = cb,
-		.cb_data = data,
-	};
-	struct bbdd_sockaddr bsa;
-	struct bbdd_ssk_cbs cbs;
-	const char *request_str;
-	int rc = -ENOMEM;
-
-	c.mon = bbdd_mon_create(bbdd_env.mon_eager, error);
-	if (c.mon == NULL)
-		return rc;
-
-	c.pctx = bbdd_poll_init(c.mon, error);
-	if (c.pctx == NULL)
-		goto mon_fini;
-
-	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, error);
-	if (rc != 0)
-		goto poll_fini;
-
-	c.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, error);
-	if (c.tkn == NULL) {
-		rc = -1;
-		goto poll_fini;
-	}
-
-	cbs = (struct bbdd_ssk_cbs) {
-		.rx_cb = bbdd_c_ssk_json_tkn_rx_cb,
-		.done_cb = bbdd_c_ssk_json_tkn_done_cb,
-		.data = &c,
-	};
-
-	rc = bbdd_ssk_open_c(&c.ctl, &bsa, c.pctx, cbs, error);
-	if (rc != 0)
-		goto tkn_destroy;
-
-	rc = bbdd_poll_set_signals(c.pctx, error);
-	if (rc != 0)
-		goto ssk_close_ctl;
-
-	request_str = json_object_to_json_string(request);
-	if (request_str == NULL) {
-		bbdd_err_fmt(error, "Failed to serialize JSON object");
-		goto unset_signals;
-	}
-
-	rc = bbdd_ssk_c_nq(&c.ctl, c.pctx, request_str, strlen(request_str),
-			   error);
-	if (rc != 0)
-		goto unset_signals;
-
-	rc = bbdd_poll_loop(c.pctx, error);
-
-	bbdd_mon_send_monitor_end(c.mon);
-
-unset_signals:
-	bbdd_poll_unset_signals(c.pctx);
-ssk_close_ctl:
-	bbdd_ssk_close_c(&c.ctl, c.pctx);
-tkn_destroy:
-	bbdd_util_ssk_json_tkn_destroy(c.tkn);
-poll_fini:
-	bbdd_poll_fini(c.pctx);
-mon_fini:
-	bbdd_mon_destroy(c.mon);
-	return rc;
-}
-
-static int bbdd_c_stop_jrpc_resp(struct json_object *response,
-				 void *, char **error)
-{
-	struct json_object *result;
-	const int id = 1;
-	int rc;
-
-	// xxx this doesn't work very nicely. Extract result also handles error
-	// responses, and should project to exit code. Leave it for now.
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		bbdd_err_fmt(error, "Invalid response");
-		return -1;
-	}
-
-	if (bbdd_c_result_show_json(result)) {
-		rc = 0;
-		goto put_result;
-	}
-
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "bbdd will stop\n");
-	rc = 0;
-
-put_result:
-	json_object_put(result);
-	return rc;
+	return 0;
 }
 
 static int bbdd_c_stop_jrpc(void)
@@ -463,12 +463,11 @@ static int bbdd_c_stop_jrpc(void)
 	if (request == NULL)
 		return -ENOMEM;
 
-	rc = bbdd_c_interact(request, bbdd_c_stop_jrpc_resp, NULL,
-			     &error);
+	rc = bbdd_c_interact(&request, bbdd_c_stop_jrpc_res, NULL,
+			     json_type_null, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, NULL);
 
-	json_object_put(request);
 	return rc;
 }
 
@@ -544,26 +543,13 @@ put_request:
 	return err;
 }
 
-
-static int bbdd_c_session_act_jrpc_result(struct json_object *response,
-					  const char *method,
-					  const int id)
+static int bbdd_c_session_act_jrpc_result(struct json_object *,
+					  const char *method)
 
 {
-	struct json_object *result;
-
-	if (!bbdd_c_response_extract_result(response, id,
-					   json_type_null, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
-
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "`%s' was handled by the daemon\n", method);
 
-put_result:
-	json_object_put(result);
 	return 0;
 }
 
@@ -1135,31 +1121,21 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 	}
 }
 
-static int bbdd_c_session_show_jrpc_result(struct json_object *response,
-					   const char *, const int id)
+static int bbdd_c_session_show_jrpc_result(struct json_object *result,
+					   const char *)
 {
-	struct json_object *result;
 	struct bbdd_c_session *sessions;
 	struct bbdd_c_session_state *states;
 	size_t num_sessions;
 	char *error;
 	int err;
 
-	if (!bbdd_c_response_extract_result(response, id,
-					    json_type_object, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
 	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
 					       &num_sessions, &error);
 	if (err != 0) {
 		fprintf(stderr, "Invalid session object: %s\n", error);
 		free(error);
-		goto put_result;
+		return 0;
 	}
 
 	for (size_t i = 0; i < num_sessions; i++) {
@@ -1170,9 +1146,6 @@ static int bbdd_c_session_show_jrpc_result(struct json_object *response,
 		printf("(no sessions)\n");
 	free(sessions);
 	free(states);
-
-put_result:
-	json_object_put(result);
 	return 0;
 }
 
@@ -1227,13 +1200,15 @@ static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
 }
 
 static int bbdd_c_session_stats_jrpc_result(struct json_object *response,
-					    const char *, const int id)
+					    const char *)
 {
 	struct json_object *result;
 	char *error = NULL;
 	int err = 0;
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
+	fprintf(stderr, "xxx RPC result needs conversion.\n");
+
+	if (!bbdd_c_response_extract_result(response, 1, json_type_object,
 					    &result))
 		return -1;
 
@@ -1259,13 +1234,15 @@ static struct bbdd_c_session_command {
 	const bool allow_change;
 	const char *const rpc;
 	const char *const rpc_diag;
-	int (*show)(struct json_object *, const char *method, int id);
+	enum json_type expected_result_type;
+	int (*show)(struct json_object *, const char *method);
 } const bbdd_c_session_commands[] = {
 	{
 		.name = "add",
 		.allow_change = true,
 		.rpc = "session-add",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "set",
@@ -1274,6 +1251,7 @@ static struct bbdd_c_session_command {
 		.allow_change = true,
 		.rpc = "session-set",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "del",
@@ -1281,12 +1259,14 @@ static struct bbdd_c_session_command {
 		.allow_query = true,
 		.rpc = "session-del",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "show",
 		.allow_query = true,
 		.rpc = "session-show",
 		.show = bbdd_c_session_show_jrpc_result,
+		.expected_result_type = json_type_object,
 	},
 	{
 		.name = "stats",
@@ -1295,6 +1275,7 @@ static struct bbdd_c_session_command {
 		.rpc = "session-stats",
 		.rpc_diag = "session-stats-diag",
 		.show = bbdd_c_session_stats_jrpc_result,
+		.expected_result_type = json_type_object,
 	},
 };
 
@@ -1906,6 +1887,14 @@ err:
 	return NULL;
 }
 
+static int bbdd_c_session_jrpc_res(struct json_object *result,
+				   void *data, char **)
+{
+	const struct bbdd_c_session_command *command = data;
+
+	return command->show(result, command->rpc);
+}
+
 static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 			       const struct bbdd_c_session *select,
 			       const struct bbdd_c_session *change,
@@ -1915,11 +1904,11 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	struct json_object *select_obj = NULL;
 	struct json_object *change_obj = NULL;
 	struct json_object *params_obj;
-	struct json_object *response;
 	struct json_object *request;
 	const char *method;
 	const int id = 1;
-	int err;
+	char *error;
+	int rc;
 
 	if (command->allow_query) {
 		select_obj = bbdd_c_jrpc_session_obj(select);
@@ -1930,7 +1919,7 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	if (command->allow_change) {
 		change_obj = bbdd_c_jrpc_session_obj(change);
 		if (change_obj == NULL) {
-			err = -ENOMEM;
+			rc = -ENOMEM;
 			goto put_select;
 		}
 	}
@@ -1944,13 +1933,13 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL) {
-		err = -1;
+		rc = -1;
 		goto put_select_change;
 	}
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL) {
-		err = bbdd_c_enomem();
+		rc = bbdd_c_enomem();
 		goto put_request;
 	}
 
@@ -1961,24 +1950,16 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	    (bulk.seen && bulk.value &&
 	     bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) ||
 	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
-		err = bbdd_c_enomem();
+		rc = bbdd_c_enomem();
 		goto put_params_obj;
 	}
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
-	}
+	rc = bbdd_c_interact(&request,
+			     bbdd_c_session_jrpc_res, (void *) command,
+			     command->expected_result_type, &error);
+	if (rc != 0)
+		bbdd_err_print(&error, NULL);
 
-	err = command->show(response, method, id);
-	if (err)
-		goto put_response;
-
-	err = 0;
-
-put_response:
-	json_object_put(response);
 put_params_obj:
 	json_object_put(params_obj);
 put_request:
@@ -1987,7 +1968,7 @@ put_select_change:
 	json_object_put(change_obj);
 put_select:
 	json_object_put(select_obj);
-	return err;
+	return rc;
 }
 
 static void

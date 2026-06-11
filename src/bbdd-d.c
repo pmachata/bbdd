@@ -93,7 +93,8 @@ struct bbdd_d {
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-void bbdd_d_handle_echo(struct bbdd_sock *peer,
+void bbdd_d_handle_echo(struct bbdd_ssk_peer *peer,
+			struct bbdd_poll_ctx *pctx,
 			struct json_object *params_obj,
 			struct json_object *id)
 {
@@ -113,12 +114,13 @@ void bbdd_d_handle_echo(struct bbdd_sock *peer,
 	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
 			       ARRAY_SIZE(policy), &error);
 	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_inv_params_err(peer, pctx,
+								 id, &error);
 
 	ts = json_object_get_uint64(values[pol_ts]);
 	reply_ts = bbdd_util_now();
 
-	bbdd_jrpc_respond_echo(peer, id, ts, reply_ts);
+	bbdd_util_jrpc_respond_echo(peer, pctx, id, ts, reply_ts);
 }
 
 void bbdd_d_handle_stop(struct bbdd_ssk_peer *peer,
@@ -989,7 +991,8 @@ put_entry_obj:
 	return NULL;
 }
 
-static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
+static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
+					  struct bbdd_poll_ctx *pctx,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
 					  struct bbdd_bpf *bpf,
@@ -1060,7 +1063,8 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 
 	if (ndiscrs > 0 && !dumped) {
 		/* Not sure this can actually happen. */
-		bbdd_util_jrpc_respond_inv_params(peer, id, "All matching sessions went away mid request");
+		bbdd_util_ssk_jrpc_respond_inv_params(peer, pctx, id,
+						      "All matching sessions went away mid request");
 		goto put_array;
 	}
 
@@ -1071,9 +1075,10 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	if (json_object_object_add(obj, "result", result_obj))
 		goto put_result_obj;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer); // xxx can we move it to jrpc_send?
 
 	json_object_put(obj);
 	return;
@@ -1087,9 +1092,9 @@ put_result_obj:
 put_obj:
 	json_object_put(obj);
 	if (error != NULL)
-		bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		bbdd_util_ssk_jrpc_respond_interr_err(peer, pctx, id, &error);
 	else
-		bbdd_util_jrpc_respond_memerr(peer, id);
+		bbdd_util_ssk_jrpc_respond_memerr(peer, pctx, id);
 }
 
 static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
@@ -1623,7 +1628,7 @@ put_port:
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1634,24 +1639,28 @@ static void bbdd_d_handle_session_add(struct bbdd_d *d,
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, NULL, &csess, NULL,
 						d->nl, &error);
 	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_inv_params_err(peer, d->pctx,
+								 id, &error);
 
 	/* Note: discr is validated to be non-zero in dissection. */
 	if (!csess.discr_seen) {
 		csess.discr = bbdd_sess_get_unique_discr(d->sdir);
 		csess.discr_seen = true;
 	} else if (bbdd_sess_dir_has_session(d->sdir, csess.discr)) {
-		return bbdd_util_jrpc_respond_inv_params(peer, id, "Duplicate session");
+		return bbdd_util_ssk_jrpc_respond_inv_params(peer, d->pctx,
+							     id, "Duplicate session");
 	}
 
 	rc = bbdd_d_session_add(d, &csess, &error);
 	if (rc < 0)
-		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_interr_err(peer, d->pctx,
+							     id, &error);
 
-	bbdd_util_jrpc_respond_empty(peer, id);
+	bbdd_util_ssk_jrpc_respond_empty(peer, d->pctx, id);
 }
 
-static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
+static int bbdd_d_parse_select_sessions(struct bbdd_ssk_peer *peer,
+					struct bbdd_poll_ctx *pctx,
 					struct json_object *params_obj,
 					struct json_object *id,
 					struct bbdd_c_session *select,
@@ -1668,37 +1677,41 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	rc = bbdd_d_jrpc_dissect_params_session(params_obj, select,
 						change, bulk, nl, &error);
 	if (rc != 0) {
-		bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		bbdd_util_ssk_jrpc_respond_inv_params_err(peer, pctx,
+							  id, &error);
 		return -1;
 	}
 
 	rc = bbdd_d_select_sessions(sdir, select, discrs, ndiscrs, &error);
 	if (rc) {
-		bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		bbdd_util_ssk_jrpc_respond_interr_err(peer, pctx, id, &error);
 		return -1;
 	}
 
 	return 0;
 }
 
-static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
+static int bbdd_d_handle_session_check_bulk(struct bbdd_ssk_peer *peer,
+					    struct bbdd_poll_ctx *pctx,
 					    struct json_object *id,
 					    bool bulk,
 					    size_t ndiscrs)
 {
 	if (ndiscrs == 0) {
-		bbdd_util_jrpc_respond_inv_params(peer, id, "The set request matches no session");
+		bbdd_util_ssk_jrpc_respond_inv_params(peer, pctx, id,
+						      "The set request matches no session");
 		return -1;
 	}
 	if (ndiscrs > 1 && !bulk) {
-		bbdd_util_jrpc_respond_inv_params(peer, id, "Non-bulk set request matches more than one session");
+		bbdd_util_ssk_jrpc_respond_inv_params(peer, pctx, id,
+						      "Non-bulk set request matches more than one session");
 		return -1;
 	}
 	return 0;
 }
 
 static void bbdd_d_handle_session_set(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1711,13 +1724,13 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 	char *error;
 	int rc;
 
-	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+	rc = bbdd_d_parse_select_sessions(peer, d->pctx, params_obj, id,
 					  &select, &change, &bulk,
 					  d->nl, d->sdir, &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, ndiscrs);
+	rc = bbdd_d_handle_session_check_bulk(peer, d->pctx, id, bulk, ndiscrs);
 	if (rc < 0)
 		goto free_discrs;
 
@@ -1734,7 +1747,8 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 		if (rc != 0) {
 			bbdd_err_wrap(&error, "Session %u: %s",
 				      dsess->local.discr, error);
-			bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+			bbdd_util_ssk_jrpc_respond_interr_err(peer, d->pctx,
+							      id, &error);
 			goto free_discrs;
 		}
 
@@ -1742,7 +1756,8 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 		rc = bbdd_bpf_session_update(d->bpf, dsess, &error);
 		if (rc != 0) {
-			bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+			bbdd_util_ssk_jrpc_respond_interr_err(peer, d->pctx,
+							      id, &error);
 			goto free_discrs;
 		}
 
@@ -1752,11 +1767,12 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 
 	if (!set) {
 		/* Not sure this can actually happen. */
-		bbdd_util_jrpc_respond_inv_params(peer, id, "All matching sessions went away mid request");
+		bbdd_util_ssk_jrpc_respond_inv_params(peer, d->pctx, id,
+						      "All matching sessions went away mid request");
 		goto free_discrs;
 	}
 
-	bbdd_util_jrpc_respond_empty(peer, id);
+	bbdd_util_ssk_jrpc_respond_empty(peer, d->pctx, id);
 
 free_discrs:
 	free(discrs);
@@ -1785,7 +1801,8 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 }
 
 static void
-bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
+bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
+			       struct bbdd_poll_ctx *pctx,
 			       struct json_object *id,
 			       struct bbdd_bpf *bpf,
 			       uint32_t *discrs,
@@ -1854,7 +1871,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 	    bbdd_jrpc_append_obj(obj, "result", &result_obj))
 		goto put_array;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
 
@@ -1872,13 +1889,13 @@ put_result_obj:
 put_obj:
 	json_object_put(obj);
 	if (error)
-		bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		bbdd_util_ssk_jrpc_respond_interr_err(peer, pctx, id, &error);
 	else
-		bbdd_util_jrpc_respond_memerr(peer, id);
+		bbdd_util_ssk_jrpc_respond_memerr(peer, pctx, id);
 }
 
 static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
-					     struct bbdd_sock *peer,
+					     struct bbdd_ssk_peer *peer,
 					     struct json_object *params_obj,
 					     struct json_object *id)
 {
@@ -1887,19 +1904,20 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
 	size_t ndiscrs;
 	int rc;
 
-	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+	rc = bbdd_d_parse_select_sessions(peer, d->pctx, params_obj, id,
 					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_do(peer, id, d->bpf, discrs, ndiscrs,
+	bbdd_d_handle_session_stats_do(peer, d->pctx, id, d->bpf,
+				       discrs, ndiscrs,
 				       bbdd_bpf_session_diag_stats_json);
 	free(discrs);
 }
 
 static void bbdd_d_handle_session_stats(struct bbdd_d *d,
-					struct bbdd_sock *peer,
+					struct bbdd_ssk_peer *peer,
 					struct json_object *params_obj,
 					struct json_object *id)
 {
@@ -1908,19 +1926,20 @@ static void bbdd_d_handle_session_stats(struct bbdd_d *d,
 	size_t ndiscrs;
 	int rc;
 
-	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+	rc = bbdd_d_parse_select_sessions(peer, d->pctx, params_obj, id,
 					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_do(peer, id, d->bpf, discrs, ndiscrs,
+	bbdd_d_handle_session_stats_do(peer, d->pctx, id, d->bpf,
+				       discrs, ndiscrs,
 				       bbdd_bpf_session_stats_json);
 	free(discrs);
 }
 
 static void bbdd_d_handle_session_del(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1932,13 +1951,13 @@ static void bbdd_d_handle_session_del(struct bbdd_d *d,
 	char *last_error = NULL;
 	size_t num_errors = 0;
 
-	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+	rc = bbdd_d_parse_select_sessions(peer, d->pctx, params_obj, id,
 					  &sess, NULL, &bulk, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
-	rc = bbdd_d_handle_session_check_bulk(peer, id, bulk, ndiscrs);
+	rc = bbdd_d_handle_session_check_bulk(peer, d->pctx, id, bulk, ndiscrs);
 	if (rc < 0)
 		goto free_discrs;
 
@@ -1956,21 +1975,22 @@ static void bbdd_d_handle_session_del(struct bbdd_d *d,
 	}
 
 	if (num_errors) {
-		bbdd_util_jrpc_respond_interr_fmt(peer, id, "%zu/%zu sessions failed to delete. Last recorded error: `%s'",
-						  num_errors, ndiscrs,
-						  last_error ?: "(unknown error)");
+		bbdd_util_ssk_jrpc_respond_interr_fmt(peer, d->pctx, id,
+						      "%zu/%zu sessions failed to delete. Last recorded error: `%s'",
+						      num_errors, ndiscrs,
+						      last_error ?: "(unknown error)");
 		free(last_error);
 		goto free_discrs;
 	}
 
-	bbdd_util_jrpc_respond_empty(peer, id);
+	bbdd_util_ssk_jrpc_respond_empty(peer, d->pctx, id);
 
 free_discrs:
 	free(discrs);
 }
 
 static void bbdd_d_handle_session_show(struct bbdd_d *d,
-				       struct bbdd_sock *peer,
+				       struct bbdd_ssk_peer *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id)
 {
@@ -1979,13 +1999,13 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	size_t ndiscrs;
 	int rc;
 
-	rc = bbdd_d_parse_select_sessions(peer, params_obj, id,
+	rc = bbdd_d_parse_select_sessions(peer, d->pctx, params_obj, id,
 					  &sess, NULL, NULL, d->nl, d->sdir,
 					  &discrs, &ndiscrs);
 	if (rc < 0)
 		return;
 
-	return bbdd_d_handle_session_show_do(peer, id, d->sdir, d->bpf,
+	return bbdd_d_handle_session_show_do(peer, d->pctx, id, d->sdir, d->bpf,
 					     discrs, ndiscrs);
 }
 
@@ -2573,18 +2593,20 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(peer, d->pctx, params_obj, id);
-	/*
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, d->pctx, params_obj, id);
+	/* xxx
 	else if (strcmp(method, "bfdd-echo") == 0)
 		bbdd_bfdd_echo_handle_start(d->bfdd, peer, d->pctx, id, true);
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(d, peer, d->pctx,
 					       params_obj, id);
+	*/
 	else if (strcmp(method, "session-show") == 0)
-		bbdd_d_handle_session_show(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_session_show(d, peer, params_obj, id);
 	else if (strcmp(method, "session-add") == 0)
-		bbdd_d_handle_session_add(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_session_add(d, peer, params_obj, id);
+	/* xxx
 	else if (strcmp(method, "session-set") == 0)
 		bbdd_d_handle_session_set(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)

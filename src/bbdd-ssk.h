@@ -50,3 +50,4 @@ int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
 int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, struct bbdd_poll_ctx *pctx,
 		    const char *buf, size_t len, char **error);
 int bbdd_ssk_peer_fd(struct bbdd_ssk_peer *peer);
+void bbdd_ssk_peer_mark_done(struct bbdd_ssk_peer *peer);

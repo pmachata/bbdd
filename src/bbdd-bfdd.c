@@ -430,9 +430,11 @@ static void bbdd_bfdd_echo_stop(struct bbdd_bfdd *bfdd)
 	bfdd->echo = NULL;
 }
 
-void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
-				 const struct bfddp_message *msg)
+void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *,
+				 const struct bfddp_message *)
 {
+	fprintf(stderr, "xxx bbdd_bfdd_echo_handle_reply not implemented\n");
+	/*
 	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
 	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
 
@@ -446,6 +448,7 @@ void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 		bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
 				       bfdd_time, dp_time);
 	bbdd_bfdd_echo_stop(bfdd);
+	*/
 }
 
 int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,

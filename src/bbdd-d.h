@@ -102,7 +102,8 @@ void bbdd_d_handle_stop(struct bbdd_ssk_peer *peer,
 			struct bbdd_poll_ctx *pctx,
 			struct json_object *params_obj,
 			struct json_object *id);
-void bbdd_d_handle_echo(struct bbdd_sock *peer,
+void bbdd_d_handle_echo(struct bbdd_ssk_peer *peer,
+			struct bbdd_poll_ctx *pctx,
 			struct json_object *params_obj,
 			struct json_object *id);
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,

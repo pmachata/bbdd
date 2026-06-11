@@ -60,6 +60,15 @@ int bbdd_util_ssk_jrpc_send(struct bbdd_ssk_peer *peer,
 	return bbdd_ssk_peer_nq(peer, pctx, str, strlen(str), error);
 }
 
+static int bbdd_util_ssk_jrpc_send_done(struct bbdd_ssk_peer *peer,
+					struct bbdd_poll_ctx *pctx,
+					struct json_object *obj,
+					char **error)
+{
+	bbdd_ssk_peer_mark_done(peer);
+	return bbdd_util_ssk_jrpc_send(peer, pctx, obj, error);
+}
+
 void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj)
 {
 	char *error;
@@ -82,10 +91,7 @@ void bbdd_util_ssk_jrpc_respond(struct bbdd_ssk_peer *peer,
 	char *error;
 	int rc;
 
-	if (obj == NULL)
-		return;
-
-	rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
+	rc = bbdd_util_ssk_jrpc_send_done(peer, pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send response");
 
@@ -182,6 +188,27 @@ void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
 		return bbdd_util_jrpc_respond_interr(peer, id, fmt);
 }
 
+__attribute__((format(printf, 4, 5)))
+void bbdd_util_ssk_jrpc_respond_interr_fmt(struct bbdd_ssk_peer *peer,
+					   struct bbdd_poll_ctx *pctx,
+					   struct json_object *id,
+					   const char *fmt, ...)
+{
+	char *buf;
+	va_list ap;
+	int rc;
+
+	va_start(ap, fmt);
+	rc = vasprintf(&buf, fmt, ap);
+	va_end(ap);
+
+	if (rc >= 0)
+		return bbdd_util_ssk_jrpc_respond_interr_err(peer, pctx,
+							     id, &buf);
+	else
+		return bbdd_util_ssk_jrpc_respond_interr(peer, pctx, id, fmt);
+}
+
 void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
 				   struct json_object *id)
 {
@@ -237,7 +264,7 @@ void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 	if (json_object_object_add(obj, "result", NULL))
 		goto put_obj;
 
-	rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
+	rc = bbdd_util_ssk_jrpc_send_done(peer, pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send empty response");
 
@@ -249,9 +276,10 @@ put_obj:
 	bbdd_util_ssk_jrpc_respond_memerr(peer, pctx, id);
 }
 
-void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
-			    struct json_object *id,
-			    uint64_t ts, uint64_t reply_ts)
+void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
+				 struct bbdd_poll_ctx *pctx,
+				 struct json_object *id,
+				 uint64_t ts, uint64_t reply_ts)
 {
 	struct json_object *result;
 	struct json_object *resp;
@@ -274,7 +302,7 @@ void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
 	if (rc != 0)
 		goto put_result;
 
-	rc = bbdd_util_jrpc_send(peer, resp, &error);
+	rc = bbdd_util_ssk_jrpc_send_done(peer, pctx, resp, &error);
 	if (rc != 0)
 		// xxx monitor
 		bbdd_err_print(&error, "Failed to send echo response");
@@ -287,7 +315,7 @@ put_result:
 put_resp:
 	json_object_put(resp);
 err_memerr:
-	bbdd_util_jrpc_respond_memerr(peer, id);
+	bbdd_util_ssk_jrpc_respond_memerr(peer, pctx, id);
 }
 
 struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af)
@@ -455,7 +483,6 @@ static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 	size_t consumed;
 	int rc;
 
-	fprintf(stderr, "[%s]", *str);
 	obj = json_tokener_parse_ex(tok, *str, *left);
 	consumed = json_tokener_get_parse_end(tok);
 	assert(consumed <= *left);
@@ -534,7 +561,6 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 	assert(tkn->peer == NULL || tkn->peer == peer);
 	tkn->peer = peer;
 
-	fprintf(stderr, "peer rx `%s' len %zu\n", buf, len);
 	while (len > 0) {
 		struct json_object *obj;
 
@@ -561,6 +587,5 @@ void bbdd_util_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
 {
 	struct bbdd_util_ssk_json_tkn *tkn = data;
 
-	fprintf(stderr, "peer done\n");
 	bbdd_util_ssk_json_tkn_destroy(tkn);
 }

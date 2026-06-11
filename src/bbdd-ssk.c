@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h> // xxx
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -23,6 +24,8 @@ struct bbdd_ssk_peer {
 	struct json_tokener *tok;
 	struct bbdd_sb tx_sb;
 	struct bbdd_ssk_cbs cbs;
+
+	bool done;
 };
 
 int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd)
@@ -30,47 +33,47 @@ int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd)
 	return ssd->sock.fd;
 }
 
+static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
+				  struct bbdd_poll_ctx *pctx);
+
 static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			    struct bbdd_poll_ctx *pctx,
 			    char **error)
 {
-	char buffer[9];
+	char buffer[1024];
 	size_t len;
 	ssize_t rc;
 
-again:
-	rc = recv(peer->fd, buffer, sizeof(buffer) - 1, 0);
-	if (rc < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			rc = 0;
-			goto out;
+	while (true) {
+		rc = recv(peer->fd, buffer, sizeof(buffer), 0);
+		if (rc < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return 0;
+			if (errno == EINTR)
+				continue;
+
+			return rc;
 		}
-		if (errno == EINTR)
-			goto again;
-		bbdd_err_fmt(error, "recv: %m");
-		goto out;
+		if (rc == 0)
+			break;
+
+		// xxx debug message
+		len = (size_t) rc;
+
+		rc = peer->cbs.rx_cb(peer, pctx, buffer, len, peer->cbs.data, error);
 	}
-	if (rc == 0)
-		goto out;
 
-	// xxx debug message
-	len = (size_t) rc;
-	buffer[len] = '\0';
-
-	rc = peer->cbs.rx_cb(peer, pctx, buffer, len, peer->cbs.data, error);
-
-out:
 	return rc;
 }
 
 static int bbdd_ssk_peer_tx(struct bbdd_ssk_peer *peer, char **error)
 {
+	const char *str = bbdd_sb_cstr(&peer->tx_sb);
 	size_t len;
 	ssize_t rc;
 
 again:
-	rc = send(peer->fd, bbdd_sb_cstr(&peer->tx_sb),
-		  bbdd_sb_len(&peer->tx_sb), MSG_NOSIGNAL);
+	rc = send(peer->fd, str, bbdd_sb_len(&peer->tx_sb), MSG_NOSIGNAL);
 	if (rc < 0) {
 		if (errno == EINTR)
 			goto again;
@@ -81,43 +84,10 @@ again:
 	}
 
 	// xxx debug message
+	// fprintf(stderr, "sent %zd bytes `%*s'\n", rc, (int)rc, str);
 	len = (size_t) rc;
 	bbdd_sb_pull(&peer->tx_sb, len);
 	return 0;
-}
-
-static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
-				  struct bbdd_poll_ctx *pctx)
-{
-	int rc;
-
-	// xxx I suspect the flushing can't work properly on a non-blocking
-	// socket.
-	/* Flush what we can. */
-	while (bbdd_sb_len(&peer->tx_sb) > 0) {
-		rc = bbdd_ssk_peer_tx(peer, NULL);
-		if (rc != 0)
-			break;
-	}
-
-	if (peer->cbs.done_cb != NULL)
-		peer->cbs.done_cb(peer, peer->cbs.data);
-
-	DL_DELETE(peer->ssb->peers, peer);
-
-	rc = bbdd_poll_unset_fd(pctx, peer->fd);
-	if (rc != 0) {
-		char *error;
-
-		bbdd_err_fmt(&error, "client_destroy: FD not found");
-		bbdd_err_print(&error, NULL);
-		// xxx monitor
-	}
-
-	bbdd_sb_fini(&peer->tx_sb);
-	json_tokener_free(peer->tok);
-	close(peer->fd);
-	free(peer);
 }
 
 static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
@@ -128,9 +98,6 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 	char *error;
 	int rc;
 
-	if (revents & POLLHUP)
-		goto error;
-
 	if (revents & POLLIN) {
 		rc = bbdd_ssk_peer_rx(peer, pctx, &error);
 		if (rc != 0) {
@@ -138,6 +105,9 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 			goto error;
 		}
 	}
+
+	if (revents & POLLHUP)
+		goto error;
 
 	if (revents & POLLOUT) {
 		rc = bbdd_ssk_peer_tx(peer, &error);
@@ -147,8 +117,12 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 		}
 	}
 
-	if (bbdd_sb_len(&peer->tx_sb) > 0)
+	if (bbdd_sb_len(&peer->tx_sb) > 0) {
 		events |= POLLOUT;
+	} else if (peer->done) {
+		bbdd_ssk_peer_destroy(peer, pctx);
+		return 0;
+	}
 
 	rc = bbdd_poll_set_fd(pctx, peer->fd, events,
 			      bbdd_ssk_peer_event, peer, &error);
@@ -206,6 +180,40 @@ free_tok:
 free_peer:
 	free(peer);
 	return NULL;
+}
+
+static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
+				  struct bbdd_poll_ctx *pctx)
+{
+	int rc;
+
+	// xxx I suspect the flushing can't work properly on a non-blocking
+	// socket.
+	/* Flush what we can. */
+	while (bbdd_sb_len(&peer->tx_sb) > 0) {
+		rc = bbdd_ssk_peer_tx(peer, NULL);
+		if (rc != 0)
+			break;
+	}
+
+	if (peer->cbs.done_cb != NULL)
+		peer->cbs.done_cb(peer, peer->cbs.data);
+
+	DL_DELETE(peer->ssb->peers, peer);
+
+	rc = bbdd_poll_unset_fd(pctx, peer->fd);
+	if (rc != 0) {
+		char *error;
+
+		bbdd_err_fmt(&error, "client_destroy: FD not found");
+		bbdd_err_print(&error, NULL);
+		// xxx monitor
+	}
+
+	bbdd_sb_fini(&peer->tx_sb);
+	json_tokener_free(peer->tok);
+	close(peer->fd);
+	free(peer);
 }
 
 int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx,
@@ -288,9 +296,9 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, const struct bbdd_sockaddr *bsa,
 
 	fd = ({
 		struct bbdd_sock sock;
+		int flags = SOCK_NONBLOCK | SOCK_STREAM | SOCK_CLOEXEC;
 
-		rc = bbdd_sock_open_sa_nobind(bsa, SOCK_STREAM | SOCK_CLOEXEC,
-					      &sock, error);
+		rc = bbdd_sock_open_sa_nobind(bsa, flags, &sock, error);
 		if (rc != 0)
 			return rc;
 
@@ -347,4 +355,9 @@ int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, struct bbdd_poll_ctx *pctx,
 int bbdd_ssk_peer_fd(struct bbdd_ssk_peer *peer)
 {
 	return peer->fd;
+}
+
+void bbdd_ssk_peer_mark_done(struct bbdd_ssk_peer *peer)
+{
+	peer->done = true;
 }
