@@ -91,6 +91,8 @@ static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
 {
 	int rc;
 
+	// xxx I suspect the flushing can't work properly on a non-blocking
+	// socket.
 	/* Flush what we can. */
 	while (bbdd_sb_len(&peer->tx_sb) > 0) {
 		rc = bbdd_ssk_peer_tx(peer, NULL);

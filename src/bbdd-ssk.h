@@ -17,6 +17,9 @@ struct bbdd_ssk_cbs {
 };
 
 struct bbdd_ssk_b {
+	// xxx consider carrying an own pctx. It would clean up some interfaces,
+	// and marrying a socket to a particular poll context doesn't sound very
+	// limiting.
 	struct bbdd_ssk_peer *peers;	/* DList. */
 };
 

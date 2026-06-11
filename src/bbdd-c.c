@@ -22,6 +22,7 @@
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-sock.h"
+#include "bbdd-ssk.h"
 #include "bbdd-util.h"
 
 /* State information added by bbdd-bpf. */
@@ -311,46 +312,164 @@ static void bbdd_c_stop_help(void)
 	);
 }
 
-static int bbdd_c_stop_jrpc(void)
+struct bbdd_c {
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct bbdd_ssk_c ctl;
+	int (*cb)(struct json_object *response,
+		  void *data, char **error);
+	void *cb_data;
+};
+
+static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
+			       struct json_object *response_obj, void *data,
+			       char **error)
 {
-	struct json_object *response;
-	struct json_object *request;
-	struct json_object *result;
-	const int id = 1;
-	int err;
+	struct bbdd_c *c = data;
 
-	request = bbdd_jrpc_new_request(id, "stop");
-	if (request == NULL)
-		return -1;
+	return c->cb(response_obj, c->cb_data, error);
+}
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
+static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				     struct bbdd_poll_ctx *pctx,
+				     const char *buf, size_t len,
+				     void *data, char **error)
+{
+	struct bbdd_c *c = data;
+
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, pctx, buf, len, c->tkn,
+					    error);
+}
+
+static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_c *c = data;
+
+	bbdd_poll_request_quit(c->pctx);
+}
+
+static int bbdd_c_interact(struct json_object *request,
+			   int (*cb)(struct json_object *response,
+				     void *data, char **error),
+			   void *data, char **error)
+{
+	struct bbdd_c c = {
+		.cb = cb,
+		.cb_data = data,
+	};
+	struct bbdd_sockaddr bsa;
+	struct bbdd_ssk_cbs cbs;
+	const char *request_str;
+	int rc = -ENOMEM;
+
+	c.mon = bbdd_mon_create(bbdd_env.mon_eager, error);
+	if (c.mon == NULL)
+		return rc;
+
+	c.pctx = bbdd_poll_init(c.mon, error);
+	if (c.pctx == NULL)
+		goto mon_fini;
+
+	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, error);
+	if (rc != 0)
+		goto poll_fini;
+
+	c.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, error);
+	if (c.tkn == NULL) {
+		rc = -1;
+		goto poll_fini;
 	}
 
+	cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = bbdd_c_ssk_json_tkn_rx_cb,
+		.done_cb = bbdd_c_ssk_json_tkn_done_cb,
+		.data = &c,
+	};
+
+	rc = bbdd_ssk_open_c(&c.ctl, &bsa, c.pctx, cbs, error);
+	if (rc != 0)
+		goto tkn_destroy;
+
+	rc = bbdd_poll_set_signals(c.pctx, error);
+	if (rc != 0)
+		goto ssk_close_ctl;
+
+	request_str = json_object_to_json_string(request);
+	if (request_str == NULL) {
+		bbdd_err_fmt(error, "Failed to serialize JSON object");
+		goto unset_signals;
+	}
+
+	rc = bbdd_ssk_c_nq(&c.ctl, c.pctx, request_str, strlen(request_str),
+			   error);
+	if (rc != 0)
+		goto unset_signals;
+
+	rc = bbdd_poll_loop(c.pctx, error);
+
+	bbdd_mon_send_monitor_end(c.mon);
+
+unset_signals:
+	bbdd_poll_unset_signals(c.pctx);
+ssk_close_ctl:
+	bbdd_ssk_close_c(&c.ctl, c.pctx);
+tkn_destroy:
+	bbdd_util_ssk_json_tkn_destroy(c.tkn);
+poll_fini:
+	bbdd_poll_fini(c.pctx);
+mon_fini:
+	bbdd_mon_destroy(c.mon);
+	return rc;
+}
+
+static int bbdd_c_stop_jrpc_resp(struct json_object *response,
+				 void *, char **error)
+{
+	struct json_object *result;
+	const int id = 1;
+	int rc;
+
+	// xxx this doesn't work very nicely. Extract result also handles error
+	// responses, and should project to exit code. Leave it for now.
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
 					    &result)) {
-		err = -1;
-		goto put_response;
+		bbdd_err_fmt(error, "Invalid response");
+		return -1;
 	}
 
 	if (bbdd_c_result_show_json(result)) {
-		err = 0;
+		rc = 0;
 		goto put_result;
 	}
 
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "bbdd will stop\n");
-	err = 0;
+	rc = 0;
 
 put_result:
 	json_object_put(result);
-put_response:
-	json_object_put(response);
-put_request:
+	return rc;
+}
+
+static int bbdd_c_stop_jrpc(void)
+{
+	struct json_object *request;
+	const int id = 1;
+	char *error;
+	int rc;
+
+	request = bbdd_jrpc_new_request(id, "stop");
+	if (request == NULL)
+		return -ENOMEM;
+
+	rc = bbdd_c_interact(request, bbdd_c_stop_jrpc_resp, NULL,
+			     &error);
+	if (rc != 0)
+		bbdd_err_print(&error, NULL);
+
 	json_object_put(request);
-	return err;
+	return rc;
 }
 
 int bbdd_c_stop(int argc, char **argv)

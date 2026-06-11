@@ -3,7 +3,9 @@
 #include <json-c/json_object.h>
 
 #include "bbdd-mon.i"
+#include "bbdd-poll.i"
 #include "bbdd-sock.i"
+#include "bbdd-ssk.i"
 
 /* The elements are (name, monitor-default), where the latter indicates whether
  * it makes for 'bbdd monitor' to monitor the topic by default. */
@@ -34,6 +36,11 @@ void bbdd_mon_destroy(struct bbdd_mon *mon);
 
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error);
+
+int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
+			   struct bbdd_ssk_peer *peer,
+			   struct bbdd_poll_ctx *pctx,
+			   struct bbdd_mon_topics topics, char **error);
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 			  void (*cb)(struct json_object *, void *),

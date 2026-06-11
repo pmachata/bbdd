@@ -14,6 +14,7 @@
 
 enum bbdd_mon_cli_kind {
 	BBDD_MON_CLI_KIND_SOCK,
+	BBDD_MON_CLI_KIND_SSK,
 	BBDD_MON_CLI_KIND_CB,
 };
 
@@ -27,9 +28,14 @@ struct bbdd_mon_cli {
 	union {
 		struct bbdd_sock sock;
 		struct {
+			// xxx lifetimes?
+			struct bbdd_ssk_peer *peer;
+			struct bbdd_poll_ctx *pctx;
+		} ssk;
+		struct {
 			void (*cb)(struct json_object *, void *);
 			void *data;
-		};
+		} cb;
 	};
 };
 
@@ -109,6 +115,26 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	return 0;
 }
 
+int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
+			   struct bbdd_ssk_peer *peer,
+			   struct bbdd_poll_ctx *pctx,
+			   struct bbdd_mon_topics topics, char **error)
+{
+	struct bbdd_mon_cli *cli;
+
+	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
+	cli = bbdd_mon_alloc_client(mon, topics, error);
+	if (cli == NULL) {
+		bbdd_err_app(error, "Failed to subscribe to monitor");
+		return -1;
+	}
+
+	cli->kind = BBDD_MON_CLI_KIND_SSK;
+	cli->ssk.peer = peer;
+	cli->ssk.pctx = pctx;
+	return 0;
+}
+
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 			  void (*cb)(struct json_object *, void *), void *data,
 			  struct bbdd_mon_topics topics, char **error)
@@ -123,8 +149,8 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 	}
 
 	cli->kind = BBDD_MON_CLI_KIND_CB;
-	cli->cb = cb;
-	cli->data = data;
+	cli->cb.cb = cb;
+	cli->cb.data = data;
 	return 0;
 }
 
@@ -159,8 +185,15 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 				bbdd_mon_unsubscribe(mon, cli);
 			break;
 
+		case BBDD_MON_CLI_KIND_SSK:
+			if (bbdd_util_ssk_jrpc_send(cli->ssk.peer,
+						    cli->ssk.pctx,
+						    msg, NULL) != 0)
+				bbdd_mon_unsubscribe(mon, cli);
+			break;
+
 		case BBDD_MON_CLI_KIND_CB:
-			cli->cb(msg, cli->data);
+			cli->cb.cb(msg, cli->cb.data);
 			break;
 		}
 	}

@@ -471,8 +471,8 @@ int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
 	return bbdd_sock_unsupported_family(af, error);
 }
 
-static int bbdd_ctl_sockaddr(const char *sockdir,
-			     struct bbdd_sockaddr *ctl_bsa, char **error)
+int bbdd_ctl_sockaddr(const char *sockdir,
+		      struct bbdd_sockaddr *ctl_bsa, char **error)
 {
 	return bbdd_sock_parse_addrstr_unix(sockdir, "bbdd.ctl", ctl_bsa,
 					    error);

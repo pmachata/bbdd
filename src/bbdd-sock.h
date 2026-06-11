@@ -66,6 +66,10 @@ int bbdd_sock_parse_addrstr(int af, const char *arg, struct bbdd_sockaddr *sa,
 int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
 			 int default_port, char **error);
 
+// xxx remove this again. With the streaming sockets, we don't need sockdir
+// anymore, we need a socket.
+int bbdd_ctl_sockaddr(const char *sockdir,
+		      struct bbdd_sockaddr *ctl_bsa, char **error);
 int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 		      struct bbdd_sock *sock, char **error);
 int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa, int type,

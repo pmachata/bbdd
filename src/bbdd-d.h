@@ -13,6 +13,7 @@
 #include "bbdd-mon.i"
 #include "bbdd-nl.i"
 #include "bbdd-poll.i"
+#include "bbdd-ssk.i"
 #include "bfddp_packet.i"
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
@@ -97,15 +98,16 @@ int bbdd_d_jrpc_dissect_validate_session(struct json_object *obj,
 					 struct bbdd_nl *nl,
 					 char **error);
 
-void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
-			struct bbdd_sock *peer,
+void bbdd_d_handle_stop(struct bbdd_ssk_peer *peer,
+			struct bbdd_poll_ctx *pctx,
 			struct json_object *params_obj,
 			struct json_object *id);
 void bbdd_d_handle_echo(struct bbdd_sock *peer,
 			struct json_object *params_obj,
 			struct json_object *id);
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
-				     struct bbdd_sock *peer,
+				     struct bbdd_ssk_peer *peer,
+				     struct bbdd_poll_ctx *pctx,
 				     struct json_object *params_obj,
 				     struct json_object *id);
 

@@ -352,9 +352,10 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 {
 	struct bbdd_br *br = data;
 
+	/*
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(br->pctx, peer, params_obj, id);
-	else if (strcmp(method, "echo") == 0)
+	else*/ if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
 		bbdd_bfdd_echo_handle_start(br->bfdd, peer, id, false);
@@ -364,8 +365,10 @@ static void bbdd_br_handle_method(struct bbdd_sock *peer,
 		bbdd_br_handle_session_del(br, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_br_handle_session_stats(br, peer, params_obj, id);
+	/* xxx
 	else if (strcmp(method, "monitor-subscribe") == 0)
 		bbdd_d_handle_monitor_subscribe(br->mon, peer, params_obj, id);
+	*/
 	else
 		bbdd_br_handle_unhandled(peer, method, id);
 }
