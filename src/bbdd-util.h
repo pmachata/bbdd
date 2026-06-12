@@ -99,6 +99,10 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 			    void *data);
 
 uint64_t bbdd_util_now(void);
+int bbdd_util_parse_time_us(const char *str, uint32_t *ret, char **error);
+
+bool bbdd_util_startswith(const char *haystack, const char *needle,
+			  const char **rest);
 
 struct bbdd_util_ssk_json_tkn {
 	struct bbdd_ssk_peer *peer;

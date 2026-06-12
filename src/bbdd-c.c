@@ -304,6 +304,10 @@ bbdd_c_interact(struct json_object **request,
 	rc = bbdd_ssk_c_nq(&c.ctl, request_str, strlen(request_str), &error);
 	if (rc != 0)
 		goto unset_signals;
+	if (bbdd_env.cli_imm_done) {
+		bbdd_mon_send_debug(c.mon, "cli-imm-done: Marking peer as done");
+		bbdd_ssk_peer_mark_done(c.ctl.base.peers);
+	}
 
 	json_object_put(*request);
 	*request = NULL;
@@ -1586,48 +1590,15 @@ static int bbdd_c_parse_kw_u32_no(int *up_argc, char ***up_argv, const char *kw,
 	return 1;
 }
 
-static int __bbdd_c_parse_time_us(const char *str, uint32_t *ret,
-				  const char *what)
-{
-	unsigned long long val;
-	uint32_t mult;
-	char *end;
-
-	val = strtoull(str, &end, 0);
-	if (end == str) {
-		fprintf(stderr, "Can't parse %s `%s': not a valid number.\n",
-			what, str);
-		return -1;
-	}
-	if (val <= 0 || val > UINT32_MAX)
-		goto oob;
-
-	if (strcmp(end, "us") == 0 || *end == '\0') {
-		mult = 1;
-	} else if (strcmp(end, "ms") == 0) {
-		mult = 1000;
-	} else if (strcmp(end, "s") == 0) {
-		mult = 1000000;
-	} else {
-		fprintf(stderr, "Can't parse %s `%s': unknown unit `%s' (use us, ms, s).\n",
-			what, str, end);
-		return -1;
-	}
-
-	if (val > UINT32_MAX / mult) {
-oob:
-		fprintf(stderr, "Can't parse %s `%s': value out of bounds (0, uint32_max].\n",
-			what, str);
-		return -1;
-	}
-
-	*ret = (uint32_t)(val * mult);
-	return 0;
-}
-
 static int bbdd_c_parse_time_us(const char *str, void *ret, const char *what)
 {
-	return __bbdd_c_parse_time_us(str, ret, what);
+	char *error;
+	int rc;
+
+	rc = bbdd_util_parse_time_us(str, ret, &error);
+	if (rc != 0)
+		bbdd_err_print(&error, "Can't parse %s `%s'", what, str);
+	return rc;
 }
 
 static int bbdd_c_parse_kw_time_us(int *up_argc, char ***up_argv, const char *kw,

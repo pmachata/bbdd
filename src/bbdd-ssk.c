@@ -150,14 +150,14 @@ error:
 	return rc;
 }
 
-struct bbdd_ssk_cbs *bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
-					   struct bbdd_ssk_cbs cbs_template,
-					   char **error)
+struct bbdd_ssk_cbs *
+bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
+		      int (*rx_cb)(struct bbdd_ssk_peer *peer, const char *buf,
+				   size_t len, void *data, char **error),
+		      void (*done_cb)(struct bbdd_ssk_peer *peer, void *data),
+		      void *data, char **error)
 {
 	struct bbdd_ssk_cbs *cbs;
-
-	assert(cbs_template.next == NULL);
-	assert(cbs_template.prev == NULL);
 
 	cbs = malloc(sizeof(*cbs));
 	if (cbs == NULL) {
@@ -165,7 +165,11 @@ struct bbdd_ssk_cbs *bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
 		return NULL;
 	}
 
-	*cbs = cbs_template;
+	*cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = rx_cb,
+		.done_cb = done_cb,
+		.data = data,
+	};
 	DL_APPEND(peer->cbs, cbs);
 
 	return cbs;
@@ -233,11 +237,14 @@ static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer)
 			break;
 	}
 
-	DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
+	DL_FOREACH_SAFE(peer->cbs, cbs, tmp)
 		if (cbs->done_cb != NULL)
 			cbs->done_cb(peer, cbs->data);
+
+	/* Drop the cbs in a separate loop to permit done_cb to unsubscribe on
+	 * its own. */
+	DL_FOREACH_SAFE(peer->cbs, cbs, tmp)
 		bbdd_ssk_peer_del_cbs(peer, cbs);
-	}
 
 	DL_DELETE(peer->ssb->peers, peer);
 
@@ -267,7 +274,9 @@ bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb, int fd,
 	if (peer == NULL)
 		return NULL;
 
-	cbs = bbdd_ssk_peer_add_cbs(peer, cbs_template, error);
+	cbs = bbdd_ssk_peer_add_cbs(peer, cbs_template.rx_cb,
+				    cbs_template.done_cb, cbs_template.data,
+				    error);
 	if (cbs == NULL)
 		goto destroy_peer;
 

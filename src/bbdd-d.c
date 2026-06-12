@@ -2193,6 +2193,9 @@ int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 {
 	int rc;
 
+	if (bbdd_env.bfdd_delay_ms > 0)
+		usleep(bbdd_env.bfdd_delay_ms);
+
 	rc = bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
 				      error);
 	if (rc != 0)
@@ -2350,7 +2353,6 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 				    char **error)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx;
-	struct bbdd_ssk_cbs ssk_cbs_template;
 	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_bfdd_cbs cbs;
 	int rc;
@@ -2371,11 +2373,9 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 		.id = json_object_get(id),
 	};
 
-	ssk_cbs_template = (struct bbdd_ssk_cbs) {
-		.done_cb = bbdd_d_bfdd_connect_peer_done_cb,
-		.data = cctx,
-	};
-	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, ssk_cbs_template, error);
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
+					bbdd_d_bfdd_connect_peer_done_cb, cctx,
+					error);
 	if (ssk_cbs == NULL)
 		goto cctx_free;
 	cctx->ssk_cbs = ssk_cbs;
@@ -2625,9 +2625,9 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 		bbdd_d_handle_bfdd_connected(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
 		bbdd_d_handle_bfdd_disconnect(d, peer, params_obj, id);
-	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(d->bfdd, peer, d->pctx, id, true);
 	*/
+	else if (strcmp(method, "bfdd-echo") == 0)
+		bbdd_bfdd_echo_handle_start(d->bfdd, peer, id, true);
 	else if (strcmp(method, "monitor-subscribe") == 0)
 		bbdd_d_handle_monitor_subscribe(d->mon, peer, params_obj, id);
 	else

@@ -478,6 +478,53 @@ uint64_t bbdd_util_now(void)
 	return ((uint64_t) tv.tv_sec) * 1000000 + tv.tv_usec;
 }
 
+int bbdd_util_parse_time_us(const char *str, uint32_t *ret, char **error)
+{
+	unsigned long long val;
+	uint32_t mult;
+	char *end;
+
+	val = strtoull(str, &end, 0);
+	if (end == str) {
+		bbdd_err_fmt(error, "not a valid number");
+		return -1;
+	}
+	if (val <= 0 || val > UINT32_MAX)
+		goto oob;
+
+	if (strcmp(end, "us") == 0 || *end == '\0') {
+		mult = 1;
+	} else if (strcmp(end, "ms") == 0) {
+		mult = 1000;
+	} else if (strcmp(end, "s") == 0) {
+		mult = 1000000;
+	} else {
+		bbdd_err_fmt(error, "unknown unit `%s' (use us, ms, s)", end);
+		return -1;
+	}
+
+	if (val > UINT32_MAX / mult) {
+oob:
+		bbdd_err_fmt(error, "value out of bounds (0, uint32_max]");
+		return -1;
+	}
+
+	*ret = (uint32_t)(val * mult);
+	return 0;
+}
+
+bool bbdd_util_startswith(const char *haystack, const char *needle,
+			  const char **rest)
+{
+	size_t sz = strlen(needle);
+
+	if (strncmp(haystack, needle, sz) != 0)
+		return false;
+
+	*rest = haystack + sz;
+	return true;
+}
+
 static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 				   const char **str, size_t *left,
 				   struct json_object **ret_obj, char **error)

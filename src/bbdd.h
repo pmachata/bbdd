@@ -17,7 +17,18 @@ extern struct bbdd_env {
 	bool show_json;
 	bool numeric;
 	bool timestamp;
-	bool mon_eager;
+
+	/* Debug options. */
+	bool mon_eager;		/* For purposes of formatting monitoring
+				 * messages, all topics should be considered
+				 * enabled. This exercises message formatting
+				 * paths without actually sending the
+				 * messages. */
+	bool cli_imm_done;	/* Client should mark peer as done after it
+				 * sends the request. This exercises the daemon
+				 * paths that deal with a disappeared peer. */
+	uint32_t bfdd_delay_ms;	/* The amount of sleep in us between reception
+				 * of a BFDD message and the response. */
 } bbdd_env;
 
 struct bbdd_ec {
