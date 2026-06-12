@@ -19,3 +19,12 @@ extern struct bbdd_env {
 	bool timestamp;
 	bool mon_eager;
 } bbdd_env;
+
+struct bbdd_ec {
+	int __ec;
+};
+
+extern const struct bbdd_ec bbdd_ec_success;
+extern const struct bbdd_ec bbdd_ec_failure;
+
+bool bbdd_ec_is_success(struct bbdd_ec ec);

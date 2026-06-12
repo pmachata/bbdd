@@ -550,7 +550,8 @@ static void bbdd_br_close_bfdd_server(struct bbdd_sock *sock)
 	bbdd_sock_close(sock);
 }
 
-static int bbdd_br_do_start(const char *addr, struct bbdd_mon_topics topics)
+static struct bbdd_ec bbdd_br_do_start(const char *addr,
+				       struct bbdd_mon_topics topics)
 {
 	struct bbdd_br br = {};
 	struct bbdd_sockaddr bfdd_bsa;
@@ -641,7 +642,7 @@ mon_fini:
 nl_destroy:
 	bbdd_nl_destroy(br.nl);
 out:
-	return err;
+	return err != 0 ? bbdd_ec_failure : bbdd_ec_success;
 }
 
 static void bbdd_br_start_help(void)
@@ -654,13 +655,14 @@ static void bbdd_br_start_help(void)
 	);
 }
 
-int bbdd_br_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
+struct bbdd_ec bbdd_br_start(int argc, char **argv,
+			     const struct bbdd_mon_topics *topics)
 {
 	const char *addr = BBDD_BFDD_DEFAULT_ADDR;
 
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		bbdd_br_start_help();
-		return 0;
+		return bbdd_ec_success;
 	}
 
 	if (argc > 0) {
@@ -670,7 +672,7 @@ int bbdd_br_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
 
 	if (argc > 0) {
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	return bbdd_br_do_start(addr, *topics);

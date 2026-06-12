@@ -3,6 +3,7 @@
 
 #include <json-c/json_object.h>
 
+#include "bbdd.h"
 #include "bbdd-pkt.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
@@ -87,7 +88,8 @@ struct bbdd_d_session {
 	struct bbdd_d_session_data remote;
 };
 
-int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_d_start(int argc, char **argv,
+			    const struct bbdd_mon_topics *topics);
 
 int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 				    struct bbdd_c_session *sess,

@@ -175,7 +175,7 @@ static int bbdd_d_global_diag_stats_json(struct bbdd_d *d,
 }
 
 static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
-					   struct bbdd_sock *peer,
+					   struct bbdd_ssk_peer *peer,
 					   struct json_object *params_obj,
 					   struct json_object *id)
 {
@@ -186,11 +186,13 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 
 	rc = bbdd_jrpc_dissect_params_empty(params_obj, &error);
 	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_inv_params_err(peer, d->pctx,
+								 id, &error);
 
 	result = bbdd_bpf_global_diag_stats_json(d->bpf, &error);
 	if (!result)
-		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_interr_err(peer, d->pctx,
+							     id, &error);
 
 	rc = bbdd_d_global_diag_stats_json(d, result, &error);
 	if (rc != 0)
@@ -204,9 +206,10 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	if (rc != 0)
 		goto put_obj;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_ssk_jrpc_send(peer, d->pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer); // xxx can we move it to jrpc_send?
 
 	json_object_put(obj);
 	return;
@@ -215,7 +218,7 @@ put_obj:
 	json_object_put(obj);
 put_result:
 	json_object_put(result);
-	bbdd_util_jrpc_respond_memerr(peer, id);
+	bbdd_util_ssk_jrpc_respond_memerr(peer, d->pctx, id);
 }
 
 static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
@@ -1874,6 +1877,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 	rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer); // xxx can we move it to jrpc_send?
 
 	json_object_put(obj);
 	return;
@@ -2595,33 +2599,29 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 		bbdd_d_handle_stop(peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, d->pctx, params_obj, id);
-	/* xxx
-	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(d->bfdd, peer, d->pctx, id, true);
 	else if (strcmp(method, "global-stats-diag") == 0)
-		bbdd_d_handle_global_stats_get(d, peer, d->pctx,
-					       params_obj, id);
-	*/
+		bbdd_d_handle_global_stats_get(d, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
 		bbdd_d_handle_session_show(d, peer, params_obj, id);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_d_handle_session_add(d, peer, params_obj, id);
-	/* xxx
 	else if (strcmp(method, "session-set") == 0)
-		bbdd_d_handle_session_set(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_session_set(d, peer, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)
-		bbdd_d_handle_session_del(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_session_del(d, peer, params_obj, id);
 	else if (strcmp(method, "session-stats-diag") == 0)
-		bbdd_d_handle_session_stats_diag(d, peer, d->pctx,
-						 params_obj, id);
+		bbdd_d_handle_session_stats_diag(d, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
-		bbdd_d_handle_session_stats(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_session_stats(d, peer, params_obj, id);
+	/* xxx
 	else if (strcmp(method, "bfdd-connect") == 0)
 		bbdd_d_handle_bfdd_connect(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "bfdd-connected") == 0)
 		bbdd_d_handle_bfdd_connected(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "bfdd-disconnect") == 0)
 		bbdd_d_handle_bfdd_disconnect(d, peer, d->pctx, params_obj, id);
+	else if (strcmp(method, "bfdd-echo") == 0)
+		bbdd_bfdd_echo_handle_start(d->bfdd, peer, d->pctx, id, true);
 	else if (strcmp(method, "monitor-subscribe") == 0)
 		bbdd_d_handle_monitor_subscribe(d->mon, peer, d->pctx,
 						params_obj, id);
@@ -2896,7 +2896,7 @@ err:
 	return rc;
 }
 
-static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
+static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 {
 	struct bbdd_d d = {};
 	const struct bbdd_bpf_cbs bpf_cbs = {
@@ -2909,7 +2909,6 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
 	struct bbdd_sockaddr bsa;
-	bool failed = true;
 	char *error;
 	int rc = -ENOMEM;
 
@@ -2948,8 +2947,10 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 
 	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, veth_rx_ifindex,
 				veth_tx_ifindex, d.mon, &error);
-	if (d.bpf == NULL)
+	if (d.bpf == NULL) {
+		rc = -1;
 		goto fini_veth;
+	}
 
 	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
 	if (rc != 0)
@@ -2971,8 +2972,6 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	rc = bbdd_poll_loop(d.pctx, &error);
 	if (rc != 0)
 		goto cleanup;
-
-	failed = false;
 
 cleanup:
 	bbdd_mon_send_monitor_end(d.mon);
@@ -2998,21 +2997,24 @@ nl_destroy:
 closelog:
 	closelog();
 
-	if (failed)
+	if (rc != 0) {
 		bbdd_err_print(&error, "Error");
-	return rc;
+		return bbdd_ec_failure;
+	}
+	return bbdd_ec_success;
 }
 
-int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
+struct bbdd_ec bbdd_d_start(int argc, char **argv,
+			    const struct bbdd_mon_topics *topics)
 {
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		fprintf(stderr, "Usage: bbdd start\n");
-		return 0;
+		return bbdd_ec_success;
 	}
 
 	if (argc > 0) {
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	return bbdd_d_do_start(*topics);

@@ -61,6 +61,8 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 		len = (size_t) rc;
 
 		rc = peer->cbs.rx_cb(peer, pctx, buffer, len, peer->cbs.data, error);
+		if (rc != 0)
+			break;
 	}
 
 	return rc;
@@ -135,8 +137,7 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 
 error:
 	bbdd_ssk_peer_destroy(peer, pctx);
-	/* Muffle errors, we don't want to break out of the poll loop. */
-	return 0;
+	return rc;
 }
 
 static struct bbdd_ssk_peer *

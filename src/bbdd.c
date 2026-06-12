@@ -21,7 +21,19 @@ struct bbdd_env bbdd_env = {
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";
 
-static int bbdd_help(void)
+const struct bbdd_ec bbdd_ec_success = {
+	.__ec = EXIT_SUCCESS,
+};
+const struct bbdd_ec bbdd_ec_failure = {
+	.__ec = EXIT_FAILURE,
+};
+
+bool bbdd_ec_is_success(struct bbdd_ec ec)
+{
+	return ec.__ec == bbdd_ec_success.__ec;
+}
+
+static struct bbdd_ec bbdd_help(void)
 {
 	puts("bbdd, the BPF-based BFD dataplane daemon.\n"
 	     "\n"
@@ -37,10 +49,11 @@ static int bbdd_help(void)
 	     "                 defaults to " BBDD_DEFAULT_SOCKDIR "\n"
 	     "  -t/--timestamp prefix monitor notifications with a timestamp\n"
 	     );
-	return 0;
+	return bbdd_ec_success;
 }
 
-static int bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
+static struct bbdd_ec
+bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 {
 	if (!argc || strcmp(*argv, "help") == 0) {
 		return bbdd_help();
@@ -68,7 +81,7 @@ static int bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 	}
 
 	fprintf(stderr, "Unknown command \"%s\"\n", *argv);
-	return -EINVAL;
+	return bbdd_ec_failure;
 }
 
 int main(int argc, char **argv)
@@ -90,9 +103,9 @@ int main(int argc, char **argv)
 		{ NULL, 0, NULL, 0 }
 	};
 	struct bbdd_mon_topics topics = {};
+	struct bbdd_ec ec;
 	int verbosity = 0;
 	int opt;
-	int rc;
 
 	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
 	while ((opt = getopt_long(argc, argv, "hqtvVN",
@@ -148,8 +161,6 @@ int main(int argc, char **argv)
 	bbdd_env.verbosity = verbosity;
 	bbdd_err_verbosity = verbosity;
 
-	rc = bbdd_cmd(argc, argv, &topics);
-	if (rc != 0)
-		return EXIT_FAILURE;
-	return EXIT_SUCCESS;
+	ec = bbdd_cmd(argc, argv, &topics);
+	return ec.__ec;
 }
