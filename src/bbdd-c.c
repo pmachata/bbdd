@@ -288,7 +288,7 @@ bbdd_c_interact(struct json_object **request,
 		.data = &c,
 	};
 
-	rc = bbdd_ssk_open_c(&c.ctl, &bsa, c.pctx, cbs, &error);
+	rc = bbdd_ssk_open_c(&c.ctl, c.pctx, &bsa, cbs, &error);
 	if (rc != 0)
 		goto tkn_destroy;
 
@@ -302,8 +302,7 @@ bbdd_c_interact(struct json_object **request,
 		goto unset_signals;
 	}
 
-	rc = bbdd_ssk_c_nq(&c.ctl, c.pctx, request_str, strlen(request_str),
-			   &error);
+	rc = bbdd_ssk_c_nq(&c.ctl, request_str, strlen(request_str), &error);
 	if (rc != 0)
 		goto unset_signals;
 
@@ -318,7 +317,7 @@ bbdd_c_interact(struct json_object **request,
 unset_signals:
 	bbdd_poll_unset_signals(c.pctx);
 ssk_close_ctl:
-	bbdd_ssk_close_c(&c.ctl, c.pctx);
+	bbdd_ssk_close_c(&c.ctl);
 tkn_destroy:
 	bbdd_util_ssk_json_tkn_destroy(c.tkn);
 poll_fini:
@@ -3288,7 +3287,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		.data = &mctx,
 	};
 
-	rc = bbdd_ssk_open_c(&mctx.ctl, &bsa, mctx.pctx, cbs, &error);
+	rc = bbdd_ssk_open_c(&mctx.ctl, mctx.pctx, &bsa, cbs, &error);
 	if (rc != 0)
 		goto tkn_destroy;
 
@@ -3297,8 +3296,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto ssk_close_ctl;
 
 
-	rc = bbdd_ssk_c_nq(&mctx.ctl, mctx.pctx, request_str,
-			   strlen(request_str), &error);
+	rc = bbdd_ssk_c_nq(&mctx.ctl, request_str, strlen(request_str), &error);
 	if (rc != 0)
 		goto unset_signals;
 
@@ -3309,7 +3307,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 unset_signals:
 	bbdd_poll_unset_signals(mctx.pctx);
 ssk_close_ctl:
-	bbdd_ssk_close_c(&mctx.ctl, mctx.pctx);
+	bbdd_ssk_close_c(&mctx.ctl);
 tkn_destroy:
 	bbdd_util_ssk_json_tkn_destroy(mctx.tkn);
 poll_fini:

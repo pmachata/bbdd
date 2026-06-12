@@ -37,9 +37,7 @@ void bbdd_mon_destroy(struct bbdd_mon *mon);
 int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 		       struct bbdd_mon_topics topics, char **error);
 
-int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
-			   struct bbdd_ssk_peer *peer,
-			   struct bbdd_poll_ctx *pctx,
+int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon, struct bbdd_ssk_peer *peer,
 			   struct bbdd_mon_topics topics, char **error);
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,

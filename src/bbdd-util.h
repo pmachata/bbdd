@@ -18,20 +18,17 @@
 int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
 			char **error);
 int bbdd_util_ssk_jrpc_send(struct bbdd_ssk_peer *peer,
-			    struct bbdd_poll_ctx *pctx,
 			    struct json_object *obj,
 			    char **error);
 
 void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj);
 void bbdd_util_ssk_jrpc_respond(struct bbdd_ssk_peer *peer,
-				struct bbdd_poll_ctx *pctx,
 				struct json_object *obj);
 
 void bbdd_util_jrpc_respond_inv_params(struct bbdd_sock *ctl,
 				       struct json_object *id,
 				       const char *msg);
 void bbdd_util_ssk_jrpc_respond_inv_params(struct bbdd_ssk_peer *peer,
-					   struct bbdd_poll_ctx *pctx,
 					   struct json_object *id,
 					   const char *msg);
 
@@ -39,7 +36,6 @@ void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_sock *ctl,
 					   struct json_object *id,
 					   char **data);
 void bbdd_util_ssk_jrpc_respond_inv_params_err(struct bbdd_ssk_peer *peer,
-					       struct bbdd_poll_ctx *pctx,
 					       struct json_object *id,
 					       char **data);
 
@@ -47,7 +43,6 @@ void bbdd_util_jrpc_respond_interr(struct bbdd_sock *peer,
 				   struct json_object *id,
 				   const char *msg);
 void bbdd_util_ssk_jrpc_respond_interr(struct bbdd_ssk_peer *peer,
-				       struct bbdd_poll_ctx *pctx,
 				       struct json_object *id,
 				       const char *msg);
 
@@ -55,7 +50,6 @@ void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
 				       struct json_object *id,
 				       char **data);
 void bbdd_util_ssk_jrpc_respond_interr_err(struct bbdd_ssk_peer *peer,
-					   struct bbdd_poll_ctx *pctx,
 					   struct json_object *id,
 					   char **data);
 
@@ -63,29 +57,24 @@ __attribute__((format(printf, 3, 4)))
 void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
 				       struct json_object *id,
 				       const char *fmt, ...);
-__attribute__((format(printf, 4, 5)))
+__attribute__((format(printf, 3, 4)))
 void bbdd_util_ssk_jrpc_respond_interr_fmt(struct bbdd_ssk_peer *peer,
-					   struct bbdd_poll_ctx *pctx,
 					   struct json_object *id,
 					   const char *fmt, ...);
 
 void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
 				   struct json_object *id);
 void bbdd_util_ssk_jrpc_respond_memerr(struct bbdd_ssk_peer *peer,
-				       struct bbdd_poll_ctx *pctx,
 				       struct json_object *id);
 
 void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 				  struct json_object *id);
 void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
-				      struct bbdd_poll_ctx *pctx,
 				      struct json_object *id);
 void bbdd_util_ssk_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
-					      struct bbdd_poll_ctx *pctx,
 					      struct json_object *id);
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
-				 struct bbdd_poll_ctx *pctx,
 				 struct json_object *id,
 				 uint64_t ts, uint64_t reply_ts);
 
@@ -101,7 +90,6 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 			    void *data);
 void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 			    struct bbdd_ssk_peer *peer,
-			    struct bbdd_poll_ctx *pctx,
 			    struct bbdd_mon *mon,
 			    void (*cb)(struct bbdd_ssk_peer *peer,
 				       const char *method,

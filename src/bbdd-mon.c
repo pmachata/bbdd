@@ -10,6 +10,7 @@
 #include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-sock.h"
+#include "bbdd-ssk.h"
 #include "bbdd-util.h"
 
 enum bbdd_mon_cli_kind {
@@ -19,6 +20,7 @@ enum bbdd_mon_cli_kind {
 };
 
 struct bbdd_mon_cli {
+	struct bbdd_mon *mon;
 	struct bbdd_mon_cli *prev;
 	struct bbdd_mon_cli *next;
 
@@ -27,11 +29,7 @@ struct bbdd_mon_cli {
 	enum bbdd_mon_cli_kind kind;
 	union {
 		struct bbdd_sock sock;
-		struct {
-			// xxx lifetimes?
-			struct bbdd_ssk_peer *peer;
-			struct bbdd_poll_ctx *pctx;
-		} ssk;
+		struct bbdd_ssk_peer *peer;
 		struct {
 			void (*cb)(struct json_object *, void *);
 			void *data;
@@ -86,6 +84,7 @@ bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
 	}
 
 	*cli = (struct bbdd_mon_cli) {
+		.mon = mon,
 		.topics = topics,
 	};
 
@@ -115,12 +114,30 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 	return 0;
 }
 
+static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
+{
+	for (int i = 0; i < bbdd_mon_ntopics; i++)
+		if (cli->topics.enabled[i])
+			mon->active[i]--;
+
+	DL_DELETE(mon->head, cli);
+	free(cli);
+}
+
+static void bbdd_mon_ssk_cli_done(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_mon_cli *cli = data;
+
+	bbdd_mon_unsubscribe(cli->mon, cli);
+}
+
 int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 			   struct bbdd_ssk_peer *peer,
-			   struct bbdd_poll_ctx *pctx,
 			   struct bbdd_mon_topics topics, char **error)
 {
+	struct bbdd_ssk_cbs ssk_cbs;
 	struct bbdd_mon_cli *cli;
+	int rc;
 
 	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
@@ -129,10 +146,22 @@ int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 		return -1;
 	}
 
+	ssk_cbs = (struct bbdd_ssk_cbs) {
+		.done_cb = bbdd_mon_ssk_cli_done,
+		.data = cli,
+	};
+
+	rc = bbdd_ssk_peer_add_cbs(peer, ssk_cbs, error);
+	if (rc != 0)
+		goto free_cli;
+
 	cli->kind = BBDD_MON_CLI_KIND_SSK;
-	cli->ssk.peer = peer;
-	cli->ssk.pctx = pctx;
+	cli->peer = peer;
 	return 0;
+
+free_cli:
+	bbdd_mon_unsubscribe(mon, cli);
+	return rc;
 }
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
@@ -152,16 +181,6 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 	cli->cb.cb = cb;
 	cli->cb.data = data;
 	return 0;
-}
-
-static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
-{
-	for (int i = 0; i < bbdd_mon_ntopics; i++)
-		if (cli->topics.enabled[i])
-			mon->active[i]--;
-
-	DL_DELETE(mon->head, cli);
-	free(cli);
 }
 
 bool bbdd_mon_topic_active(struct bbdd_mon *mon, enum bbdd_mon_topic topic)
@@ -186,9 +205,7 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 			break;
 
 		case BBDD_MON_CLI_KIND_SSK:
-			if (bbdd_util_ssk_jrpc_send(cli->ssk.peer,
-						    cli->ssk.pctx,
-						    msg, NULL) != 0)
+			if (bbdd_util_ssk_jrpc_send(cli->peer, msg, NULL) != 0)
 				bbdd_mon_unsubscribe(mon, cli);
 			break;
 

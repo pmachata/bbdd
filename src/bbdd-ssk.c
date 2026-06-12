@@ -23,7 +23,7 @@ struct bbdd_ssk_peer {
 	int fd;
 	struct json_tokener *tok;
 	struct bbdd_sb tx_sb;
-	struct bbdd_ssk_cbs cbs;
+	struct bbdd_ssk_cbs *cbs;	/* DList. */
 
 	bool done;
 };
@@ -33,13 +33,18 @@ int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd)
 	return ssd->sock.fd;
 }
 
-static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
-				  struct bbdd_poll_ctx *pctx);
+static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer);
+
+static struct bbdd_poll_ctx *bbdd_ssk_peer_pctx(struct bbdd_ssk_peer *peer)
+{
+	return peer->ssb->pctx;
+}
 
 static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			    struct bbdd_poll_ctx *pctx,
 			    char **error)
 {
+	struct bbdd_ssk_cbs *cbs, *tmp;
 	char buffer[1024];
 	size_t len;
 	ssize_t rc;
@@ -60,12 +65,18 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 		// xxx debug message
 		len = (size_t) rc;
 
-		rc = peer->cbs.rx_cb(peer, pctx, buffer, len, peer->cbs.data, error);
-		if (rc != 0)
-			break;
+
+		DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
+			if (cbs->rx_cb != NULL) {
+				rc = cbs->rx_cb(peer, pctx, buffer, len,
+						cbs->data, error);
+				if (rc != 0)
+					return rc;
+			}
+		}
 	}
 
-	return rc;
+	return 0;
 }
 
 static int bbdd_ssk_peer_tx(struct bbdd_ssk_peer *peer, char **error)
@@ -122,7 +133,7 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 	if (bbdd_sb_len(&peer->tx_sb) > 0) {
 		events |= POLLOUT;
 	} else if (peer->done) {
-		bbdd_ssk_peer_destroy(peer, pctx);
+		bbdd_ssk_peer_destroy(peer);
 		return 0;
 	}
 
@@ -136,14 +147,40 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 	return 0;
 
 error:
-	bbdd_ssk_peer_destroy(peer, pctx);
+	bbdd_ssk_peer_destroy(peer);
 	return rc;
 }
 
+int bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
+			  struct bbdd_ssk_cbs cbs_template,
+			  char **error)
+{
+	struct bbdd_ssk_cbs *cbs;
+
+	assert(cbs_template.next == NULL);
+	assert(cbs_template.prev == NULL);
+
+	cbs = malloc(sizeof(*cbs));
+	if (cbs == NULL) {
+		bbdd_err_fmt(error, "push peer cbs: %m");
+		return -1;
+	}
+
+	*cbs = cbs_template;
+	DL_APPEND(peer->cbs, cbs);
+
+	return 0;
+}
+
+static void bbdd_ssk_peer_del_cbs(struct bbdd_ssk_peer *peer,
+				  struct bbdd_ssk_cbs *cbs)
+{
+	DL_DELETE(peer->cbs, cbs);
+	free(cbs);
+}
+
 static struct bbdd_ssk_peer *
-bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb,
-		     struct bbdd_poll_ctx *pctx, int fd,
-		     struct bbdd_ssk_cbs cbs, char **error)
+bbdd_ssk_peer_create_no_cb(struct bbdd_ssk_b *ssb, int fd, char **error)
 {
 	struct bbdd_ssk_peer *peer;
 	struct json_tokener *tok;
@@ -165,10 +202,10 @@ bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb,
 		.ssb = ssb,
 		.fd = fd,
 		.tok = tok,
-		.cbs = cbs,
+		.cbs = NULL,
 	};
 
-	rc = bbdd_poll_set_fd(pctx, fd, POLLIN | POLLHUP,
+	rc = bbdd_poll_set_fd(ssb->pctx, fd, POLLIN | POLLHUP,
 			      bbdd_ssk_peer_event, peer, error);
 	if (rc != 0)
 		goto free_tok;
@@ -183,9 +220,10 @@ free_peer:
 	return NULL;
 }
 
-static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
-				  struct bbdd_poll_ctx *pctx)
+static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer)
 {
+	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
+	struct bbdd_ssk_cbs *cbs, *tmp;
 	int rc;
 
 	// xxx I suspect the flushing can't work properly on a non-blocking
@@ -197,8 +235,11 @@ static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
 			break;
 	}
 
-	if (peer->cbs.done_cb != NULL)
-		peer->cbs.done_cb(peer, peer->cbs.data);
+	DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
+		if (cbs->done_cb != NULL)
+			cbs->done_cb(peer, cbs->data);
+		bbdd_ssk_peer_del_cbs(peer, cbs);
+	}
 
 	DL_DELETE(peer->ssb->peers, peer);
 
@@ -217,8 +258,30 @@ static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer,
 	free(peer);
 }
 
-int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx,
-		      struct bbdd_ssk_cbs cbs, char **error)
+static struct bbdd_ssk_peer *
+bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb, int fd,
+		     struct bbdd_ssk_cbs cbs, char **error)
+{
+	struct bbdd_ssk_peer *peer;
+	int rc;
+
+	peer = bbdd_ssk_peer_create_no_cb(ssb, fd, error);
+	if (peer == NULL)
+		return NULL;
+
+	rc = bbdd_ssk_peer_add_cbs(peer, cbs, error);
+	if (rc != 0)
+		goto destroy_peer;
+
+	return peer;
+
+destroy_peer:
+	bbdd_ssk_peer_destroy(peer);
+	return NULL;
+}
+
+int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_ssk_cbs cbs,
+		      char **error)
 {
 	struct bbdd_ssk_peer *peer;
 	int fd;
@@ -235,7 +298,7 @@ again:
 		return -errno;
 	}
 
-	peer = bbdd_ssk_peer_create(&ssd->base, pctx, fd, cbs, error);
+	peer = bbdd_ssk_peer_create(&ssd->base, fd, cbs, error);
 	if (peer == NULL)
 		goto close_fd;
 
@@ -246,8 +309,8 @@ close_fd:
 	return -1;
 }
 
-int bbdd_ssk_open_d(struct bbdd_ssk_d *ssd, const struct bbdd_sockaddr *bsa,
-		    char **error)
+int bbdd_ssk_open_d(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx,
+		    const struct bbdd_sockaddr *bsa, char **error)
 {
 	struct bbdd_sock sock;
 	int rc;
@@ -264,6 +327,9 @@ int bbdd_ssk_open_d(struct bbdd_ssk_d *ssd, const struct bbdd_sockaddr *bsa,
 	}
 
 	*ssd = (struct bbdd_ssk_d) {
+		.base = {
+			.pctx = pctx,
+		},
 		.sock = sock,
 	};
 	return 0;
@@ -273,23 +339,23 @@ close:
 	return rc;
 }
 
-static void bbdd_ssk_close_b(struct bbdd_ssk_b *ssb, struct bbdd_poll_ctx *pctx)
+static void bbdd_ssk_close_b(struct bbdd_ssk_b *ssb)
 {
 	struct bbdd_ssk_peer *peer, *tmp;
 
 	DL_FOREACH_SAFE(ssb->peers, peer, tmp)
-		bbdd_ssk_peer_destroy(peer, pctx);
+		bbdd_ssk_peer_destroy(peer);
 }
 
-void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx)
+void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd)
 {
-	bbdd_ssk_close_b(&ssd->base, pctx);
+	bbdd_ssk_close_b(&ssd->base);
 	bbdd_sock_close(&ssd->sock);
 }
 
-int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, const struct bbdd_sockaddr *bsa,
-		    struct bbdd_poll_ctx *pctx,
-		    struct bbdd_ssk_cbs cbs, char **error)
+int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
+		    const struct bbdd_sockaddr *bsa, struct bbdd_ssk_cbs cbs,
+		    char **error)
 {
 	struct bbdd_ssk_peer *peer;
 	int fd;
@@ -312,9 +378,13 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, const struct bbdd_sockaddr *bsa,
 		goto close;
 	}
 
-	*ssc = (struct bbdd_ssk_c) {};
+	*ssc = (struct bbdd_ssk_c) {
+		.base = {
+			.pctx = pctx,
+		},
+	};
 
-	peer = bbdd_ssk_peer_create(&ssc->base, pctx, fd, cbs, error);
+	peer = bbdd_ssk_peer_create(&ssc->base, fd, cbs, error);
 	if (peer == NULL) {
 		rc = -1;
 		goto close;
@@ -327,20 +397,21 @@ close:
 	return rc;
 }
 
-void bbdd_ssk_close_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx)
+void bbdd_ssk_close_c(struct bbdd_ssk_c *ssc)
 {
-	bbdd_ssk_close_b(&ssc->base, pctx);
+	bbdd_ssk_close_b(&ssc->base);
 }
 
-int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
-		  const char *buf, size_t len, char **error)
+int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, const char *buf, size_t len,
+		  char **error)
 {
-	return bbdd_ssk_peer_nq(ssc->base.peers, pctx, buf, len, error);
+	return bbdd_ssk_peer_nq(ssc->base.peers, buf, len, error);
 }
 
-int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, struct bbdd_poll_ctx *pctx,
-		     const char *buf, size_t len, char **error)
+int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
+		     char **error)
 {
+	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
 	int rc;
 
 	/* Do this first so that we don't have to later unpush the buffer.
