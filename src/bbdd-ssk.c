@@ -111,7 +111,7 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 	int rc;
 
 	if (revents & POLLIN) {
-		rc = bbdd_ssk_peer_rx(peer, pctx, &error);
+		rc = bbdd_ssk_peer_rx(peer, &error);
 		if (rc != 0) {
 			bbdd_err_print(&error, "client_rx");
 			goto error;
@@ -150,9 +150,9 @@ error:
 	return rc;
 }
 
-int bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
-			  struct bbdd_ssk_cbs cbs_template,
-			  char **error)
+struct bbdd_ssk_cbs *bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
+					   struct bbdd_ssk_cbs cbs_template,
+					   char **error)
 {
 	struct bbdd_ssk_cbs *cbs;
 
@@ -162,17 +162,16 @@ int bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
 	cbs = malloc(sizeof(*cbs));
 	if (cbs == NULL) {
 		bbdd_err_fmt(error, "push peer cbs: %m");
-		return -1;
+		return NULL;
 	}
 
 	*cbs = cbs_template;
 	DL_APPEND(peer->cbs, cbs);
 
-	return 0;
+	return cbs;
 }
 
-static void bbdd_ssk_peer_del_cbs(struct bbdd_ssk_peer *peer,
-				  struct bbdd_ssk_cbs *cbs)
+void bbdd_ssk_peer_del_cbs(struct bbdd_ssk_peer *peer, struct bbdd_ssk_cbs *cbs)
 {
 	DL_DELETE(peer->cbs, cbs);
 	free(cbs);
@@ -259,17 +258,17 @@ static void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer)
 
 static struct bbdd_ssk_peer *
 bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb, int fd,
-		     struct bbdd_ssk_cbs cbs, char **error)
+		     struct bbdd_ssk_cbs cbs_template, char **error)
 {
 	struct bbdd_ssk_peer *peer;
-	int rc;
+	struct bbdd_ssk_cbs *cbs;
 
 	peer = bbdd_ssk_peer_create_no_cb(ssb, fd, error);
 	if (peer == NULL)
 		return NULL;
 
-	rc = bbdd_ssk_peer_add_cbs(peer, cbs, error);
-	if (rc != 0)
+	cbs = bbdd_ssk_peer_add_cbs(peer, cbs_template, error);
+	if (cbs == NULL)
 		goto destroy_peer;
 
 	return peer;

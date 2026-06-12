@@ -135,9 +135,9 @@ int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 			   struct bbdd_ssk_peer *peer,
 			   struct bbdd_mon_topics topics, char **error)
 {
-	struct bbdd_ssk_cbs ssk_cbs;
+	struct bbdd_ssk_cbs ssk_cbs_template;
+	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_mon_cli *cli;
-	int rc;
 
 	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
@@ -146,13 +146,12 @@ int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 		return -1;
 	}
 
-	ssk_cbs = (struct bbdd_ssk_cbs) {
+	ssk_cbs_template = (struct bbdd_ssk_cbs) {
 		.done_cb = bbdd_mon_ssk_cli_done,
 		.data = cli,
 	};
-
-	rc = bbdd_ssk_peer_add_cbs(peer, ssk_cbs, error);
-	if (rc != 0)
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, ssk_cbs_template, error);
+	if (ssk_cbs == NULL)
 		goto free_cli;
 
 	cli->kind = BBDD_MON_CLI_KIND_SSK;
@@ -161,7 +160,7 @@ int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 
 free_cli:
 	bbdd_mon_unsubscribe(mon, cli);
-	return rc;
+	return -1;
 }
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,

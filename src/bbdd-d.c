@@ -2296,8 +2296,9 @@ static void bbdd_d_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
 
 struct bbdd_d_bfdd_connect_ctx {
 	struct bbdd_d *d;
-	struct bbdd_sock peer;
 	struct json_object *id;
+	struct bbdd_ssk_peer *peer;
+	struct bbdd_ssk_cbs *ssk_cbs;
 };
 
 static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
@@ -2306,7 +2307,8 @@ static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
 	struct bbdd_d *d = cctx->d;
 
 	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
-	bbdd_util_jrpc_respond_empty(&cctx->peer, cctx->id);
+	if (cctx->peer != NULL)
+		bbdd_util_ssk_jrpc_respond_empty(cctx->peer, cctx->id);
 }
 
 static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
@@ -2315,7 +2317,8 @@ static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 	struct bbdd_d *d = cctx->d;
 
-	bbdd_util_jrpc_respond_interr(&cctx->peer, cctx->id, *error);
+	if (cctx->peer != NULL)
+		bbdd_util_ssk_jrpc_respond_interr(cctx->peer, cctx->id, *error);
 	bbdd_mon_senderr(d->mon, error, "Failed to connect to BFD");
 
 	assert(d->bfdd == bfdd);
@@ -2327,17 +2330,28 @@ static void bbdd_d_bfdd_connect_free_cb(void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 
+	if (cctx->peer != NULL)
+		bbdd_ssk_peer_del_cbs(cctx->peer, cctx->ssk_cbs);
 	json_object_put(cctx->id);
 	free(cctx);
 }
 
+static void bbdd_d_bfdd_connect_peer_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+
+	cctx->peer = NULL;
+}
+
 static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
-				    struct bbdd_sock *peer,
+				    struct bbdd_ssk_peer *peer,
 				    struct json_object *id,
 				    const char *path,
 				    char **error)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx;
+	struct bbdd_ssk_cbs ssk_cbs_template;
+	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_bfdd_cbs cbs;
 	int rc;
 
@@ -2353,9 +2367,18 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	}
 	*cctx = (struct bbdd_d_bfdd_connect_ctx) {
 		.d = d,
-		.peer = *peer,
+		.peer = peer,
 		.id = json_object_get(id),
 	};
+
+	ssk_cbs_template = (struct bbdd_ssk_cbs) {
+		.done_cb = bbdd_d_bfdd_connect_peer_done_cb,
+		.data = cctx,
+	};
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, ssk_cbs_template, error);
+	if (ssk_cbs == NULL)
+		goto cctx_free;
+	cctx->ssk_cbs = ssk_cbs;
 
 	cbs = (struct bbdd_bfdd_cbs) {
 		.conn_cb_data = cctx,
@@ -2373,18 +2396,20 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	d->bfdd = bbdd_bfdd_open(path, d->pctx, d->mon, &cbs, error);
 	if (d->bfdd == NULL) {
 		rc = -ENOMEM;
-		goto cctx_free;
+		goto peer_del_cbs;
 	}
 
 	return 0;
 
+peer_del_cbs:
+	bbdd_ssk_peer_del_cbs(peer, ssk_cbs);
 cctx_free:
 	free(cctx);
 	return rc;
 }
 
 static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
-				       struct bbdd_sock *peer,
+				       struct bbdd_ssk_peer *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id)
 {
@@ -2413,7 +2438,8 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 	rc = bbdd_jrpc_dissect(params_obj, policy, seen, values,
 			       ARRAY_SIZE(policy), &error);
 	if (rc != 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_inv_params_err(peer, id,
+								 &error);
 
 	proto = json_object_get_string(values[pol_proto]);
 	addr = json_object_get_string(values[pol_addr]);
@@ -2421,17 +2447,18 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 
 	af = bbdd_sock_af_from_str(proto, &error);
 	if (af < 0)
-		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_inv_params_err(peer, id,
+								 &error);
 
 	if (af != AF_UNIX)
-		return bbdd_util_jrpc_respond_inv_params(peer, id, "Only `unix' protocol supported");
+		return bbdd_util_ssk_jrpc_respond_inv_params(peer, id, "Only `unix' protocol supported");
 
 	if (port != NULL)
-		return bbdd_util_jrpc_respond_inv_params(peer, id, "`unix' address schema doesn't support ports");
+		return bbdd_util_ssk_jrpc_respond_inv_params(peer, id, "`unix' address schema doesn't support ports");
 
 	rc = bbdd_d_bfdd_connect_unix(d, peer, id, addr, &error);
 	if (rc < 0)
-		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
+		return bbdd_util_ssk_jrpc_respond_interr_err(peer, id, &error);
 
 	/* Response for successful cases is handled asynchronously. */
 }
@@ -2591,9 +2618,9 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 		bbdd_d_handle_session_stats_diag(d, peer, params_obj, id);
 	else if (strcmp(method, "session-stats") == 0)
 		bbdd_d_handle_session_stats(d, peer, params_obj, id);
-	/* xxx
 	else if (strcmp(method, "bfdd-connect") == 0)
-		bbdd_d_handle_bfdd_connect(d, peer, d->pctx, params_obj, id);
+		bbdd_d_handle_bfdd_connect(d, peer, params_obj, id);
+	/* xxx
 	else if (strcmp(method, "bfdd-connected") == 0)
 		bbdd_d_handle_bfdd_connected(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "bfdd-disconnect") == 0)

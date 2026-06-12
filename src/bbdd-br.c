@@ -642,7 +642,11 @@ mon_fini:
 nl_destroy:
 	bbdd_nl_destroy(br.nl);
 out:
-	return err != 0 ? bbdd_ec_failure : bbdd_ec_success;
+	if (err != 0) {
+		bbdd_err_print(&error, "bridge start");
+		return bbdd_ec_failure;
+	}
+	return bbdd_ec_success;
 }
 
 static void bbdd_br_start_help(void)

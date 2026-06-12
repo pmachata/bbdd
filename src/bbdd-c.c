@@ -205,7 +205,8 @@ static int __bbdd_c_ctl_recv_obj(struct json_object *response,
 	if (bbdd_c_result_show_json(result))
 		goto put_result;
 
-	rc = cb(result, cb_data, error);
+	if (cb != NULL)
+		rc = cb(result, cb_data, error);
 
 put_result:
 	json_object_put(result);
@@ -2140,59 +2141,37 @@ struct bbdd_ec bbdd_c_session(int argc, char **argv,
 				   topics);
 }
 
-static struct bbdd_ec bbdd_c_bfdd_connect_jrpc(const char *proto,
-					       const char *addr,
-					       const char *port)
+static struct bbdd_ec
+bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
+			 const struct bbdd_mon_topics *topics)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *params_obj;
-	struct json_object *response;
 	struct json_object *request;
-	struct json_object *result;
 	const int id = 1;
-	int err;
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connect");
 	if (request == NULL)
 		return bbdd_ec_failure;
 
 	params_obj = json_object_new_object();
-	if (params_obj == NULL) {
-		err = bbdd_c_enomem();
+	if (params_obj == NULL)
 		goto put_request;
-	}
 
 	if (bbdd_jrpc_append_str(params_obj, "proto", proto) ||
 	    bbdd_jrpc_append_str(params_obj, "addr", addr) ||
 	    (port != NULL &&
 	     bbdd_jrpc_append_str(params_obj, "port", port)) ||
-	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
-		err = bbdd_c_enomem();
+	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
-	}
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
-		goto put_request;
-	}
+	ec = bbdd_c_interact(&request, NULL, NULL, json_type_null, topics);
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		err = -1;
-		goto put_response;
-	}
-
-	bbdd_c_result_show_json(result);
-	err = 0;
-
-	json_object_put(result);
-put_response:
-	json_object_put(response);
 put_params_obj:
 	json_object_put(params_obj);
 put_request:
 	json_object_put(request);
-	return err != 0 ? bbdd_ec_failure : bbdd_ec_success;
+	return ec;
 }
 
 static void bbdd_c_bfdd_connect_help(void)
@@ -2205,7 +2184,8 @@ static void bbdd_c_bfdd_connect_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv,
+					  const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	const char *proto;
@@ -2232,7 +2212,7 @@ static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv)
 		goto out;
 	}
 
-	ec = bbdd_c_bfdd_connect_jrpc(proto, addr, port);
+	ec = bbdd_c_bfdd_connect_jrpc(proto, addr, port, topics);
 
 out:
 	free(copy);
@@ -2374,7 +2354,7 @@ struct bbdd_ec bbdd_c_bfdd(int argc, char **argv,
 		return bbdd_ec_failure;
 	} else if (strcmp(*argv, "connect") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd_connect(argc, argv);
+		return bbdd_c_bfdd_connect(argc, argv, topics);
 	} else if (strcmp(*argv, "connected") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd_connected(argc, argv);
