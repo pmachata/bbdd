@@ -80,6 +80,9 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 				      struct bbdd_poll_ctx *pctx,
 				      struct json_object *id);
+void bbdd_util_ssk_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
+					      struct bbdd_poll_ctx *pctx,
+					      struct json_object *id);
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 				 struct bbdd_poll_ctx *pctx,

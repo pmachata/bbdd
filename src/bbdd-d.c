@@ -2575,7 +2575,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 		return bbdd_util_ssk_jrpc_respond_interr_err(peer, pctx,
 							     id, &error);
 
-	bbdd_util_ssk_jrpc_respond_empty(peer, pctx, id);
+	bbdd_util_ssk_jrpc_respond_empty_no_done(peer, pctx, id);
 }
 
 static void bbdd_d_handle_unhandled(struct bbdd_ssk_peer *peer,
@@ -2622,10 +2622,10 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 		bbdd_d_handle_bfdd_disconnect(d, peer, d->pctx, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
 		bbdd_bfdd_echo_handle_start(d->bfdd, peer, d->pctx, id, true);
+	*/
 	else if (strcmp(method, "monitor-subscribe") == 0)
 		bbdd_d_handle_monitor_subscribe(d->mon, peer, d->pctx,
 						params_obj, id);
-	*/
 	else
 		bbdd_d_handle_unhandled(peer, d->pctx, method, id);
 }

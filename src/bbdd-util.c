@@ -249,9 +249,10 @@ put_obj:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
-void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
-				      struct bbdd_poll_ctx *pctx,
-				      struct json_object *id)
+static void __bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
+					       struct bbdd_poll_ctx *pctx,
+					       struct json_object *id,
+					       bool keep_open)
 {
 	struct json_object *obj;
 	char *error;
@@ -264,7 +265,11 @@ void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 	if (json_object_object_add(obj, "result", NULL))
 		goto put_obj;
 
-	rc = bbdd_util_ssk_jrpc_send_done(peer, pctx, obj, &error);
+	if (keep_open)
+		rc = bbdd_util_ssk_jrpc_send(peer, pctx, obj, &error);
+	else
+		rc = bbdd_util_ssk_jrpc_send_done(peer, pctx, obj, &error);
+
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send empty response");
 
@@ -274,6 +279,20 @@ void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 put_obj:
 	json_object_put(obj);
 	bbdd_util_ssk_jrpc_respond_memerr(peer, pctx, id);
+}
+
+void bbdd_util_ssk_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
+				      struct bbdd_poll_ctx *pctx,
+				      struct json_object *id)
+{
+	__bbdd_util_ssk_jrpc_respond_empty(peer, pctx, id, false);
+}
+
+void bbdd_util_ssk_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
+					      struct bbdd_poll_ctx *pctx,
+					      struct json_object *id)
+{
+	__bbdd_util_ssk_jrpc_respond_empty(peer, pctx, id, true);
 }
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
