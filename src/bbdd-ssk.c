@@ -41,7 +41,6 @@ static struct bbdd_poll_ctx *bbdd_ssk_peer_pctx(struct bbdd_ssk_peer *peer)
 }
 
 static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
-			    struct bbdd_poll_ctx *pctx,
 			    char **error)
 {
 	struct bbdd_ssk_cbs *cbs, *tmp;
@@ -68,8 +67,8 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 
 		DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
 			if (cbs->rx_cb != NULL) {
-				rc = cbs->rx_cb(peer, pctx, buffer, len,
-						cbs->data, error);
+				rc = cbs->rx_cb(peer, buffer, len, cbs->data,
+						error);
 				if (rc != 0)
 					return rc;
 			}

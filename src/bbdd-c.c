@@ -223,14 +223,12 @@ static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
 }
 
 static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
-				     struct bbdd_poll_ctx *pctx,
 				     const char *buf, size_t len,
 				     void *data, char **error)
 {
 	struct bbdd_c *c = data;
 
-	return bbdd_util_ssk_json_tkn_rx_cb(peer, pctx, buf, len, c->tkn,
-					    error);
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, buf, len, c->tkn, error);
 }
 
 static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
@@ -3215,14 +3213,12 @@ err:
 }
 
 static int bbdd_c_ssk_monitor_jrpc_rx_cb(struct bbdd_ssk_peer *peer,
-					 struct bbdd_poll_ctx *pctx,
 					 const char *buf, size_t len,
 					 void *data, char **error)
 {
 	struct bbdd_c_monitor_ctx *mctx = data;
 
-	return bbdd_util_ssk_json_tkn_rx_cb(peer, pctx, buf, len, mctx->tkn,
-					    error);
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, buf, len, mctx->tkn, error);
 }
 
 static void bbdd_c_ssk_monitor_jrpc_done_cb(struct bbdd_ssk_peer *, void *data)

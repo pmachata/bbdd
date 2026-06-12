@@ -553,7 +553,6 @@ void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn)
 }
 
 int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
-				 struct bbdd_poll_ctx *,
 				 const char *buf, size_t len,
 				 void *data, char **error)
 {
