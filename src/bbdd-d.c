@@ -2820,7 +2820,7 @@ err:
 	return rc;
 }
 
-static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
+static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 {
 	struct bbdd_d d = {};
 	const struct bbdd_bpf_cbs bpf_cbs = {
@@ -2832,7 +2832,6 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	};
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
-	bool failed = true;
 	char *error;
 	int rc = -ENOMEM;
 
@@ -2871,8 +2870,10 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 
 	d.bpf = bbdd_bpf_create(&bpf_cbs, d.pctx, d.nl, veth_rx_ifindex,
 				veth_tx_ifindex, d.mon, &error);
-	if (d.bpf == NULL)
+	if (d.bpf == NULL) {
+		rc = -1;
 		goto fini_veth;
+	}
 
 	rc = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
 	if (rc != 0)
@@ -2888,12 +2889,7 @@ static int bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		goto sock_close_d;
 
 	rc = bbdd_poll_loop(d.pctx, &error);
-	if (rc != 0)
-		goto cleanup;
 
-	failed = false;
-
-cleanup:
 	bbdd_mon_send_monitor_end(d.mon);
 
 	if (d.bfdd != NULL)
@@ -2917,21 +2913,24 @@ nl_destroy:
 closelog:
 	closelog();
 
-	if (failed)
+	if (rc != 0) {
 		bbdd_err_print(&error, "Error");
-	return rc;
+		return bbdd_ec_failure;
+	}
+	return bbdd_ec_success;
 }
 
-int bbdd_d_start(int argc, char **argv, const struct bbdd_mon_topics *topics)
+struct bbdd_ec bbdd_d_start(int argc, char **argv,
+			    const struct bbdd_mon_topics *topics)
 {
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		fprintf(stderr, "Usage: bbdd start\n");
-		return 0;
+		return bbdd_ec_success;
 	}
 
 	if (argc > 0) {
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	return bbdd_d_do_start(*topics);

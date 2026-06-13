@@ -209,8 +209,9 @@ static void bbdd_c_echo_help(void)
 	);
 }
 
-static int bbdd_c_echo_jrpc(const char *method)
+static struct bbdd_ec bbdd_c_echo_jrpc(const char *method)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	enum {
 		pol_ts,
 		pol_reply_ts,
@@ -231,13 +232,12 @@ static int bbdd_c_echo_jrpc(const char *method)
 	uint64_t reply_ts_us;
 	uint64_t ts_us;
 	const int id = 1;
-	int err = -1;
 	char *error;
 	int rc;
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL)
-		return -1;
+		goto out;
 
 	params = json_object_new_object();
 	if (params == NULL)
@@ -258,10 +258,8 @@ static int bbdd_c_echo_jrpc(const char *method)
 					    &result))
 		goto put_response;
 
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
+	if (bbdd_c_result_show_json(result))
+		goto done;
 
 	rc = bbdd_jrpc_dissect(result, policy, seen, values,
 			       ARRAY_SIZE(policy), &error);
@@ -280,7 +278,7 @@ static int bbdd_c_echo_jrpc(const char *method)
 	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
 
 done:
-	err = 0;
+	ec = bbdd_ec_success;
 put_result:
 	json_object_put(result);
 put_response:
@@ -289,16 +287,17 @@ put_params:
 	json_object_put(params);
 put_request:
 	json_object_put(request);
-	return err;
+out:
+	return ec;
 }
 
-int bbdd_c_echo(int argc, char **argv)
+struct bbdd_ec bbdd_c_echo(int argc, char **argv)
 {
 	int err;
 
 	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_echo_help);
 	if (err != 0)
-		return err;
+		return bbdd_ec_failure;
 
 	return bbdd_c_echo_jrpc("echo");
 }
@@ -311,55 +310,50 @@ static void bbdd_c_stop_help(void)
 	);
 }
 
-static int bbdd_c_stop_jrpc(void)
+static struct bbdd_ec bbdd_c_stop_jrpc(void)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
 	const int id = 1;
-	int err;
 
 	request = bbdd_jrpc_new_request(id, "stop");
 	if (request == NULL)
-		return -1;
+		goto out;
 
 	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
+	if (response == NULL)
 		goto put_request;
-	}
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		err = -1;
+					    &result))
 		goto put_response;
-	}
 
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
+	if (bbdd_c_result_show_json(result))
+		goto done;
 
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "bbdd will stop\n");
-	err = 0;
 
-put_result:
+done:
+	ec = bbdd_ec_success;
 	json_object_put(result);
 put_response:
 	json_object_put(response);
 put_request:
 	json_object_put(request);
-	return err;
+out:
+	return ec;
 }
 
-int bbdd_c_stop(int argc, char **argv)
+struct bbdd_ec bbdd_c_stop(int argc, char **argv)
 {
 	int err;
 
 	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_stop_help);
 	if (err != 0)
-		return err;
+		return bbdd_ec_failure;
 
 	return bbdd_c_stop_jrpc();
 }
@@ -401,8 +395,9 @@ put_result:
 	return 0;
 }
 
-static int bbdd_c_global_stats_get_jrpc(void)
+static struct bbdd_ec bbdd_c_global_stats_get_jrpc(void)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
 	struct json_object *request;
 	const int id = 1;
@@ -410,21 +405,24 @@ static int bbdd_c_global_stats_get_jrpc(void)
 
 	request = bbdd_jrpc_new_request(id, "global-stats-diag");
 	if (request == NULL)
-		return -1;
+		goto out;
 
 	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
+	if (response == NULL)
 		goto put_request;
-	}
 
 	err = bbdd_c_global_stats_get_jrpc_result(response, id);
+	if (err != 0)
+		goto put_response;
+
+	ec = bbdd_ec_success;
+put_response:
 	json_object_put(response);
 put_request:
 	json_object_put(request);
-	return err;
+out:
+	return ec;
 }
-
 
 static int bbdd_c_session_act_jrpc_result(struct json_object *response,
 					  const char *method,
@@ -1314,7 +1312,7 @@ incomplete_command:
 	return -1;
 }
 
-int bbdd_c_global(int argc, char **argv)
+struct bbdd_ec bbdd_c_global(int argc, char **argv)
 {
 	struct bbdd_flag diag = {};
 	bool seen_stats = false;
@@ -1324,34 +1322,36 @@ int bbdd_c_global(int argc, char **argv)
 		if (strcmp(*argv, "stats") == 0) {
 			if (seen_stats) {
 				fprintf(stderr, "Duplicate `stats'.\n");
-				return -1;
+				return bbdd_ec_failure;
 			}
 			NEXT_ARG_FWD();
 			seen_stats = true;
 			continue;
 		} else if (strcmp(*argv, "help") == 0) {
 			bbdd_c_global_stats_help();
-			return 0;
+			return bbdd_ec_success;
 		}
 
 		if ((rc = bbdd_c_parse_kw_flag(&argc, &argv, "diag", &diag))) {
 			if (rc > 0)
 				continue;
-			return rc;
+			if (rc != 0)
+				return bbdd_ec_failure;
+			return bbdd_ec_success;
 		}
 
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	if (!seen_stats) {
 		fprintf(stderr, "No command given.\n");
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	if (!diag.seen || !diag.value) {
 		fprintf(stderr, "Only `diag' stats are currently supported.\n");
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	return bbdd_c_global_stats_get_jrpc();
@@ -1787,12 +1787,14 @@ err:
 	return NULL;
 }
 
-static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
-			       const struct bbdd_c_session *select,
-			       const struct bbdd_c_session *change,
-			       struct bbdd_flag bulk,
-			       struct bbdd_flag diag)
+static struct bbdd_ec
+bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
+		    const struct bbdd_c_session *select,
+		    const struct bbdd_c_session *change,
+		    struct bbdd_flag bulk,
+		    struct bbdd_flag diag)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *select_obj = NULL;
 	struct json_object *change_obj = NULL;
 	struct json_object *params_obj;
@@ -1805,15 +1807,13 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	if (command->allow_query) {
 		select_obj = bbdd_c_jrpc_session_obj(select);
 		if (select_obj == NULL)
-			return -1;
+			return ec;
 	}
 
 	if (command->allow_change) {
 		change_obj = bbdd_c_jrpc_session_obj(change);
-		if (change_obj == NULL) {
-			err = -ENOMEM;
+		if (change_obj == NULL)
 			goto put_select;
-		}
 	}
 
 	if (diag.seen && diag.value)
@@ -1824,16 +1824,12 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	assert(method != NULL);
 
 	request = bbdd_jrpc_new_request(id, method);
-	if (request == NULL) {
-		err = -1;
+	if (request == NULL)
 		goto put_select_change;
-	}
 
 	params_obj = json_object_new_object();
-	if (params_obj == NULL) {
-		err = bbdd_c_enomem();
+	if (params_obj == NULL)
 		goto put_request;
-	}
 
 	if ((select_obj != NULL &&
 	     bbdd_jrpc_append_obj(params_obj, "select", &select_obj)) ||
@@ -1841,22 +1837,18 @@ static int bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	     bbdd_jrpc_append_obj(params_obj, "change", &change_obj)) ||
 	    (bulk.seen && bulk.value &&
 	     bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) ||
-	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
-		err = bbdd_c_enomem();
+	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
-	}
 
 	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
+	if (response == NULL)
 		goto put_request;
-	}
 
 	err = command->show(response, method, id);
 	if (err)
 		goto put_response;
 
-	err = 0;
+	ec = bbdd_ec_success;
 
 put_response:
 	json_object_put(response);
@@ -1868,7 +1860,7 @@ put_select_change:
 	json_object_put(change_obj);
 put_select:
 	json_object_put(select_obj);
-	return err;
+	return ec;
 }
 
 static void
@@ -1892,7 +1884,7 @@ static int bbdd_c_session_check_params(struct bbdd_c_session *csess)
 	return 0;
 }
 
-int bbdd_c_session(int argc, char **argv)
+struct bbdd_ec bbdd_c_session(int argc, char **argv)
 {
 	struct bbdd_c_session select = {};
 	struct bbdd_c_session change = {};
@@ -1913,7 +1905,7 @@ int bbdd_c_session(int argc, char **argv)
 			if (command != NULL) {
 				fprintf(stderr, "`%s' seen when a command `%s' was already given\n",
 					*argv, command->name);
-				return -1;
+				return bbdd_ec_failure;
 			}
 
 			command = command2;
@@ -1922,7 +1914,7 @@ int bbdd_c_session(int argc, char **argv)
 			if (!command->allow_query && seen_arg) {
 				fprintf(stderr, "`%s' used with session query parameters\n",
 					command->name);
-				return -1;
+				return bbdd_ec_failure;
 			}
 
 			if (command->allow_change)
@@ -1939,13 +1931,13 @@ int bbdd_c_session(int argc, char **argv)
 
 		if (strcmp(*argv, "help") == 0) {
 			bbdd_c_session_help();
-			return 0;
+			return bbdd_ec_success;
 		}
 
 		if (csess == NULL) {
 			fprintf(stderr, "`%s' used with session change parameters\n",
 				command->name);
-			return -1;
+			return bbdd_ec_failure;
 		}
 
 		seen_arg = true;
@@ -1998,49 +1990,51 @@ int bbdd_c_session(int argc, char **argv)
 		     (rc = bbdd_c_parse_kw_flag(&argc, &argv, "diag", &diag)))) {
 			if (rc > 0)
 				continue;
-			return rc;
+			if (rc != 0)
+				return bbdd_ec_failure;
+			return bbdd_ec_success;
 		}
 
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	if (command == NULL) {
 		fprintf(stderr, "No command given.\n");
-		return -1;
+		return bbdd_ec_failure;
 	}
 	if (bulk.seen && !command->allow_bulk) {
 		fprintf(stderr, "`bulk' not supported for `%s'.\n",
 			command->name);
-		return -1;
+		return bbdd_ec_failure;
 	}
 	if (diag.seen && !command->allow_diag) {
 		fprintf(stderr, "`diag' not supported for `%s'.\n",
 			command->name);
-		return -1;
+		return bbdd_ec_failure;
 	}
 
 	if (bbdd_c_session_check_params(&select) < 0 ||
 	    bbdd_c_session_check_params(&change) < 0)
-		return -1;
+		return bbdd_ec_failure;
 
 	return bbdd_c_session_jrpc(command, &select, &change, bulk, diag);
 }
 
-static int bbdd_c_bfdd_connect_jrpc(const char *proto,
-				    const char *addr,
-				    const char *port)
+static struct bbdd_ec bbdd_c_bfdd_connect_jrpc(const char *proto,
+					       const char *addr,
+					       const char *port)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *params_obj;
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
 	const int id = 1;
-	int err;
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connect");
 	if (request == NULL)
-		return -1;
+		return bbdd_ec_failure;
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL)
@@ -2050,25 +2044,19 @@ static int bbdd_c_bfdd_connect_jrpc(const char *proto,
 	    bbdd_jrpc_append_str(params_obj, "addr", addr) ||
 	    (port != NULL &&
 	     bbdd_jrpc_append_str(params_obj, "port", port)) ||
-	    bbdd_jrpc_append_obj(request, "params", &params_obj)) {
-		err = bbdd_c_enomem();
+	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
-	}
 
 	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
+	if (response == NULL)
 		goto put_request;
-	}
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		err = -1;
+					    &result))
 		goto put_response;
-	}
 
 	bbdd_c_result_show_json(result);
-	err = 0;
+	ec = bbdd_ec_success;
 
 	json_object_put(result);
 put_response:
@@ -2077,7 +2065,7 @@ put_params_obj:
 	json_object_put(params_obj);
 put_request:
 	json_object_put(request);
-	return err;
+	return ec;
 }
 
 static void bbdd_c_bfdd_connect_help(void)
@@ -2090,8 +2078,9 @@ static void bbdd_c_bfdd_connect_help(void)
 	);
 }
 
-static int bbdd_c_bfdd_connect(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	const char *proto;
 	const char *addr;
 	const char *port;
@@ -2104,7 +2093,7 @@ static int bbdd_c_bfdd_connect(int argc, char **argv)
 		arg = BBDD_BFDD_DEFAULT_ADDR;
 	} else if (strcmp(*argv, "help") == 0) {
 		bbdd_c_bfdd_connect_help();
-		return 0;
+		return bbdd_ec_success;
 	} else {
 		arg = *argv;
 	}
@@ -2116,112 +2105,107 @@ static int bbdd_c_bfdd_connect(int argc, char **argv)
 		goto out;
 	}
 
-	rc = bbdd_c_bfdd_connect_jrpc(proto, addr, port);
+	ec = bbdd_c_bfdd_connect_jrpc(proto, addr, port);
 
 out:
 	free(copy);
-	return rc;
+	return ec;
 }
 
-static int bbdd_c_bfdd_disconnect(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_disconnect(int argc, char **argv)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
 	const int id = 1;
-	int err;
 
 	if (argc > 0) {
 		fprintf(stderr, "Usage: bbdd bfdd disconnect\n\n");
 		if (strcmp(*argv, "help") == 0)
-			return 0;
-		else
-			return -1;
+			return bbdd_ec_success;
+		goto out;
 	}
 
 	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
 	if (request == NULL)
-		return -1;
+		goto out;
 
 	response = bbdd_c_send_request(request);
-	if (response == NULL) {
-		err = -1;
+	if (response == NULL)
 		goto put_request;
-	}
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		err = -1;
+					    &result))
 		goto put_response;
-	}
 
 	bbdd_c_result_show_json(result);
-	err = 0;
+	ec = bbdd_ec_success;
 
 	json_object_put(result);
 put_request:
 	json_object_put(request);
 put_response:
 	json_object_put(response);
-	return err;
+out:
+	return ec;
 }
 
-static int bbdd_c_bfdd_connected(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_connected(int argc, char **argv)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
 	struct json_object *request;
 	struct json_object *result;
 	bool connected;
 	const int id = 1;
-	int err;
 
 	if (argc > 0) {
 		fprintf(stderr, "Usage: bbdd bfdd connected\n\n");
 		if (strcmp(*argv, "help") == 0)
-			return 0;
-		else
-			return -1;
+			return bbdd_ec_success;
+		goto out;
 	}
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connected");
 	if (request == NULL)
-		return -1;
+		goto out;
 
 	response = bbdd_c_send_request(request);
 	if (response == NULL)
 		goto put_request;
 
 	if (!bbdd_c_response_extract_result(response, id, json_type_boolean,
-					    &result)) {
-		err = -1;
+					    &result))
 		goto put_response;
-	}
 
 	connected = json_object_get_boolean(result);
-	err = connected ? 0 : 1;
+	if (connected)
+		ec = bbdd_ec_success;
 
 	if (bbdd_c_result_show_json(result))
-		goto out;
+		goto done;
 	if (bbdd_env.verbosity > 0)
 		printf("connected: %s\n", connected ? "yes" : "no");
 
-out:
+done:
 	json_object_put(result);
 put_response:
 	json_object_put(response);
 put_request:
 	json_object_put(request);
-	return err;
+out:
+	return ec;
 }
 
-static int bbdd_c_bfdd_echo(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_echo(int argc, char **argv)
 {
 	int err;
 
 	err = bbdd_c_cmd_noargs(argc, argv, NULL);
 	if (err != 0) {
 		fprintf(stderr, "Usage: bbdd bfdd echo\n\n");
-		return err;
+		return bbdd_ec_failure;
 	}
 
 	return bbdd_c_echo_jrpc("bfdd-echo");
@@ -2235,23 +2219,24 @@ static void bbdd_c_bfdd_help(void)
 	);
 }
 
-int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics)
+struct bbdd_ec bbdd_c_bfdd(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics)
 {
 	if (!argc || strcmp(*argv, "help") == 0) {
 		bbdd_c_bfdd_help();
-		return 0;
+		return bbdd_ec_success;
 	} else if (strcmp(*argv, "bridge") == 0) {
 		NEXT_ARG_FWD();
 		if (!argc || strcmp(*argv, "help") == 0) {
 			fprintf(stderr,
 				"Usage: bbdd bfdd bridge { start | help }\n\n");
-			return 0;
+			return bbdd_ec_success;
 		} else if (strcmp(*argv, "start") == 0) {
 			NEXT_ARG_FWD();
 			return bbdd_br_start(argc, argv, topics);
 		}
 		fprintf(stderr, "What is \"%s\"?\n", *argv);
-		return -1;
+		return bbdd_ec_failure;
 	} else if (strcmp(*argv, "connect") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd_connect(argc, argv);
@@ -2267,7 +2252,7 @@ int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 	}
 
 	fprintf(stderr, "What is \"%s\"?\n", *argv);
-	return -1;
+	return bbdd_ec_failure;
 }
 
 static void bbdd_c_monitor_help(void)
@@ -3082,9 +3067,11 @@ put_request:
 	return NULL;
 }
 
-static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
-			       struct bbdd_mon_topics remote_topics)
+static struct bbdd_ec
+bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
+		    struct bbdd_mon_topics remote_topics)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct bbdd_c_monitor_ctx mctx = {};
 	struct bbdd_poll_ctx *pctx;
 	struct json_object *response;
@@ -3151,6 +3138,7 @@ static int bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	if (err)
 		goto unset_fd;
 
+	ec = bbdd_ec_success;
 unset_fd:
 	bbdd_poll_unset_fd(pctx, mctx.cli.fd);
 unset_signals:
@@ -3166,9 +3154,11 @@ put_request:
 close_cli:
 	bbdd_sock_close_c(&mctx.cli);
 err:
-	if (err != 0)
+	if (err != 0) {
 		bbdd_err_print(&error, "Monitor error");
-	return err;
+		return bbdd_ec_failure;
+	}
+	return ec;
 }
 
 static void bbdd_c_monitor_enable_all(struct bbdd_mon_topics *topics)
@@ -3242,18 +3232,18 @@ void bbdd_c_monitor_dispatch(struct json_object *msg, void *)
 	bbdd_c_monitor_handle_notif(method, params);
 }
 
-int bbdd_c_monitor(int argc, char **argv,
-		   const struct bbdd_mon_topics *int_topics)
+struct bbdd_ec bbdd_c_monitor(int argc, char **argv,
+			      const struct bbdd_mon_topics *int_topics)
 {
 	struct bbdd_mon_topics topics = {};
 
 	if (argc > 0 && strcmp(*argv, "help") == 0) {
 		bbdd_c_monitor_help();
-		return 0;
+		return bbdd_ec_success;
 	}
 
 	if (bbdd_c_monitor_parse_topics(argc, argv, &topics) < 0)
-		return -1;
+		return bbdd_ec_failure;
 
 	return bbdd_c_monitor_jrpc(int_topics, topics);
 }

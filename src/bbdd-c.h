@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <json-c/json_object.h>
 
+#include "bbdd.h"
 #include "bbdd-sess.h"
 
 #include "bbdd-mon.i"
@@ -45,13 +46,15 @@ struct bbdd_c_session {
 	struct bbdd_c_session_vrf vrf;
 };
 
-int bbdd_c_stop(int argc, char **argv);
-int bbdd_c_echo(int argc, char **argv);
-int bbdd_c_session(int argc, char **argv);
-int bbdd_c_global(int argc, char **argv);
-int bbdd_c_bfdd(int argc, char **argv, const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_c_stop(int argc, char **argv);
+struct bbdd_ec bbdd_c_echo(int argc, char **argv);
+struct bbdd_ec bbdd_c_session(int argc, char **argv);
+struct bbdd_ec bbdd_c_global(int argc, char **argv);
+struct bbdd_ec bbdd_c_bfdd(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_c_monitor(int argc, char **argv,
+			      const struct bbdd_mon_topics *topics);
 
-int bbdd_c_monitor(int argc, char **argv, const struct bbdd_mon_topics *topics);
 void bbdd_c_monitor_dispatch(struct json_object *msg, void *data);
 
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
