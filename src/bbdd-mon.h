@@ -21,7 +21,6 @@
 
 #define BBDD_MON_ENUM(NAME, ALL) BBDD_MON_TOPIC_ ## NAME,
 enum bbdd_mon_topic {
-	BBDD_MON_TOPIC_monitor,
 	BBDD_MON_TOPICS(BBDD_MON_ENUM)
 	bbdd_mon_ntopics
 };
@@ -59,5 +58,3 @@ void bbdd_mon_send_debug(struct bbdd_mon *mon, const char *fmt, ...);
 
 __attribute__((format(printf, 3, 4)))
 void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...);
-
-void bbdd_mon_send_monitor_end(struct bbdd_mon *mon);

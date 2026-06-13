@@ -2978,8 +2978,6 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		goto cleanup;
 
 cleanup:
-	bbdd_mon_send_monitor_end(d.mon);
-
 	if (d.bfdd != NULL)
 		bbdd_bfdd_close(d.bfdd);
 

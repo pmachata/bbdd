@@ -102,7 +102,6 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
 {
 	struct bbdd_mon_cli *cli;
 
-	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL) {
 		bbdd_err_app(error, "Failed to subscribe to monitor");
@@ -138,7 +137,6 @@ int bbdd_mon_subscribe_ssk(struct bbdd_mon *mon,
 	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_mon_cli *cli;
 
-	topics.enabled[BBDD_MON_TOPIC_monitor] = true;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL) {
 		bbdd_err_app(error, "Failed to subscribe to monitor");
@@ -165,7 +163,6 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 {
 	struct bbdd_mon_cli *cli;
 
-	topics.enabled[BBDD_MON_TOPIC_monitor] = false;
 	cli = bbdd_mon_alloc_client(mon, topics, error);
 	if (cli == NULL) {
 		bbdd_err_app(error, "Failed to subscribe to monitor");
@@ -340,9 +337,4 @@ out:
 	free(str);
 	free(*error);
 	*error = NULL;
-}
-
-void bbdd_mon_send_monitor_end(struct bbdd_mon *mon)
-{
-	bbdd_mon_send_str(mon, BBDD_MON_TOPIC_monitor, "monitor-end", NULL);
 }

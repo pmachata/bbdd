@@ -315,8 +315,6 @@ bbdd_c_interact(struct json_object **request,
 
 	rc = bbdd_poll_loop(c.pctx, &error);
 
-	bbdd_mon_send_monitor_end(c.mon);
-
 unset_signals:
 	bbdd_poll_unset_signals(c.pctx);
 ssk_close_ctl:
@@ -3064,10 +3062,9 @@ struct bbdd_c_monitor_ctx {
 };
 
 static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
-				  struct json_object *notif_obj, void *data,
+				  struct json_object *notif_obj, void *,
 				  char **)
 {
-	struct bbdd_c_monitor_ctx *mctx = data;
 	struct json_object *params;
 	const char *method;
 	char *error;
@@ -3079,10 +3076,7 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
 		return 0;
 	}
 
-	if (strcmp(method, "monitor-end") == 0)
-		bbdd_poll_request_quit(mctx->pctx);
-	else
-		bbdd_c_monitor_handle_notif(method, params);
+	bbdd_c_monitor_handle_notif(method, params);
 	return 0;
 }
 
@@ -3248,8 +3242,6 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto unset_signals;
 
 	rc = bbdd_poll_loop(mctx.pctx, &error);
-
-	bbdd_mon_send_monitor_end(mctx.mon);
 
 unset_signals:
 	bbdd_poll_unset_signals(mctx.pctx);
