@@ -14,7 +14,6 @@
 #include "bbdd-util.h"
 
 enum bbdd_mon_cli_kind {
-	BBDD_MON_CLI_KIND_SOCK,
 	BBDD_MON_CLI_KIND_SSK,
 	BBDD_MON_CLI_KIND_CB,
 };
@@ -97,22 +96,6 @@ bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
 	return cli;
 }
 
-int bbdd_mon_subscribe(struct bbdd_mon *mon, const struct bbdd_sock *sock,
-		       struct bbdd_mon_topics topics, char **error)
-{
-	struct bbdd_mon_cli *cli;
-
-	cli = bbdd_mon_alloc_client(mon, topics, error);
-	if (cli == NULL) {
-		bbdd_err_app(error, "Failed to subscribe to monitor");
-		return -1;
-	}
-
-	cli->kind = BBDD_MON_CLI_KIND_SOCK;
-	cli->sock = *sock;
-	return 0;
-}
-
 static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
 {
 	for (int i = 0; i < bbdd_mon_ntopics; i++)
@@ -191,11 +174,6 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 			continue;
 
 		switch (cli->kind) {
-		case BBDD_MON_CLI_KIND_SOCK:
-			if (bbdd_util_jrpc_send(&cli->sock, msg, NULL) != 0)
-				bbdd_mon_unsubscribe(mon, cli);
-			break;
-
 		case BBDD_MON_CLI_KIND_SSK:
 			if (bbdd_util_ssk_jrpc_send(cli->peer, msg, NULL) != 0)
 				bbdd_mon_unsubscribe(mon, cli);
