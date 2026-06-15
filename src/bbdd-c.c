@@ -74,45 +74,75 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 		fprintf(stderr, "Error %" PRId64 ": %s\n", code, message);
 }
 
+enum bbdd_c_result_rc {
+	bbdd_c_result_rc_fail = -1,
+	bbdd_c_result_rc_ok = 0,
+	bbdd_c_result_rc_ok_error = 1,
+};
+
+static enum bbdd_c_result_rc
+__bbdd_c_response_extract_result(struct json_object *j,
+				 int expect_id,
+				 enum json_type result_type,
+				 struct json_object **ret_result,
+				 char **error)
+{
+	struct json_object *result;
+	struct json_object *id;
+	bool is_error;
+	int err;
+
+	err = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, error);
+	if (err != 0) {
+		bbdd_err_app(error, "Invalid response object");
+		return bbdd_c_result_rc_fail;
+	}
+
+	if (!bbdd_c_validate_id(id, expect_id)) {
+		bbdd_err_fmt(error, "Unknown response ID: %s",
+			     json_object_to_json_string(id));
+		return bbdd_c_result_rc_fail;
+	}
+
+	if (is_error) {
+		bbdd_c_response_handle_error(result);
+		return bbdd_c_result_rc_ok_error;
+	}
+
+	*ret_result = json_object_get(result);
+
+	if (json_object_get_type(result) != result_type) {
+		bbdd_err_fmt(error, "Unexpected result type: %s expected, got %s",
+			     json_type_to_name(result_type),
+			     json_type_to_name(json_object_get_type(result)));
+		return bbdd_c_result_rc_fail;
+	}
+
+	return bbdd_c_result_rc_ok;
+}
+
 static bool bbdd_c_response_extract_result(struct json_object *j,
 					   int expect_id,
 					   enum json_type result_type,
 					   struct json_object **ret_result)
 {
-	struct json_object *result;
-	struct json_object *id;
-	bool is_error;
+	enum bbdd_c_result_rc rc;
 	char *error;
-	int err;
 
-	err = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, &error);
-	if (err) {
-		bbdd_err_print(&error, "Invalid response object");
-		return false;
-	}
-
-	if (!bbdd_c_validate_id(id, expect_id)) {
-		bbdd_err_fmt(&error, "Unknown response ID: %s",
-			     json_object_to_json_string(id));
+	rc = __bbdd_c_response_extract_result(j, expect_id, result_type,
+					      ret_result, &error);
+	switch (rc) {
+	case bbdd_c_result_rc_fail:
 		bbdd_err_print(&error, NULL);
 		return false;
-	}
-
-	if (is_error) {
-		bbdd_c_response_handle_error(result);
+	case bbdd_c_result_rc_ok_error:
 		return false;
+	case bbdd_c_result_rc_ok:
+		return true;
 	}
 
-	if (json_object_get_type(result) != result_type) {
-		bbdd_err_fmt(&error, "Unexpected result type: %s expected, got %s",
-			     json_type_to_name(result_type),
-			     json_type_to_name(json_object_get_type(result)));
-		bbdd_err_print(&error, NULL);
-		return false;
-	}
-
-	*ret_result = json_object_get(result);
-	return true;
+	assert(!"extract_result");
+	__builtin_unreachable();
 }
 
 static void __bbdd_c_result_show_json(struct json_object *result)
