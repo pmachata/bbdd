@@ -2482,7 +2482,7 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 		return bbdd_util_jrpc_respond_memerr(peer, id);
 	}
 
-	bbdd_util_jrpc_respond(peer, obj);
+	bbdd_util_jrpc_respond(peer, &obj);
 }
 
 static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
@@ -2571,7 +2571,7 @@ static void bbdd_d_handle_unhandled(struct bbdd_ssk_peer *peer,
 				    const char *method,
 				    struct json_object *id)
 {
-	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
+	bbdd_util_jrpc_respond_method_nf(peer, id, method);
 }
 
 static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,

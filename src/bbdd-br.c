@@ -373,7 +373,7 @@ static void bbdd_br_handle_unhandled(struct bbdd_ssk_peer *peer,
 				     const char *method,
 				     struct json_object *id)
 {
-	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
+	bbdd_util_jrpc_respond_method_nf(peer, id, method);
 }
 
 static void bbdd_br_handle_method(struct bbdd_ssk_peer *peer,

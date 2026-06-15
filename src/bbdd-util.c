@@ -37,23 +37,29 @@ static int bbdd_util_jrpc_send_done(struct bbdd_ssk_peer *peer,
 	return bbdd_util_jrpc_send(peer, obj, error);
 }
 
-void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer, struct json_object *obj)
+void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer, struct json_object **obj)
 {
 	char *error;
 	int rc;
 
-	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
+	/* Note: *obj is allowed to be NULL. It is better to send an invalid
+	 * error response than none at all. */
+
+	rc = bbdd_util_jrpc_send_done(peer, *obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send response");
 
-	json_object_put(obj);
+	json_object_put(*obj);
+	*obj = NULL;
 }
 
 void bbdd_util_jrpc_respond_inv_params(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
 				       const char *msg)
 {
-	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_inv_params(id, msg));
+	struct json_object *obj = bbdd_jrpc_new_error_inv_params(id, msg);
+
+	bbdd_util_jrpc_respond(peer, &obj);
 }
 
 
@@ -70,7 +76,9 @@ void bbdd_util_jrpc_respond_interr(struct bbdd_ssk_peer *peer,
 				   struct json_object *id,
 				   const char *msg)
 {
-	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_int_error(id, msg));
+	struct json_object *obj = bbdd_jrpc_new_error_int_error(id, msg);
+
+	bbdd_util_jrpc_respond(peer, &obj);
 }
 
 void bbdd_util_jrpc_respond_interr_err(struct bbdd_ssk_peer *peer,
@@ -148,6 +156,15 @@ void bbdd_util_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
 					  struct json_object *id)
 {
 	__bbdd_util_jrpc_respond_empty(peer, id, true);
+}
+
+void bbdd_util_jrpc_respond_method_nf(struct bbdd_ssk_peer *peer,
+				      struct json_object *id,
+				      const char *method)
+{
+	struct json_object *obj = bbdd_jrpc_new_error_method_nf(id, method);
+
+	bbdd_util_jrpc_respond(peer, &obj);
 }
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
@@ -258,6 +275,7 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_jrpc;
 	struct json_object *params;
+	struct json_object *obj;
 	struct json_object *id;
 	const char *method;
 	char *error;
@@ -266,18 +284,18 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 	if (bbdd_mon_topic_active(mon, topic))
 		bbdd_util_ctl_mon_send(mon, topic, NULL, request_obj);
 
+	/* request_obj is JSON `null'. */
 	if (request_obj == NULL) {
-		/* JSON `null'. */
-		bbdd_util_jrpc_respond(peer,
-				       bbdd_jrpc_new_error_inv_request(NULL));
+		obj = bbdd_jrpc_new_error_inv_request(NULL);
+		bbdd_util_jrpc_respond(peer, &obj);
 		return;
 	}
 
 	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
 					&error);
 	if (err) {
-		bbdd_util_jrpc_respond(peer,
-				       bbdd_jrpc_new_error_inv_request(error));
+		obj = bbdd_jrpc_new_error_inv_request(error);
+		bbdd_util_jrpc_respond(peer, &obj);
 		free(error);
 		return;
 	}

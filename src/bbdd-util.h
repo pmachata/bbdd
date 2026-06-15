@@ -18,7 +18,7 @@ int bbdd_util_jrpc_send(struct bbdd_ssk_peer *peer,
 			char **error);
 
 void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer,
-			    struct json_object *obj);
+			    struct json_object **obj);
 
 void bbdd_util_jrpc_respond_inv_params(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
@@ -48,6 +48,10 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 				  struct json_object *id);
 void bbdd_util_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
 					  struct json_object *id);
+
+void bbdd_util_jrpc_respond_method_nf(struct bbdd_ssk_peer *peer,
+				      struct json_object *id,
+				      const char *msg);
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 				 struct json_object *id,
