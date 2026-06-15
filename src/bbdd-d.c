@@ -2184,6 +2184,9 @@ int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
 {
 	int rc;
 
+	if (bbdd_env.bfdd_delay_ms > 0)
+		usleep(bbdd_env.bfdd_delay_ms);
+
 	rc = bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
 				      error);
 	if (rc != 0)

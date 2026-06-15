@@ -61,6 +61,10 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 
 uint64_t bbdd_util_now(void);
 int bbdd_util_parse_time_us(const char *str, uint32_t *ret, char **error);
+
+bool bbdd_util_startswith(const char *haystack, const char *needle,
+			  const char **rest);
+
 struct bbdd_util_ssk_json_tkn {
 	struct bbdd_ssk_peer *peer;
 	struct json_tokener *tok;

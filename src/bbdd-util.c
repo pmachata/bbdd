@@ -330,6 +330,18 @@ oob:
 	return 0;
 }
 
+bool bbdd_util_startswith(const char *haystack, const char *needle,
+			  const char **rest)
+{
+	size_t sz = strlen(needle);
+
+	if (strncmp(haystack, needle, sz) != 0)
+		return false;
+
+	*rest = haystack + sz;
+	return true;
+}
+
 static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 				   const char **str, size_t *left,
 				   struct json_object **ret_obj, char **error)

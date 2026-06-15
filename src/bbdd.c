@@ -13,6 +13,7 @@
 #include "bbdd-d.h"
 #include "bbdd-err.h"
 #include "bbdd-mon.h"
+#include "bbdd-util.h"
 #include "config.h"
 
 struct bbdd_env bbdd_env = {
@@ -105,12 +106,17 @@ int main(int argc, char **argv)
 	struct bbdd_mon_topics topics = {};
 	struct bbdd_ec ec;
 	int verbosity = 0;
+	char *error;
 	int opt;
+	int rc;
 
 	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
 	while ((opt = getopt_long(argc, argv, "hqtvVN",
 				  long_options, NULL)) >= 0) {
 		switch (opt) {
+			const char *dbg_arg;
+			uint32_t us;
+
 		case 'V':
 			printf("%s\n", program_version);
 			return EXIT_SUCCESS;
@@ -138,6 +144,16 @@ int main(int argc, char **argv)
 		case opt_debug:
 			if (strcmp(optarg, "mon-eager") == 0) {
 				bbdd_env.mon_eager = true;
+			} else if (bbdd_util_startswith(optarg, "bfdd-delay=",
+							&dbg_arg)) {
+				rc = bbdd_util_parse_time_us(dbg_arg, &us,
+							     &error);
+				if (rc != 0) {
+					bbdd_err_print(&error, "bfdd-delay `%s'",
+						       dbg_arg);
+					return EXIT_FAILURE;
+				}
+				bbdd_env.bfdd_delay_ms = us;
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);
