@@ -398,41 +398,24 @@ static void bbdd_c_stop_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *)
+static int bbdd_c_stop_jrpc_res(struct json_object *, void *, char **)
 {
-	struct bbdd_ec ec = bbdd_ec_failure;
-	struct json_object *response;
+	if (bbdd_env.verbosity > 0)
+		fprintf(stderr, "bbdd will stop\n");
+	return 0;
+}
+
+static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *topics)
+{
 	struct json_object *request;
-	struct json_object *result;
 	const int id = 1;
 
 	request = bbdd_jrpc_new_request(id, "stop");
 	if (request == NULL)
-		goto out;
+		return bbdd_ec_failure;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result))
-		goto put_response;
-
-	if (bbdd_c_result_show_json(result))
-		goto done;
-
-	if (bbdd_env.verbosity > 0)
-		fprintf(stderr, "bbdd will stop\n");
-
-done:
-	ec = bbdd_ec_success;
-	json_object_put(result);
-put_response:
-	json_object_put(response);
-put_request:
-	json_object_put(request);
-out:
-	return ec;
+	return bbdd_c_interact(&request, bbdd_c_stop_jrpc_res, NULL,
+			       json_type_null, topics);
 }
 
 struct bbdd_ec bbdd_c_stop(int argc, char **argv,
