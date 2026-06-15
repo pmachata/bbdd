@@ -412,6 +412,11 @@ int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, const char *buf, size_t len,
 	return bbdd_ssk_peer_nq(ssc->base.peers, buf, len, error);
 }
 
+void bbdd_ssk_c_mark_done(struct bbdd_ssk_c *ssc)
+{
+	bbdd_ssk_peer_mark_done(ssc->base.peers);
+}
+
 int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error)
 {

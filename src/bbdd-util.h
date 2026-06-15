@@ -13,9 +13,12 @@
 
 /* JRPC helpers. */
 
-int bbdd_util_jrpc_send(struct bbdd_ssk_peer *peer,
-			struct json_object *obj,
-			char **error);
+int bbdd_util_jrpc_send_keep(struct bbdd_ssk_peer *peer,
+			     struct json_object *obj,
+			     char **error);
+int bbdd_util_jrpc_send_done(struct bbdd_ssk_peer *peer,
+			     struct json_object *obj,
+			     char **error);
 
 void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer,
 			    struct json_object **obj);
@@ -46,8 +49,8 @@ void bbdd_util_jrpc_respond_memerr(struct bbdd_ssk_peer *peer,
 
 void bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 				  struct json_object *id);
-void bbdd_util_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
-					  struct json_object *id);
+void bbdd_util_jrpc_respond_empty_keep(struct bbdd_ssk_peer *peer,
+				       struct json_object *id);
 
 void bbdd_util_jrpc_respond_method_nf(struct bbdd_ssk_peer *peer,
 				      struct json_object *id,

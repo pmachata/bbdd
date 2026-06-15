@@ -201,10 +201,9 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	if (rc != 0)
 		goto put_obj;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
-	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -1071,10 +1070,9 @@ static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 	if (json_object_object_add(obj, "result", result_obj))
 		goto put_result_obj;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
-	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -1855,10 +1853,9 @@ bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 	    bbdd_jrpc_append_obj(obj, "result", &result_obj))
 		goto put_array;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
-	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -2564,7 +2561,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
-	bbdd_util_jrpc_respond_empty_no_done(peer, id);
+	bbdd_util_jrpc_respond_empty_keep(peer, id);
 }
 
 static void bbdd_d_handle_unhandled(struct bbdd_ssk_peer *peer,

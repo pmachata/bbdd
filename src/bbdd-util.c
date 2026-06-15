@@ -15,8 +15,9 @@
 #include "bbdd-mon.h"
 #include "bbdd-ssk.h"
 
-int bbdd_util_jrpc_send(struct bbdd_ssk_peer *peer, struct json_object *obj,
-			char **error)
+int bbdd_util_jrpc_send_keep(struct bbdd_ssk_peer *peer,
+			     struct json_object *obj,
+			     char **error)
 {
 	const char *str;
 
@@ -29,12 +30,12 @@ int bbdd_util_jrpc_send(struct bbdd_ssk_peer *peer, struct json_object *obj,
 	return bbdd_ssk_peer_nq(peer, str, strlen(str), error);
 }
 
-static int bbdd_util_jrpc_send_done(struct bbdd_ssk_peer *peer,
-				    struct json_object *obj,
-				    char **error)
+int bbdd_util_jrpc_send_done(struct bbdd_ssk_peer *peer,
+			     struct json_object *obj,
+			     char **error)
 {
 	bbdd_ssk_peer_mark_done(peer);
-	return bbdd_util_jrpc_send(peer, obj, error);
+	return bbdd_util_jrpc_send_keep(peer, obj, error);
 }
 
 void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer, struct json_object **obj)
@@ -131,7 +132,7 @@ static void __bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 		goto put_obj;
 
 	if (keep_open)
-		rc = bbdd_util_jrpc_send(peer, obj, &error);
+		rc = bbdd_util_jrpc_send_keep(peer, obj, &error);
 	else
 		rc = bbdd_util_jrpc_send_done(peer, obj, &error);
 
@@ -152,8 +153,8 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 	__bbdd_util_jrpc_respond_empty(peer, id, false);
 }
 
-void bbdd_util_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
-					  struct json_object *id)
+void bbdd_util_jrpc_respond_empty_keep(struct bbdd_ssk_peer *peer,
+				       struct json_object *id)
 {
 	__bbdd_util_jrpc_respond_empty(peer, id, true);
 }

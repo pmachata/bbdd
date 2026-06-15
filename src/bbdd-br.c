@@ -226,10 +226,9 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 		goto put_stats_obj;
 
 	if (br->stats->peer != NULL) {
-		rc = bbdd_util_jrpc_send(br->stats->peer, resp, &error);
+		rc = bbdd_util_jrpc_send_done(br->stats->peer, resp, &error);
 		if (rc != 0)
 			bbdd_err_print(&error, "Failed to send session counters response");
-		bbdd_ssk_peer_mark_done(br->stats->peer);
 	}
 
 	json_object_put(resp);

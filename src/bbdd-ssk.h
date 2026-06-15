@@ -45,6 +45,7 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
 void bbdd_ssk_close_c(struct bbdd_ssk_c *ssc);
 int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, const char *buf, size_t len,
 		  char **error);
+void bbdd_ssk_c_mark_done(struct bbdd_ssk_c *ssc);
 
 int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error);
