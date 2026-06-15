@@ -209,7 +209,8 @@ static void bbdd_c_echo_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_echo_jrpc(const char *method)
+static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
+				       const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	enum {
@@ -291,7 +292,8 @@ out:
 	return ec;
 }
 
-struct bbdd_ec bbdd_c_echo(int argc, char **argv)
+struct bbdd_ec bbdd_c_echo(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics)
 {
 	int err;
 
@@ -299,7 +301,7 @@ struct bbdd_ec bbdd_c_echo(int argc, char **argv)
 	if (err != 0)
 		return bbdd_ec_failure;
 
-	return bbdd_c_echo_jrpc("echo");
+	return bbdd_c_echo_jrpc("echo", topics);
 }
 
 static void bbdd_c_stop_help(void)
@@ -310,7 +312,7 @@ static void bbdd_c_stop_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_stop_jrpc(void)
+static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
@@ -347,7 +349,8 @@ out:
 	return ec;
 }
 
-struct bbdd_ec bbdd_c_stop(int argc, char **argv)
+struct bbdd_ec bbdd_c_stop(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics)
 {
 	int err;
 
@@ -355,7 +358,7 @@ struct bbdd_ec bbdd_c_stop(int argc, char **argv)
 	if (err != 0)
 		return bbdd_ec_failure;
 
-	return bbdd_c_stop_jrpc();
+	return bbdd_c_stop_jrpc(topics);
 }
 
 static void bbdd_c_global_stats_help(void)
@@ -395,7 +398,8 @@ put_result:
 	return 0;
 }
 
-static struct bbdd_ec bbdd_c_global_stats_get_jrpc(void)
+static struct bbdd_ec
+bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
@@ -1312,7 +1316,8 @@ incomplete_command:
 	return -1;
 }
 
-struct bbdd_ec bbdd_c_global(int argc, char **argv)
+struct bbdd_ec bbdd_c_global(int argc, char **argv,
+			     const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_flag diag = {};
 	bool seen_stats = false;
@@ -1354,7 +1359,7 @@ struct bbdd_ec bbdd_c_global(int argc, char **argv)
 		return bbdd_ec_failure;
 	}
 
-	return bbdd_c_global_stats_get_jrpc();
+	return bbdd_c_global_stats_get_jrpc(topics);
 }
 
 static int bbdd_c_parse_u8(const char *str, void *ret, const char *what)
@@ -1759,7 +1764,8 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 		    const struct bbdd_c_session *select,
 		    const struct bbdd_c_session *change,
 		    struct bbdd_flag bulk,
-		    struct bbdd_flag diag)
+		    struct bbdd_flag diag,
+		    const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *select_obj = NULL;
@@ -1851,7 +1857,8 @@ static int bbdd_c_session_check_params(struct bbdd_c_session *csess)
 	return 0;
 }
 
-struct bbdd_ec bbdd_c_session(int argc, char **argv)
+struct bbdd_ec bbdd_c_session(int argc, char **argv,
+			      const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_c_session select = {};
 	struct bbdd_c_session change = {};
@@ -1985,12 +1992,13 @@ struct bbdd_ec bbdd_c_session(int argc, char **argv)
 	    bbdd_c_session_check_params(&change) < 0)
 		return bbdd_ec_failure;
 
-	return bbdd_c_session_jrpc(command, &select, &change, bulk, diag);
+	return bbdd_c_session_jrpc(command, &select, &change, bulk, diag,
+				   topics);
 }
 
-static struct bbdd_ec bbdd_c_bfdd_connect_jrpc(const char *proto,
-					       const char *addr,
-					       const char *port)
+static struct bbdd_ec
+bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
+			 const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *params_obj;
@@ -2045,7 +2053,8 @@ static void bbdd_c_bfdd_connect_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv,
+					  const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	const char *proto;
@@ -2072,14 +2081,16 @@ static struct bbdd_ec bbdd_c_bfdd_connect(int argc, char **argv)
 		goto out;
 	}
 
-	ec = bbdd_c_bfdd_connect_jrpc(proto, addr, port);
+	ec = bbdd_c_bfdd_connect_jrpc(proto, addr, port, topics);
 
 out:
 	free(copy);
 	return ec;
 }
 
-static struct bbdd_ec bbdd_c_bfdd_disconnect(int argc, char **argv)
+static struct bbdd_ec
+bbdd_c_bfdd_disconnect(int argc, char **argv,
+		       const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
@@ -2118,7 +2129,9 @@ out:
 	return ec;
 }
 
-static struct bbdd_ec bbdd_c_bfdd_connected(int argc, char **argv)
+static struct bbdd_ec
+bbdd_c_bfdd_connected(int argc, char **argv,
+		      const struct bbdd_mon_topics *)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *response;
@@ -2165,7 +2178,8 @@ out:
 	return ec;
 }
 
-static struct bbdd_ec bbdd_c_bfdd_echo(int argc, char **argv)
+static struct bbdd_ec bbdd_c_bfdd_echo(int argc, char **argv,
+				       const struct bbdd_mon_topics *topics)
 {
 	int err;
 
@@ -2175,7 +2189,7 @@ static struct bbdd_ec bbdd_c_bfdd_echo(int argc, char **argv)
 		return bbdd_ec_failure;
 	}
 
-	return bbdd_c_echo_jrpc("bfdd-echo");
+	return bbdd_c_echo_jrpc("bfdd-echo", topics);
 }
 
 static void bbdd_c_bfdd_help(void)
@@ -2206,16 +2220,16 @@ struct bbdd_ec bbdd_c_bfdd(int argc, char **argv,
 		return bbdd_ec_failure;
 	} else if (strcmp(*argv, "connect") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd_connect(argc, argv);
+		return bbdd_c_bfdd_connect(argc, argv, topics);
 	} else if (strcmp(*argv, "connected") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd_connected(argc, argv);
+		return bbdd_c_bfdd_connected(argc, argv, topics);
 	} else if (strcmp(*argv, "disconnect") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd_disconnect(argc, argv);
+		return bbdd_c_bfdd_disconnect(argc, argv, topics);
 	} else if (strcmp(*argv, "echo") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_bfdd_echo(argc, argv);
+		return bbdd_c_bfdd_echo(argc, argv, topics);
 	}
 
 	fprintf(stderr, "What is \"%s\"?\n", *argv);

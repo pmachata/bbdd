@@ -62,16 +62,16 @@ bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 		return bbdd_d_start(argc, argv, topics);
 	} else if (strcmp(*argv, "stop") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_stop(argc, argv);
+		return bbdd_c_stop(argc, argv, topics);
 	} else if (strcmp(*argv, "echo") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_echo(argc, argv);
+		return bbdd_c_echo(argc, argv, topics);
 	} else if (strcmp(*argv, "session") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_session(argc, argv);
+		return bbdd_c_session(argc, argv, topics);
 	} else if (strcmp(*argv, "global") == 0) {
 		NEXT_ARG_FWD();
-		return bbdd_c_global(argc, argv);
+		return bbdd_c_global(argc, argv, topics);
 	} else if (strcmp(*argv, "bfdd") == 0) {
 		NEXT_ARG_FWD();
 		return bbdd_c_bfdd(argc, argv, topics);

@@ -46,10 +46,14 @@ struct bbdd_c_session {
 	struct bbdd_c_session_vrf vrf;
 };
 
-struct bbdd_ec bbdd_c_stop(int argc, char **argv);
-struct bbdd_ec bbdd_c_echo(int argc, char **argv);
-struct bbdd_ec bbdd_c_session(int argc, char **argv);
-struct bbdd_ec bbdd_c_global(int argc, char **argv);
+struct bbdd_ec bbdd_c_stop(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_c_echo(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_c_session(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics);
+struct bbdd_ec bbdd_c_global(int argc, char **argv,
+			   const struct bbdd_mon_topics *topics);
 struct bbdd_ec bbdd_c_bfdd(int argc, char **argv,
 			   const struct bbdd_mon_topics *topics);
 struct bbdd_ec bbdd_c_monitor(int argc, char **argv,
