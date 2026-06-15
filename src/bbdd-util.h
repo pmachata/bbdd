@@ -61,3 +61,24 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 
 uint64_t bbdd_util_now(void);
 int bbdd_util_parse_time_us(const char *str, uint32_t *ret, char **error);
+struct bbdd_util_ssk_json_tkn {
+	struct bbdd_ssk_peer *peer;
+	struct json_tokener *tok;
+
+	int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+		      struct json_object *obj, void *data, char **error);
+	void *data;
+};
+
+struct bbdd_util_ssk_json_tkn *
+bbdd_util_ssk_json_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+					    struct json_object *obj,
+					    void *data, char **error),
+			      void *data, char **error);
+void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn);
+
+int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				 const char *buf, size_t len,
+				 void *data, char **error);
+void bbdd_util_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *peer,
+				    void *data);

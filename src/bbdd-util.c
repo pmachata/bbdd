@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "bbdd-util.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -327,4 +328,118 @@ oob:
 
 	*ret = (uint32_t)(val * mult);
 	return 0;
+}
+
+static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
+				   const char **str, size_t *left,
+				   struct json_object **ret_obj, char **error)
+{
+	struct json_object *obj;
+	size_t consumed;
+	int rc;
+
+	obj = json_tokener_parse_ex(tok, *str, *left);
+	consumed = json_tokener_get_parse_end(tok);
+	assert(consumed <= *left);
+	*left -= consumed;
+	*str += consumed;
+	*ret_obj = obj;
+	if (obj == NULL) {
+		rc = json_tokener_get_error(tok);
+		if (rc == json_tokener_success) {
+			/* A `null' JSON object. */
+			return 0;
+		}
+		if (rc == json_tokener_continue) {
+			/* Not enough to form a full JSON object. */
+			return 1;
+		}
+
+		bbdd_err_fmt(error, "JSON parse error: %s",
+			     json_tokener_error_desc(rc));
+		return -1;
+	}
+
+	json_tokener_reset(tok);
+	return 0;
+}
+
+struct bbdd_util_ssk_json_tkn *
+bbdd_util_ssk_json_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+					    struct json_object *obj,
+					    void *data, char **error),
+			      void *data, char **error)
+{
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct json_tokener *tok;
+
+	tkn = malloc(sizeof(*tkn));
+	if (tkn == NULL) {
+		bbdd_err_fmt(error, "dispatch context alloc: %m");
+		return NULL;
+	}
+
+	tok = json_tokener_new();
+	if (tok == NULL) {
+		bbdd_err_fmt(error, "json_tokener_new: %m");
+		goto free_tkn;
+	}
+
+	*tkn = (struct bbdd_util_ssk_json_tkn) {
+		.tok = tok,
+		.obj_cb = obj_cb,
+		.data = data,
+	};
+
+	return tkn;
+
+free_tkn:
+	free(tkn);
+	return NULL;
+}
+
+void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn)
+{
+	json_tokener_free(tkn->tok);
+	free(tkn);
+}
+
+int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				 const char *buf, size_t len,
+				 void *data, char **error)
+{
+	struct bbdd_util_ssk_json_tkn *tkn = data;
+	int rc;
+
+	/* At this point we can backfill the peer. */
+	assert(tkn->peer == NULL || tkn->peer == peer);
+	tkn->peer = peer;
+
+	while (len > 0) {
+		struct json_object *obj;
+
+		rc = bbdd_util_jrpc_tokenize(tkn->tok, &buf, &len, &obj, error);
+		if (rc < 0) /* Error. */
+			return rc;
+		if (rc > 0) {
+			/* Continue. */
+			assert(len == 0);
+			break;
+		}
+
+		/* Note: obj == NULL for JSON `null'. */
+		rc = tkn->obj_cb(tkn, obj, tkn->data, error);
+		json_object_put(obj);
+		if (rc != 0)
+			return rc;
+	}
+
+	return 0;
+}
+
+void bbdd_util_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_util_ssk_json_tkn *tkn = data;
+
+	bbdd_util_ssk_json_tkn_destroy(tkn);
 }
