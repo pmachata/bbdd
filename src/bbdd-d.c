@@ -2332,7 +2332,7 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	struct bbdd_bfdd_cbs cbs;
 	int rc;
 
-	if (d->bfdd) {
+	if (d->bfdd != NULL) {
 		bbdd_err_fmt(error, "Already connected to a BFD daemon");
 		return -1;
 	}
@@ -2472,10 +2472,8 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	if (d->bfdd == NULL) {
-		bbdd_util_jrpc_respond_empty(peer, id);
-		return;
-	}
+	if (d->bfdd == NULL)
+		return bbdd_util_jrpc_respond_interr(peer, id, "Not connected to a BFD daemon");
 
 	bbdd_bfdd_close(d->bfdd);
 	d->bfdd = NULL;
