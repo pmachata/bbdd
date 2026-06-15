@@ -2039,13 +2039,11 @@ struct bbdd_ec bbdd_c_session(int argc, char **argv,
 
 static struct bbdd_ec
 bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
-			 const struct bbdd_mon_topics *)
+			 const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *params_obj;
-	struct json_object *response;
 	struct json_object *request;
-	struct json_object *result;
 	const int id = 1;
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connect");
@@ -2063,20 +2061,8 @@ bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
 	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
+	ec = bbdd_c_interact(&request, NULL, NULL, json_type_null, topics);
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result))
-		goto put_response;
-
-	bbdd_c_result_show_json(result);
-	ec = bbdd_ec_success;
-
-	json_object_put(result);
-put_response:
-	json_object_put(response);
 put_params_obj:
 	json_object_put(params_obj);
 put_request:
@@ -2130,102 +2116,96 @@ out:
 }
 
 static struct bbdd_ec
-bbdd_c_bfdd_disconnect(int argc, char **argv,
-		       const struct bbdd_mon_topics *)
+bbdd_c_bfdd_disconnect_jrpc(const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
-	struct json_object *response;
 	struct json_object *request;
-	struct json_object *result;
 	const int id = 1;
 
+	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
+	if (request == NULL)
+		return bbdd_ec_failure;
+
+	ec = bbdd_c_interact(&request, NULL, NULL, json_type_null, topics);
+
+	json_object_put(request);
+	return ec;
+}
+
+static struct bbdd_ec
+bbdd_c_bfdd_disconnect(int argc, char **argv,
+		       const struct bbdd_mon_topics *topics)
+{
 	if (argc > 0) {
 		fprintf(stderr, "Usage: bbdd bfdd disconnect\n\n");
 		if (strcmp(*argv, "help") == 0)
 			return bbdd_ec_success;
-		goto out;
+		else
+			return bbdd_ec_failure;
 	}
 
-	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
+	return bbdd_c_bfdd_disconnect_jrpc(topics);
+}
+
+static int bbdd_c_bfdd_connected_jrpc_res(struct json_object *result,
+					  void *data, char **)
+{
+	bool *connected_p = data;
+	bool connected;
+
+	connected = json_object_get_boolean(result);
+
+	if (bbdd_env.verbosity > 0)
+		printf("connected: %s\n", connected ? "yes" : "no");
+
+	*connected_p = connected;
+	return 0;
+}
+
+static struct bbdd_ec
+bbdd_c_bfdd_connected_jrpc(const struct bbdd_mon_topics *topics)
+{
+	struct bbdd_ec ec = bbdd_ec_failure;
+	struct json_object *request;
+	const int id = 1;
+	bool connected;
+
+	request = bbdd_jrpc_new_request(id, "bfdd-connected");
 	if (request == NULL)
-		goto out;
+		return bbdd_ec_failure;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
+	ec = bbdd_c_interact(&request,
+			     bbdd_c_bfdd_connected_jrpc_res, &connected,
+			     json_type_boolean, topics);
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result))
-		goto put_response;
+	if (bbdd_ec_is_success(ec) && !connected)
+		ec = bbdd_ec_failure;
 
-	bbdd_c_result_show_json(result);
-	ec = bbdd_ec_success;
-
-	json_object_put(result);
-put_request:
-	json_object_put(request);
-put_response:
-	json_object_put(response);
-out:
 	return ec;
 }
 
 static struct bbdd_ec
 bbdd_c_bfdd_connected(int argc, char **argv,
-		      const struct bbdd_mon_topics *)
+		      const struct bbdd_mon_topics *topics)
 {
-	struct bbdd_ec ec = bbdd_ec_failure;
-	struct json_object *response;
-	struct json_object *request;
-	struct json_object *result;
-	bool connected;
-	const int id = 1;
-
 	if (argc > 0) {
 		fprintf(stderr, "Usage: bbdd bfdd connected\n\n");
 		if (strcmp(*argv, "help") == 0)
 			return bbdd_ec_success;
-		goto out;
+		else
+			return bbdd_ec_failure;
 	}
 
-	request = bbdd_jrpc_new_request(id, "bfdd-connected");
-	if (request == NULL)
-		goto out;
-
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_boolean,
-					    &result))
-		goto put_response;
-
-	connected = json_object_get_boolean(result);
-	if (connected)
-		ec = bbdd_ec_success;
-
-	if (bbdd_c_result_show_json(result))
-		goto done;
-	if (bbdd_env.verbosity > 0)
-		printf("connected: %s\n", connected ? "yes" : "no");
-
-done:
-	json_object_put(result);
-put_response:
-	json_object_put(response);
-put_request:
-	json_object_put(request);
-out:
-	return ec;
+	return bbdd_c_bfdd_connected_jrpc(topics);
 }
 
 static struct bbdd_ec bbdd_c_bfdd_echo(int argc, char **argv,
 				       const struct bbdd_mon_topics *topics)
 {
-	int err;
+	int rc;
 
-	err = bbdd_c_cmd_noargs(argc, argv, NULL);
-	if (err != 0) {
+	rc = bbdd_c_cmd_noargs(argc, argv, NULL);
+	if (rc != 0) {
 		fprintf(stderr, "Usage: bbdd bfdd echo\n\n");
 		return bbdd_ec_failure;
 	}
