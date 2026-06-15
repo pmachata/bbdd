@@ -469,25 +469,13 @@ bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *topics)
 			       json_type_object, topics);
 }
 
-static int bbdd_c_session_act_jrpc_result(struct json_object *response,
-					  const char *method,
-					  const int id)
+static int bbdd_c_session_act_jrpc_result(struct json_object *,
+					  const char *method)
 
 {
-	struct json_object *result;
-
-	if (!bbdd_c_response_extract_result(response, id,
-					   json_type_null, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
-
 	if (bbdd_env.verbosity > 0)
 		fprintf(stderr, "`%s' was handled by the daemon\n", method);
 
-put_result:
-	json_object_put(result);
 	return 0;
 }
 
@@ -1059,31 +1047,21 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 	}
 }
 
-static int bbdd_c_session_show_jrpc_result(struct json_object *response,
-					   const char *, const int id)
+static int bbdd_c_session_show_jrpc_result(struct json_object *result,
+					   const char *)
 {
-	struct json_object *result;
 	struct bbdd_c_session *sessions;
 	struct bbdd_c_session_state *states;
 	size_t num_sessions;
 	char *error;
 	int err;
 
-	if (!bbdd_c_response_extract_result(response, id,
-					    json_type_object, &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result)) {
-		err = 0;
-		goto put_result;
-	}
-
 	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
 					       &num_sessions, &error);
 	if (err != 0) {
 		fprintf(stderr, "Invalid session object: %s\n", error);
 		free(error);
-		goto put_result;
+		return 0;
 	}
 
 	for (size_t i = 0; i < num_sessions; i++) {
@@ -1094,9 +1072,6 @@ static int bbdd_c_session_show_jrpc_result(struct json_object *response,
 		printf("(no sessions)\n");
 	free(sessions);
 	free(states);
-
-put_result:
-	json_object_put(result);
 	return 0;
 }
 
@@ -1150,19 +1125,11 @@ static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
 	return 0;
 }
 
-static int bbdd_c_session_stats_jrpc_result(struct json_object *response,
-					    const char *, const int id)
+static int bbdd_c_session_stats_jrpc_result(struct json_object *result,
+					    const char *)
 {
-	struct json_object *result;
 	char *error = NULL;
 	int err = 0;
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
 
 	err = bbdd_c_session_stats_dissect_result(result, &error);
 	if (err != 0) {
@@ -1170,8 +1137,6 @@ static int bbdd_c_session_stats_jrpc_result(struct json_object *response,
 		free(error);
 	}
 
-put_result:
-	json_object_put(result);
 	return err;
 }
 
@@ -1183,13 +1148,15 @@ static struct bbdd_c_session_command {
 	const bool allow_change;
 	const char *const rpc;
 	const char *const rpc_diag;
-	int (*show)(struct json_object *, const char *method, int id);
+	enum json_type expected_result_type;
+	int (*show)(struct json_object *, const char *method);
 } const bbdd_c_session_commands[] = {
 	{
 		.name = "add",
 		.allow_change = true,
 		.rpc = "session-add",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "set",
@@ -1198,6 +1165,7 @@ static struct bbdd_c_session_command {
 		.allow_change = true,
 		.rpc = "session-set",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "del",
@@ -1205,12 +1173,14 @@ static struct bbdd_c_session_command {
 		.allow_query = true,
 		.rpc = "session-del",
 		.show = bbdd_c_session_act_jrpc_result,
+		.expected_result_type = json_type_null,
 	},
 	{
 		.name = "show",
 		.allow_query = true,
 		.rpc = "session-show",
 		.show = bbdd_c_session_show_jrpc_result,
+		.expected_result_type = json_type_object,
 	},
 	{
 		.name = "stats",
@@ -1219,6 +1189,7 @@ static struct bbdd_c_session_command {
 		.rpc = "session-stats",
 		.rpc_diag = "session-stats-diag",
 		.show = bbdd_c_session_stats_jrpc_result,
+		.expected_result_type = json_type_object,
 	},
 };
 
@@ -1800,23 +1771,29 @@ err:
 	return NULL;
 }
 
+static int bbdd_c_session_jrpc_res(struct json_object *result,
+				   void *data, char **)
+{
+	const struct bbdd_c_session_command *command = data;
+
+	return command->show(result, command->rpc);
+}
+
 static struct bbdd_ec
 bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 		    const struct bbdd_c_session *select,
 		    const struct bbdd_c_session *change,
 		    struct bbdd_flag bulk,
 		    struct bbdd_flag diag,
-		    const struct bbdd_mon_topics *)
+		    const struct bbdd_mon_topics *topics)
 {
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *select_obj = NULL;
 	struct json_object *change_obj = NULL;
 	struct json_object *params_obj;
-	struct json_object *response;
 	struct json_object *request;
 	const char *method;
 	const int id = 1;
-	int err;
 
 	if (command->allow_query) {
 		select_obj = bbdd_c_jrpc_session_obj(select);
@@ -1854,18 +1831,10 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
+	ec = bbdd_c_interact(&request,
+			     bbdd_c_session_jrpc_res, (void *) command,
+			     command->expected_result_type, topics);
 
-	err = command->show(response, method, id);
-	if (err)
-		goto put_response;
-
-	ec = bbdd_ec_success;
-
-put_response:
-	json_object_put(response);
 put_params_obj:
 	json_object_put(params_obj);
 put_request:
