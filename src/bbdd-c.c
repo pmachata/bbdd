@@ -2972,10 +2972,9 @@ struct bbdd_c_monitor_ctx {
 };
 
 static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
-				  struct json_object *notif_obj, void *data,
+				  struct json_object *notif_obj, void *,
 				  char **)
 {
-	struct bbdd_c_monitor_ctx *mctx = data;
 	struct json_object *params;
 	const char *method;
 	char *error;
@@ -2984,11 +2983,6 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
 	rc = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
 	if (rc) {
 		bbdd_err_print(&error, "monitor event");
-		return 0;
-	}
-
-	if (strcmp(method, "monitor-end") == 0) {
-		bbdd_poll_request_quit(mctx->pctx);
 		return 0;
 	}
 

@@ -671,8 +671,6 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 	if (br.bfdd != NULL)
 		bbdd_br_bfdd_client_close(&br);
 
-	bbdd_mon_send_monitor_end(br.mon);
-
 	bbdd_poll_unset_signals(br.pctx);
 
 sock_close_d:
