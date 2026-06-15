@@ -163,6 +163,40 @@ static bool bbdd_c_result_show_json(struct json_object *result)
 	return true;
 }
 
+static int __bbdd_c_ctl_recv_obj(struct json_object *response,
+				 int (*cb)(struct json_object *result,
+					   void *data, char **error),
+				 void *cb_data, enum json_type cb_expected_type,
+				 struct bbdd_ec *ec, char **error)
+{
+	struct json_object *result;
+	enum bbdd_c_result_rc rrc;
+	const int id = 1;
+	int rc = 0;
+
+	rrc = __bbdd_c_response_extract_result(response, id, cb_expected_type,
+					       &result, error);
+	switch (rrc) {
+	case bbdd_c_result_rc_fail:
+		return -1;
+	case bbdd_c_result_rc_ok_error:
+		*ec = bbdd_ec_failure;
+		return 0;
+	case bbdd_c_result_rc_ok:
+		break;
+	}
+
+	if (bbdd_c_result_show_json(result))
+		goto put_result;
+
+	if (cb != NULL)
+		rc = cb(result, cb_data, error);
+
+put_result:
+	json_object_put(result);
+	return rc;
+}
+
 static struct json_object *bbdd_c_send_request_on(struct json_object *request,
 						  struct bbdd_sock *cli,
 						  struct bbdd_sock *peer)
@@ -216,6 +250,38 @@ static struct json_object *bbdd_c_send_request(struct json_object *request)
 	return response_obj;
 }
 
+static struct bbdd_ec
+bbdd_c_interact(struct json_object **request,
+		int (*cb)(struct json_object *response, void *data,
+			  char **error),
+		void *data, enum json_type cb_expected_type,
+		const struct bbdd_mon_topics *)
+{
+	struct bbdd_ec ec = bbdd_ec_success;
+	struct json_object *response;
+	char *error;
+	int rc;
+
+	response = bbdd_c_send_request(*request);
+	if (response == NULL) {
+		rc = -1;
+		goto put_request;
+	}
+
+	rc = __bbdd_c_ctl_recv_obj(response, cb, data, cb_expected_type, &ec,
+				   &error);
+
+put_request:
+	json_object_put(*request);
+	*request = NULL;
+
+	if (rc != 0) {
+		bbdd_err_print(&error, "Communication error");
+		return bbdd_ec_failure;
+	}
+	return ec;
+}
+
 static int bbdd_c_cmd_noargs(int argc, char **argv, void (*help_cb)(void))
 {
 	while (argc > 0) {
@@ -239,10 +305,9 @@ static void bbdd_c_echo_help(void)
 	);
 }
 
-static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
-				       const struct bbdd_mon_topics *)
+static int bbdd_c_echo_jrpc_res(struct json_object *result,
+				void *, char **error)
 {
-	struct bbdd_ec ec = bbdd_ec_failure;
 	enum {
 		pol_ts,
 		pol_reply_ts,
@@ -255,16 +320,37 @@ static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
-	struct json_object *response;
+	uint64_t reply_ts_us;
+	uint64_t delay_us;
+	uint64_t ts_us;
+	int rc;
+
+	rc = bbdd_jrpc_dissect(result, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0) {
+		bbdd_err_app(error, "echo result");
+		return rc;
+	}
+
+	if (bbdd_env.verbosity <= 0)
+		return rc;
+
+	ts_us = json_object_get_uint64(values[pol_ts]);
+	reply_ts_us = json_object_get_uint64(values[pol_reply_ts]);
+	delay_us = reply_ts_us - ts_us;
+
+	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
+	return 0;
+}
+
+static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
+				       const struct bbdd_mon_topics *topics)
+{
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	struct json_object *params;
-	struct json_object *result;
-	uint64_t delay_us;
-	uint64_t reply_ts_us;
-	uint64_t ts_us;
 	const int id = 1;
-	char *error;
-	int rc;
+	uint64_t ts_us;
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL)
@@ -281,39 +367,9 @@ static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
 	if (bbdd_jrpc_append_obj(request, "params", &params))
 		goto put_params;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
+	ec = bbdd_c_interact(&request, bbdd_c_echo_jrpc_res, NULL,
+			     json_type_object, topics);
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result))
-		goto put_response;
-
-	if (bbdd_c_result_show_json(result))
-		goto done;
-
-	rc = bbdd_jrpc_dissect(result, policy, seen, values,
-			       ARRAY_SIZE(policy), &error);
-	if (rc != 0) {
-		bbdd_err_fmt(&error, "Invalid echo response");
-		goto put_result;
-	}
-
-	if (bbdd_env.verbosity <= 0)
-		goto done;
-
-	ts_us = json_object_get_uint64(values[pol_ts]);
-	reply_ts_us = json_object_get_uint64(values[pol_reply_ts]);
-	delay_us = reply_ts_us - ts_us;
-
-	fprintf(stdout, "echo reply: latency %" PRIu64 " us\n", delay_us);
-
-done:
-	ec = bbdd_ec_success;
-put_result:
-	json_object_put(result);
-put_response:
-	json_object_put(response);
 put_params:
 	json_object_put(params);
 put_request:
