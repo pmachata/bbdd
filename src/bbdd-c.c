@@ -447,54 +447,26 @@ static void bbdd_c_print_stats_obj(struct json_object *obj)
 	}
 }
 
-static int bbdd_c_global_stats_get_jrpc_result(struct json_object *response,
-					       const int id)
+static int bbdd_c_global_stats_get_jrpc_res(struct json_object *result,
+					    void *, char **)
 {
-	struct json_object *result;
-
-	if (!bbdd_c_response_extract_result(response, id, json_type_object,
-					    &result))
-		return -1;
-
-	if (bbdd_c_result_show_json(result))
-		goto put_result;
-
 	printf("global:\n");
 	bbdd_c_print_stats_obj(result);
-
-put_result:
-	json_object_put(result);
 	return 0;
 }
 
 static struct bbdd_ec
-bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *)
+bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *topics)
 {
-	struct bbdd_ec ec = bbdd_ec_failure;
-	struct json_object *response;
 	struct json_object *request;
 	const int id = 1;
-	int err;
 
 	request = bbdd_jrpc_new_request(id, "global-stats-diag");
 	if (request == NULL)
-		goto out;
+		return bbdd_ec_failure;
 
-	response = bbdd_c_send_request(request);
-	if (response == NULL)
-		goto put_request;
-
-	err = bbdd_c_global_stats_get_jrpc_result(response, id);
-	if (err != 0)
-		goto put_response;
-
-	ec = bbdd_ec_success;
-put_response:
-	json_object_put(response);
-put_request:
-	json_object_put(request);
-out:
-	return ec;
+	return bbdd_c_interact(&request, bbdd_c_global_stats_get_jrpc_res, NULL,
+			       json_type_object, topics);
 }
 
 static int bbdd_c_session_act_jrpc_result(struct json_object *response,
