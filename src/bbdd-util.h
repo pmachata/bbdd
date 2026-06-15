@@ -44,9 +44,9 @@ void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
 void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 				  struct json_object *id);
 
-void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
-			    struct json_object *id,
-			    uint64_t bfdd_time, uint64_t dp_time);
+void bbdd_util_jrpc_respond_echo(struct bbdd_sock *peer,
+				 struct json_object *id,
+				 uint64_t ts, uint64_t reply_ts);
 
 struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af);
 

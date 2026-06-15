@@ -141,9 +141,9 @@ put_obj:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
-void bbdd_jrpc_respond_echo(struct bbdd_sock *peer,
-			    struct json_object *id,
-			    uint64_t ts, uint64_t reply_ts)
+void bbdd_util_jrpc_respond_echo(struct bbdd_sock *peer,
+				 struct json_object *id,
+				 uint64_t ts, uint64_t reply_ts)
 {
 	struct json_object *result;
 	struct json_object *resp;

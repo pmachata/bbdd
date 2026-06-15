@@ -440,11 +440,11 @@ void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 		return;
 
 	if (bfdd->echo->is_dp)
-		bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
-				       dp_time, bfdd_time);
+		bbdd_util_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
+					    dp_time, bfdd_time);
 	else
-		bbdd_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
-				       bfdd_time, dp_time);
+		bbdd_util_jrpc_respond_echo(&bfdd->echo->peer, bfdd->echo->id,
+					    bfdd_time, dp_time);
 	bbdd_bfdd_echo_stop(bfdd);
 }
 

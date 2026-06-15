@@ -117,7 +117,7 @@ void bbdd_d_handle_echo(struct bbdd_sock *peer,
 	ts = json_object_get_uint64(values[pol_ts]);
 	reply_ts = bbdd_util_now();
 
-	bbdd_jrpc_respond_echo(peer, id, ts, reply_ts);
+	bbdd_util_jrpc_respond_echo(peer, id, ts, reply_ts);
 }
 
 void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
