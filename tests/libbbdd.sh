@@ -90,7 +90,14 @@ Bbdd_bfdd_connect()
 {
 	local dst_sockdir=$1; shift
 
-	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd_dplane.sock
+	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd_dplane.sock "$@"
+}
+
+Bbdd_bfdd_disconnect()
+{
+	local dst_sockdir=$1; shift
+
+	Bbdd bfdd disconnect "$@"
 }
 
 Bbdd_session_get()
@@ -321,7 +328,7 @@ __echo_test()
 	resp=$(Bbdd --json "$@")
 	rc=$?
 	t1=$(now)
-	check_err "$rc" "bbdd bfdd echo exit code is $rc, 0 expected"
+	check_err "$rc" "bbdd $@ exit code is $rc, 0 expected"
 
 	reported_lat=$(echo "$resp" | jq '.reply_ts - .ts')
 	measured_lat=$((t1 - t0))
@@ -338,6 +345,21 @@ __echo_test()
 	Bbdd_log_test "echo ($reported_lat us)"
 }
 
+__fail_echo_test()
+{
+	local t0
+	local t1
+	local rc
+	local reported_lat
+	local resp
+
+	Bbdd -q "$@"
+	rc=$?
+	check_fail "$rc" "bbdd $@ exit code is $rc, != 0 expected"
+
+	Bbdd_log_test "no echo"
+}
+
 echo_test()
 {
 	__echo_test echo
@@ -346,6 +368,11 @@ echo_test()
 bfdd_echo_test()
 {
 	__echo_test bfdd echo
+}
+
+bfdd_fail_echo_test()
+{
+	__fail_echo_test bfdd echo
 }
 
 packet_size_test()

@@ -13,8 +13,21 @@ in_sockdir SD1 in_ns NS1 adf_Bbdd_start
 in_sockdir SD2 in_ns NS2 adf_Bbdd_start
 in_sockdir FD2 in_ns NS2 adf_Frr_bfdd_dplane_start
 
+
+in_sockdir SD2 Bbdd bfdd connected
+check_fail $? "connected expected to fail before connect"
+
 in_sockdir SD2 Bbdd_bfdd_connect FD2
+check_err $? "Failed to connect"
+
+in_sockdir SD2 Bbdd_bfdd_connect FD2 -q
+check_fail $? "Repeated request for connection succeeded"
+
+in_sockdir SD2 Bbdd bfdd connected
+check_err $? "connected expected to hold after connect"
+
 in_sockdir SD2 bfdd_echo_test
+
 
 in_sockdir SD1 Bbdd session add \
 	   discr 101 dst $(Bbdd_IP 2) \
@@ -24,3 +37,15 @@ in_sockdir FD2 Frr_session_add $(Bbdd_IP 1)
 
 in_sockdir SD1 session_state_test up 1
 in_sockdir FD2 Frr_session_test_up $(Bbdd_IP 1)
+
+
+in_sockdir SD2 Bbdd_bfdd_disconnect FD2
+check_err $? "Failed to disconnect"
+
+in_sockdir SD2 Bbdd bfdd connected
+check_fail $? "connected expected to fail after disconnect"
+
+in_sockdir SD2 Bbdd_bfdd_disconnect FD2 -q
+check_fail $? "Repeated request for disconnection succeeded"
+
+in_sockdir SD2 bfdd_fail_echo_test
