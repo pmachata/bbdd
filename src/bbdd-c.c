@@ -56,11 +56,11 @@ static void bbdd_c_response_handle_error(struct json_object *error_obj)
 	const char *message;
 	int64_t code;
 	char *error;
-	int err;
+	int rc;
 
-	err = bbdd_jrpc_dissect_error(error_obj, &code, &message, &data,
-				      &error);
-	if (err != 0) {
+	rc = bbdd_jrpc_dissect_error(error_obj, &code, &message, &data,
+				     &error);
+	if (rc != 0) {
 		bbdd_err_print(&error, "Invalid error object");
 		return;
 	}
@@ -91,10 +91,10 @@ __bbdd_c_response_extract_result(struct json_object *j,
 	struct json_object *result;
 	struct json_object *id;
 	bool is_error;
-	int err;
+	int rc;
 
-	err = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, error);
-	if (err != 0) {
+	rc = bbdd_jrpc_dissect_response(j, &id, &result, &is_error, error);
+	if (rc != 0) {
 		bbdd_err_app(error, "Invalid response object");
 		return bbdd_c_result_rc_fail;
 	}
@@ -404,10 +404,10 @@ out:
 struct bbdd_ec bbdd_c_echo(int argc, char **argv,
 			   const struct bbdd_mon_topics *topics)
 {
-	int err;
+	int rc;
 
-	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_echo_help);
-	if (err != 0)
+	rc = bbdd_c_cmd_noargs(argc, argv, bbdd_c_echo_help);
+	if (rc != 0)
 		return bbdd_ec_failure;
 
 	return bbdd_c_echo_jrpc("echo", topics);
@@ -444,10 +444,10 @@ static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *topics)
 struct bbdd_ec bbdd_c_stop(int argc, char **argv,
 			   const struct bbdd_mon_topics *topics)
 {
-	int err;
+	int rc;
 
-	err = bbdd_c_cmd_noargs(argc, argv, bbdd_c_stop_help);
-	if (err != 0)
+	rc = bbdd_c_cmd_noargs(argc, argv, bbdd_c_stop_help);
+	if (rc != 0)
 		return bbdd_ec_failure;
 
 	return bbdd_c_stop_jrpc(topics);
@@ -813,11 +813,11 @@ bbdd_c_session_show_jrpc_dissect_sessions(struct json_object *sess_array,
 			json_object_array_get_idx(sess_array, i);
 		struct bbdd_c_session *session = &sessions[i];
 		struct bbdd_c_session_state *state = &states[i];
-		int err;
+		int rc;
 
-		err = bbdd_c_jrpc_dissect_session_elem(sess_obj, session,
-						       state, error);
-		if (err != 0)
+		rc = bbdd_c_jrpc_dissect_session_elem(sess_obj, session,
+						      state, error);
+		if (rc != 0)
 			goto free_sessions;
 	}
 
@@ -850,18 +850,18 @@ bbdd_c_response_extract_sessions(struct json_object *obj,
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	struct json_object *sessions_arr;
 	bool seen[ARRAY_SIZE(policy)] = {};
-	int err;
+	int rc;
 
-	err = bbdd_jrpc_dissect(obj, policy, seen, values,
-				ARRAY_SIZE(policy), error);
-	if (err != 0)
-		return err;
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values,
+			       ARRAY_SIZE(policy), error);
+	if (rc != 0)
+		return rc;
 
 	sessions_arr = values[pol_sessions];
 
-	err = bbdd_jrpc_validate_array(sessions_arr, json_type_object, error);
-	if (err != 0)
-		return err;
+	rc = bbdd_jrpc_validate_array(sessions_arr, json_type_object, error);
+	if (rc != 0)
+		return rc;
 
 	*ret_sessions_arr = sessions_arr;
 	return 0;
@@ -874,11 +874,11 @@ static int bbdd_c_session_show_jrpc_dissect(struct json_object *obj,
 					    char **error)
 {
 	struct json_object *sessions_arr;
-	int err;
+	int rc;
 
-	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
-	if (err != 0)
-		return err;
+	rc = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (rc != 0)
+		return rc;
 
 	return bbdd_c_session_show_jrpc_dissect_sessions(sessions_arr,
 							 sessions, states,
@@ -1077,11 +1077,11 @@ static int bbdd_c_session_show_jrpc_result(struct json_object *result,
 	struct bbdd_c_session_state *states;
 	size_t num_sessions;
 	char *error;
-	int err;
+	int rc;
 
-	err = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
-					       &num_sessions, &error);
-	if (err != 0) {
+	rc = bbdd_c_session_show_jrpc_dissect(result, &sessions, &states,
+					      &num_sessions, &error);
+	if (rc != 0) {
 		fprintf(stderr, "Invalid session object: %s\n", error);
 		free(error);
 		return 0;
@@ -1130,19 +1130,19 @@ static int bbdd_c_session_stats_dissect_result(struct json_object *obj,
 					       char **error)
 {
 	struct json_object *sessions_arr;
-	int err;
+	int rc;
 
-	err = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
-	if (err != 0)
-		return err;
+	rc = bbdd_c_response_extract_sessions(obj, &sessions_arr, error);
+	if (rc != 0)
+		return rc;
 
 	for (size_t i = 0; i < json_object_array_length(sessions_arr); i++) {
 		struct json_object *session_obj =
 			json_object_array_get_idx(sessions_arr, i);
 
-		err = bbdd_c_session_stats_dissect_one(session_obj, error);
-		if (err != 0)
-			return err;
+		rc = bbdd_c_session_stats_dissect_one(session_obj, error);
+		if (rc != 0)
+			return rc;
 	}
 
 	return 0;
@@ -1152,15 +1152,15 @@ static int bbdd_c_session_stats_jrpc_result(struct json_object *result,
 					    const char *)
 {
 	char *error = NULL;
-	int err = 0;
+	int rc = 0;
 
-	err = bbdd_c_session_stats_dissect_result(result, &error);
-	if (err != 0) {
+	rc = bbdd_c_session_stats_dissect_result(result, &error);
+	if (rc != 0) {
 		fprintf(stderr, "%s\n", error);
 		free(error);
 	}
 
-	return err;
+	return rc;
 }
 
 static struct bbdd_c_session_command {
@@ -2979,10 +2979,10 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
 	struct json_object *params;
 	const char *method;
 	char *error;
-	int err;
+	int rc;
 
-	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
-	if (err) {
+	rc = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
+	if (rc) {
 		bbdd_err_print(&error, "monitor event");
 		return 0;
 	}
@@ -3240,10 +3240,10 @@ void bbdd_c_monitor_dispatch(struct json_object *msg, void *)
 	struct json_object *params;
 	const char *method;
 	char *error;
-	int err;
+	int rc;
 
-	err = bbdd_jrpc_dissect_notif(msg, &method, &params, &error);
-	if (err) {
+	rc = bbdd_jrpc_dissect_notif(msg, &method, &params, &error);
+	if (rc) {
 		bbdd_err_print(&error, "Failed to dissect monitor event");
 		return;
 	}
