@@ -230,7 +230,6 @@ put_obj:
 
 static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 				   enum bbdd_mon_topic topic,
-				   const char *request,
 				   struct json_object *request_obj)
 {
 	struct bbdd_mon_message mon_msg = {
@@ -238,30 +237,21 @@ static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 	};
 	int rc;
 
-	if (request == NULL)
-		request = "(invalid message)";
-
 	mon_msg.params = json_object_new_object();
 	if (mon_msg.params == NULL)
 		return;
 
-	/* If we could parse it, append the parse, fall back to string. */
-	if (request_obj != NULL) {
-		rc = json_object_object_add(mon_msg.params, "message",
-					    request_obj);
-		if (rc != 0)
-			goto string;
-		json_object_get(request_obj);
-	} else {
-	string:
-		rc = bbdd_jrpc_append_str(mon_msg.params, "message", request);
-		if (rc != 0) {
-			json_object_put(mon_msg.params);
-			return;
-		}
-	}
+	rc = json_object_object_add(mon_msg.params, "message",
+				    request_obj);
+	if (rc != 0)
+		goto put_params;
+	json_object_get(request_obj);
 
 	bbdd_mon_send(mon, &mon_msg, topic);
+	return;
+
+put_params:
+	json_object_put(mon_msg.params);
 }
 
 void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
@@ -283,7 +273,7 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 	int err;
 
 	if (bbdd_mon_topic_active(mon, topic))
-		bbdd_util_ctl_mon_send(mon, topic, NULL, request_obj);
+		bbdd_util_ctl_mon_send(mon, topic, request_obj);
 
 	/* request_obj is JSON `null'. */
 	if (request_obj == NULL) {
