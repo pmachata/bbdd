@@ -154,6 +154,8 @@ int main(int argc, char **argv)
 					return EXIT_FAILURE;
 				}
 				bbdd_env.bfdd_delay_ms = us;
+			} else if (strcmp(optarg, "cli-imm-done") == 0) {
+				bbdd_env.cli_imm_done = true;
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);
