@@ -142,10 +142,8 @@ int main(int argc, char **argv)
 			bbdd_env.timestamp = true;
 			break;
 		case opt_debug:
-			if (strcmp(optarg, "mon-eager") == 0) {
-				bbdd_env.mon_eager = true;
-			} else if (bbdd_util_startswith(optarg, "bfdd-delay=",
-							&dbg_arg)) {
+			if (bbdd_util_startswith(optarg, "bfdd-delay=",
+						 &dbg_arg)) {
 				rc = bbdd_util_parse_time_us(dbg_arg, &us,
 							     &error);
 				if (rc != 0) {
@@ -156,6 +154,8 @@ int main(int argc, char **argv)
 				bbdd_env.bfdd_delay_ms = us;
 			} else if (strcmp(optarg, "cli-imm-done") == 0) {
 				bbdd_env.cli_imm_done = true;
+			} else if (strcmp(optarg, "mon-eager") == 0) {
+				bbdd_env.mon_eager = true;
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);
