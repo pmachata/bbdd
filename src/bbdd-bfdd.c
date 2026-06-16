@@ -810,6 +810,7 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 		uint32_t hold_time_ms = bbdd_ntoh32(fsess->hold_time);
 
 		if (hold_time_ms > UINT32_MAX / 1000) {
+			// xxx monitor
 			fprintf(stderr,
 				"bfdd: hold_time %u ms overflows uint32_t, saturating\n",
 				hold_time_ms);

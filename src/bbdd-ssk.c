@@ -75,6 +75,7 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 		if (rc == 0)
 			break;
 
+		// xxx debug message
 		len = (size_t) rc;
 
 		DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {

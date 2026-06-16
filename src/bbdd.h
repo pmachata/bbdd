@@ -29,6 +29,7 @@ extern struct bbdd_env {
 				 * paths that deal with a disappeared peer. */
 	uint32_t bfdd_delay_ms;	/* The amount of sleep in us between reception
 				 * of a BFDD message and the response. */
+	bool no_poll_reply;	/* Do not send poll replies. */
 } bbdd_env;
 
 struct bbdd_ec {

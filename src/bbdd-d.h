@@ -59,9 +59,15 @@ struct bbdd_d_session_data_timing {
 };
 
 struct bbdd_d_session_data {
+	// xxx this should go to bbdd-bpf for remote end, can stay here for
+	// local end
 	struct bbdd_d_session_flags flags;
+	// xxx this likewise -- remote should be separate
 	uint32_t discr;
+	// xxx and this
 	struct bbdd_d_session_data_timing timing;
+	// xxx and this for both local and remote, this is changed in bbdd-bpf,
+	// it just shouldn't be here.
 	struct bbdd_d_session_state_end state;
 };
 

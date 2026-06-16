@@ -2617,6 +2617,10 @@ static int bbdd_d_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
 {
 	struct bbdd_d *d = data;
 
+	// xxx this only gets called for valid objects. There should also be a
+	// callback for invalid parses so that we can bounce them with
+	// semantically correct JRPC and send them to monitor.
+
 	bbdd_util_ssk_recv_obj(request_obj, tkn->peer, d->mon,
 			       bbdd_d_handle_method, d);
 	return 0;
