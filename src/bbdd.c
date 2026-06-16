@@ -156,6 +156,8 @@ int main(int argc, char **argv)
 				bbdd_env.cli_imm_done = true;
 			} else if (strcmp(optarg, "mon-eager") == 0) {
 				bbdd_env.mon_eager = true;
+			} else if (strcmp(optarg, "no-poll-reply") == 0) {
+				bbdd_env.no_poll_reply = true;
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);
