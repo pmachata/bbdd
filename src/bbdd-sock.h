@@ -74,19 +74,7 @@ int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa, int type,
 			     struct bbdd_sock *sock, char **error);
 void bbdd_sock_close(struct bbdd_sock *sock);
 
-int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error);
-void bbdd_sock_close_d(struct bbdd_sock *ctl);
-
-int bbdd_sock_open_c(struct bbdd_sock *cli,
-		     struct bbdd_sock *peer,
-		     const char *sockdir, char **error);
-void bbdd_sock_close_c(struct bbdd_sock *cli);
-
 int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		       struct bbdd_sock *sock,
 		       char **error);
 void bbdd_sock_close_udp(struct bbdd_sock *sock);
-
-int bbdd_sock_recv(struct bbdd_sock *sock,
-		   struct bbdd_sock *peer,
-		   char **bufp, char **error);

@@ -478,23 +478,6 @@ int bbdd_ctl_sockaddr(const char *sockdir,
 					    error);
 }
 
-static int bbdd_cli_sockaddr(const char *sockdir,
-			     struct bbdd_sockaddr *cli_bsa, char **error)
-{
-	char *sockname;
-	int rc;
-
-	rc = asprintf(&sockname, "bbdd.cli.%d", getpid());
-	if (rc < 0) {
-		bbdd_err_fmt(error, "%m");
-		return rc;
-	}
-
-	rc = bbdd_sock_parse_addrstr_unix(sockdir, sockname, cli_bsa, error);
-	free(sockname);
-	return rc;
-}
-
 int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 			     int type, struct bbdd_sock *sock,
 			     char **error)
@@ -574,76 +557,6 @@ close_sock:
 	return rc;
 }
 
-int bbdd_sock_open_d(struct bbdd_sock *ctl, const char *sockdir, char **error)
-{
-	struct bbdd_sockaddr bsa;
-	int rc;
-
-	rc = bbdd_ctl_sockaddr(sockdir, &bsa, error);
-	if (rc != 0)
-		goto err;
-
-	rc = bbdd_sock_open_sa(&bsa, SOCK_DGRAM, ctl, error);
-	if (rc != 0)
-		goto err;
-
-	return 0;
-
-err:
-	bbdd_err_app(error, "Failed to open daemon socket");
-	return rc;
-}
-
-void bbdd_sock_close_d(struct bbdd_sock *ctl)
-{
-	bbdd_sock_close(ctl);
-}
-
-int bbdd_sock_open_c(struct bbdd_sock *cli,
-		     struct bbdd_sock *peer,
-		     const char *sockdir,
-		     char **error)
-{
-	struct bbdd_sockaddr ctl_bsa;
-	struct bbdd_sockaddr cli_bsa;
-	int rc;
-
-	rc = bbdd_ctl_sockaddr(sockdir, &ctl_bsa, error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_cli_sockaddr(sockdir, &cli_bsa, error);
-	if (rc != 0)
-		return rc;
-
-	rc = bbdd_sock_open_sa(&cli_bsa, SOCK_DGRAM, cli, error);
-	if (rc != 0)
-		return rc;
-
-	*peer = (struct bbdd_sock) {
-		.fd = cli->fd,
-		.sa = ctl_bsa,
-	};
-	rc = connect(peer->fd, &peer->sa.sa, peer->sa.len);
-	if (rc != 0) {
-		bbdd_err_fmt(error, "Failed to connect to socket `%s': %m",
-			     peer->sa.sun.sun_path);
-		goto close_cli;
-	}
-
-	return 0;
-
-close_cli:
-	bbdd_sock_close_c(cli);
-	return -1;
-
-}
-
-void bbdd_sock_close_c(struct bbdd_sock *cli)
-{
-	bbdd_sock_close(cli);
-}
-
 int bbdd_sock_open_udp(struct bbdd_sockaddr addr,
 		       struct bbdd_sock *sock,
 		       char **error)
@@ -700,48 +613,4 @@ close_fd:
 void bbdd_sock_close_udp(struct bbdd_sock *sock)
 {
 	close(sock->fd);
-}
-
-int bbdd_sock_recv(struct bbdd_sock *sock, struct bbdd_sock *peer,
-		   char **bufp, char **error)
-{
-	ssize_t msgsz;
-	char *buf;
-	ssize_t n;
-	int rc;
-
-	*bufp = NULL;
-	*peer = (struct bbdd_sock) {
-		.fd = sock->fd,
-		.sa = {
-			.len = sizeof(peer->sa),
-		},
-	};
-	msgsz = recvfrom(sock->fd, NULL, 0, MSG_PEEK | MSG_TRUNC,
-			 (struct sockaddr *) &peer->sa, &peer->sa.len);
-	if (msgsz < 0) {
-		bbdd_err_fmt(error, "recvfrom: %m");
-		return -1;
-	}
-
-	buf = calloc(1, (size_t)msgsz + 1);
-	if (buf == NULL) {
-		bbdd_err_fmt(error, "calloc: %m");
-		return -1;
-	}
-
-	n = recv(sock->fd, buf, (size_t)msgsz, 0);
-	if (n < 0) {
-		bbdd_err_fmt(error, "recv: %m");
-		rc = -1;
-		goto free_buf;
-	}
-	buf[n] = '\0';
-
-	*bufp = buf;
-	return 0;
-
-free_buf:
-	free(buf);
-	return rc;
 }
