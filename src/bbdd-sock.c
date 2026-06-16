@@ -95,23 +95,18 @@ static int bbdd_sock_parse_port(const char *str, uint16_t *ret_port,
 	return 0;
 }
 
-static int bbdd_sock_parse_addrstr_unix(const char *sockdir,
-					const char *addr,
+static int bbdd_sock_parse_addrstr_unix(const char *addr,
 					struct bbdd_sockaddr *bsa,
 					char **error)
 {
-	const char *maybe_slash = "/";
 	int len;
-
-	if (sockdir[0] == '\0' || sockdir[strlen(sockdir) - 1] == '/')
-		maybe_slash++;
 
 	bsa->len = sizeof(bsa->sun);
 	bsa->sun.sun_family = AF_UNIX;
 	len = snprintf(bsa->sun.sun_path, sizeof(bsa->sun.sun_path),
-		       "%s%s%s", sockdir, maybe_slash, addr);
+		       "%s", addr);
 	if (len < 0) {
-		bbdd_err_fmt(error, "Failed to parse UNIX domain socket address: %m");
+		bbdd_err_fmt(error, "Failed to format UNIX domain socket address: %m");
 		return len;
 	}
 	if ((unsigned) len >= sizeof(bsa->sun.sun_path)) {
@@ -419,7 +414,7 @@ int bbdd_sock_parse_addrstr(int af, const char *addr, struct bbdd_sockaddr *bsa,
 {
 	switch (af) {
 	case AF_UNIX:
-		return bbdd_sock_parse_addrstr_unix("", addr, bsa, error);
+		return bbdd_sock_parse_addrstr_unix(addr, bsa, error);
 	case AF_INET:
 		return bbdd_sock_parse_addrstr_ipv4(addr, bsa, error);
 	case AF_INET6:
@@ -471,12 +466,6 @@ int bbdd_sock_parse_addr(const char *addr, struct bbdd_sockaddr *bsa,
 	return bbdd_sock_unsupported_family(af, error);
 }
 
-int bbdd_ctl_sockaddr(const char *sockdir,
-		      struct bbdd_sockaddr *ctl_bsa, char **error)
-{
-	return bbdd_sock_parse_addrstr_unix(sockdir, "bbdd.ctl", ctl_bsa,
-					    error);
-}
 
 int bbdd_sock_open_sa_nobind(const struct bbdd_sockaddr *bsa,
 			     int type, struct bbdd_sock *sock,

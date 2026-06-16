@@ -5,8 +5,8 @@ IPV=4
 Bbdd_setup_ns NS1
 in_ns NS1
 
-Bbdd_setup_sockdir SD1
-in_sockdir SD1
+Bbdd_setup_socket SD1
+with_socket SD1
 
 adf_Bbdd_start
 

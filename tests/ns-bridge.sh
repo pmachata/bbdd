@@ -4,61 +4,61 @@ Bbdd_setup_ns NS1 NS2
 Bbdd_connect_ns NS1 v1 $(Bbdd_IP_mask 1) \
 		NS2 v2 $(Bbdd_IP_mask 2)
 
-Bbdd_setup_sockdir SD1 SD2 SDb
-in_sockdir SD1 in_ns NS1 adf_Bbdd_start
-in_sockdir SD2 in_ns NS2 adf_Bbdd_start
+Bbdd_setup_socket SD1 SD2 SDb
+with_socket SD1 in_ns NS1 adf_Bbdd_start
+with_socket SD2 in_ns NS2 adf_Bbdd_start
 
 defer_scope_push
 
 # This has to run in the same namespace as the daemon it forwards to, so that
 # netif name translation works.
-in_sockdir SDb in_ns NS2 adf_Bbdd_bridge_start
+with_socket SDb in_ns NS2 adf_Bbdd_bridge_start
 
-in_sockdir SD2 Bbdd_bfdd_connect SDb
-in_sockdir SD2 bfdd_echo_test
-in_sockdir SDb bfdd_echo_test
+with_socket SD2 Bbdd_bfdd_connect SDb
+with_socket SD2 bfdd_echo_test
+with_socket SDb bfdd_echo_test
 
-in_sockdir SD1 Bbdd session add \
+with_socket SD1 Bbdd session add \
 	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3 \
 	   passive
-in_sockdir SD1 nsessions_test 1
+with_socket SD1 nsessions_test 1
 
-in_sockdir SDb Bbdd session add \
+with_socket SDb Bbdd session add \
 	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
 	   discr 2 passive
-in_sockdir SD2 nsessions_test 1
+with_socket SD2 nsessions_test 1
 
-in_sockdir SD1 session_state_test up 0
-in_sockdir SD2 session_state_test up 0
+with_socket SD1 session_state_test up 0
+with_socket SD2 session_state_test up 0
 
-in_sockdir SDb Bbdd session discr 2 del
-in_sockdir SD2 nsessions_test 0
+with_socket SDb Bbdd session discr 2 del
+with_socket SD2 nsessions_test 0
 
-in_sockdir SDb Bbdd session add \
+with_socket SDb Bbdd session add \
 	   dst $(Bbdd_IP 1) min-tx 200ms min-rx 200ms detect-mult 3 \
 	   discr 2 hold-time 5s
 
-in_sockdir SD1 hold_time_test 5
-in_sockdir SD2 session_state_test up 1
+with_socket SD1 hold_time_test 5
+with_socket SD2 session_state_test up 1
 
 cpi_test()
 {
-	in_sockdir SD1 session_value_check '.data.cpi' false
-	in_sockdir SD1 session_value_check '.state.remote.cpi' false
-	in_sockdir SD2 session_value_check '.data.cpi' false
-	in_sockdir SD2 session_value_check '.state.remote.cpi' false
+	with_socket SD1 session_value_check '.data.cpi' false
+	with_socket SD1 session_value_check '.state.remote.cpi' false
+	with_socket SD2 session_value_check '.data.cpi' false
+	with_socket SD2 session_value_check '.state.remote.cpi' false
 
 	# This also tests session parameter change via bridge, and exercises
 	# code for setting src address across the bridge.
-	in_sockdir SDb Bbdd session add dst $(Bbdd_IP 1) \
+	with_socket SDb Bbdd session add dst $(Bbdd_IP 1) \
 		   min-tx 200ms min-rx 200ms detect-mult 3 \
 		   src $(Bbdd_IP 2) netif v2 discr 2 cpi
 	sleep 1
 
-	in_sockdir SD1 session_value_check '.data.cpi' false
-	in_sockdir SD1 session_value_check '.state.remote.cpi' true
-	in_sockdir SD2 session_value_check '.data.cpi' true
-	in_sockdir SD2 session_value_check '.state.remote.cpi' false
+	with_socket SD1 session_value_check '.data.cpi' false
+	with_socket SD1 session_value_check '.state.remote.cpi' true
+	with_socket SD2 session_value_check '.data.cpi' true
+	with_socket SD2 session_value_check '.state.remote.cpi' false
 
 	Bbdd_log_test "CPI propagates"
 }
@@ -67,7 +67,7 @@ cpi_test
 
 sleep 1 # Collect some more traffic -- the CPI test already slept 1s
 
-in_sockdir SDb packet_size_test discr 2
+with_socket SDb packet_size_test discr 2
 
 defer_scope_pop # Kill the bridge
 
@@ -87,19 +87,19 @@ bfdd_echo_race_test()
 	local -a survivors=()
 	local i
 
-	slowwait 5 not in_sockdir SDb Bbdd -q echo
+	slowwait 5 not with_socket SDb Bbdd -q echo
 
-	in_sockdir SDb in_ns NS2 \
+	with_socket SDb in_ns NS2 \
 		Bbdd_bground --debug=bfdd-delay=1s \
 			     bfdd bridge start \
 			     unix:${SDb}/bfdd_dplane.sock
-	defer in_sockdir SDb Bbdd_stop $!
-	in_sockdir SDb Bbdd_wait
+	defer with_socket SDb Bbdd_stop $!
+	with_socket SDb Bbdd_wait
 
-	in_sockdir SD2 Bbdd_bfdd_connect SDb
+	with_socket SD2 Bbdd_bfdd_connect SDb
 
 	for ((i = 0; i < n; i++)); do
-		in_sockdir SD2 Bbdd --json bfdd echo \
+		with_socket SD2 Bbdd --json bfdd echo \
 			> "$tmpdir/race.$i.out" &
 		pids+=($!)
 	done

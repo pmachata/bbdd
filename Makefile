@@ -8,7 +8,7 @@ MANDIR          := $(PREFIX)/share/man
 SYSCONFDIR      := $(PREFIX)/etc
 RUNSTATEDIR     := /run
 SYSTEMDDIR      := $(PREFIX)/lib/systemd/system
-DEFAULT_SOCKDIR := $(RUNSTATEDIR)/bbdd
+DEFAULT_SOCKET  := $(RUNSTATEDIR)/bbdd/bbdd.ctl
 
 # ── Directories ───────────────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ SED_SUBST := \
     -e 's|@BINDIR@|$(BINDIR)|g'                   \
     -e 's|@SYSCONFDIR@|$(SYSCONFDIR)|g'           \
     -e 's|@RUNSTATEDIR@|$(RUNSTATEDIR)|g'         \
-    -e 's|@DEFAULT_SOCKDIR@|$(DEFAULT_SOCKDIR)|g'
+    -e 's|@DEFAULT_SOCKET@|$(DEFAULT_SOCKET)|g'
 
 # ── C sources, objects, dependency files ─────────────────────────────────────
 

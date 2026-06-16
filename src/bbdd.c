@@ -40,14 +40,14 @@ static struct bbdd_ec bbdd_help(void)
 	     "\n"
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
-	     "                    -V | --version | --sockdir <DIR> | --json |\n"
+	     "                    -V | --version | --socket <PATH> | --json |\n"
 	     "                    -N | -t | --timestamp ]\n"
 	     "	     COMMAND := { start | stop | echo | session | global | bfdd | monitor }\n"
 	     "\n"
 	     "  --json         show JSON result object instead of formatting it\n"
 	     "  -N             suppress human-readable unit conversion (show raw microseconds)\n"
-	     "  --sockdir      the directory to use to put socket files\n"
-	     "                 defaults to " BBDD_DEFAULT_SOCKDIR "\n"
+	     "  --socket       path to the UNIX socket used to talk to the daemon\n"
+	     "                 defaults to " BBDD_DEFAULT_SOCKET "\n"
 	     "  -t/--timestamp prefix monitor notifications with a timestamp\n"
 	     );
 	return bbdd_ec_success;
@@ -88,7 +88,7 @@ bbdd_cmd(int argc, char **argv, const struct bbdd_mon_topics *topics)
 int main(int argc, char **argv)
 {
 	enum {
-		opt_sockaddr = 257,
+		opt_socket = 257,
 		opt_json,
 		opt_debug,
 	};
@@ -99,7 +99,7 @@ int main(int argc, char **argv)
 		{ "timestamp",	no_argument,	   NULL, 't' },
 		{ "verbose",	no_argument,	   NULL, 'v' },
 		{ "version",	no_argument,	   NULL, 'V' },
-		{ "sockdir",	required_argument, NULL, opt_sockaddr },
+		{ "socket",	required_argument, NULL, opt_socket },
 		{ "debug",	required_argument, NULL, opt_debug },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
 	int opt;
 	int rc;
 
-	bbdd_env.sockdir = BBDD_DEFAULT_SOCKDIR;
+	bbdd_env.socket = BBDD_DEFAULT_SOCKET;
 	while ((opt = getopt_long(argc, argv, "hqtvVN",
 				  long_options, NULL)) >= 0) {
 		switch (opt) {
@@ -129,8 +129,8 @@ int main(int argc, char **argv)
 		case 'q':
 			verbosity--;
 			break;
-		case opt_sockaddr:
-			bbdd_env.sockdir = optarg;
+		case opt_socket:
+			bbdd_env.socket = optarg;
 			break;
 		case opt_json:
 			bbdd_env.show_json = true;

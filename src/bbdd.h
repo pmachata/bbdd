@@ -12,7 +12,7 @@
 /* bbdd.c */
 
 extern struct bbdd_env {
-	const char *sockdir;
+	const char *socket;
 	int verbosity;
 	bool show_json;
 	bool numeric;

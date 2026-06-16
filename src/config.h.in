@@ -1,3 +1,3 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #pragma once
-#define BBDD_DEFAULT_SOCKDIR "@DEFAULT_SOCKDIR@"
+#define BBDD_DEFAULT_SOCKET "@DEFAULT_SOCKET@"

@@ -4,35 +4,35 @@ tmpdir=$(mktemp -d /tmp/XXXXXX)
 defer rm -Rf "$tmpdir"
 chmod a+rwx "${tmpdir}"
 
-Bbdd_setup_sockdir()
+Bbdd_setup_socket()
 {
-	local sd_name
+	local s_name
 	local dir
 
-	for sd_name in "$@"; do
-		dir="${tmpdir}/${sd_name}"
-		eval "${sd_name}=${dir}"
-		mkdir "${!sd_name}"
-		defer rm -Rf "${!sd_name}"
-		chmod a+rwx "${!sd_name}"
+	for s_name in "$@"; do
+		dir="${tmpdir}/${s_name}"
+		eval "${s_name}=${dir}"
+		mkdir "${!s_name}"
+		defer rm -Rf "${!s_name}"
+		chmod a+rwx "${!s_name}"
 	done
 }
 
-in_sockdir()
+with_socket()
 {
-	local sd_name=$1; shift
+	local s_name=$1; shift
 
-	BBDD_SOCKDIR="${sd_name}" "$@"
+	BBDD_SOCKET="${s_name}" "$@"
 }
 
 Bbdd()
 {
-	$(nspfx) "${bin_dir}/bbdd" --sockdir "${!BBDD_SOCKDIR}" "$@"
+	$(nspfx) "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@"
 }
 
 Bbdd_bground()
 {
-	$(nspfx) "${bin_dir}/bbdd" --sockdir "${!BBDD_SOCKDIR}" "$@" &
+	$(nspfx) "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@" &
 }
 
 Bbdd_stop()
@@ -72,7 +72,7 @@ Bbdd_wait()
 adf_Bbdd_start()
 {
 	Bbdd --debug=mon-eager start &
-	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
+	defer with_socket "$BBDD_SOCKET" Bbdd_stop $!
 
 	Bbdd_wait
 }
@@ -80,22 +80,22 @@ adf_Bbdd_start()
 adf_Bbdd_bridge_start()
 {
 	Bbdd --debug=mon-eager \
-	     bfdd bridge start unix:${!BBDD_SOCKDIR}/bfdd_dplane.sock &
-	defer in_sockdir "$BBDD_SOCKDIR" Bbdd_stop $!
+	     bfdd bridge start unix:${!BBDD_SOCKET}/bfdd_dplane.sock &
+	defer with_socket "$BBDD_SOCKET" Bbdd_stop $!
 
 	Bbdd_wait
 }
 
 Bbdd_bfdd_connect()
 {
-	local dst_sockdir=$1; shift
+	local dst_socket=$1; shift
 
-	Bbdd bfdd connect unix:${!dst_sockdir}/bfdd_dplane.sock "$@"
+	Bbdd bfdd connect unix:${!dst_socket}/bfdd_dplane.sock "$@"
 }
 
 Bbdd_bfdd_disconnect()
 {
-	local dst_sockdir=$1; shift
+	local dst_socket=$1; shift
 
 	Bbdd bfdd disconnect "$@"
 }
@@ -208,7 +208,7 @@ Bbdd_session_wait_bpf_shutting_down()
 
 Bbdd_describe_env()
 {
-	format_env $(collect_env) "$BBDD_SOCKDIR"
+	format_env $(collect_env) "$BBDD_SOCKET"
 }
 
 Bbdd_log_test()

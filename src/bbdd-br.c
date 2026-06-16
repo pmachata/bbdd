@@ -641,7 +641,8 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 	{
 		struct bbdd_sockaddr ctl_bsa;
 
-		err = bbdd_ctl_sockaddr(bbdd_env.sockdir, &ctl_bsa, &error);
+		err = bbdd_sock_parse_addrstr(AF_UNIX, bbdd_env.socket,
+					      &ctl_bsa, &error);
 		if (err != 0)
 			goto bfdd_poll_unset_server;
 

@@ -10,7 +10,7 @@ SYNOPSIS
 
 `bbdd -V`
 
-`bbdd [-v | -q] [-N] [-t | --timestamp] [--json] [--sockdir <PATH>]
+`bbdd [-v | -q] [-N] [-t | --timestamp] [--json] [--socket <PATH>]
 {start | stop | echo | session | global | bfdd | monitor | help}`
 
 DESCRIPTION
@@ -69,13 +69,12 @@ OPTIONS
 
 : Prefix monitor notifications with a timestamp.
 
-`--sockdir <PATH>`
+`--socket <PATH>`
 
-: Location of the directory where Unix sockets used to communicate with the
-  daemon are put.
+: Path to the UNIX socket used to talk to the daemon.
 
-  By default, `bbdd` places the socket in a directory @DEFAULT_SOCKDIR@.
-  The `--sockdir` option overrides the compiled-in default.
+  By default, the socket lives at @DEFAULT_SOCKET@. The `--socket` option
+  overrides the compiled-in default.
 
 `--json`
 

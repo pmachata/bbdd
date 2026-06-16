@@ -19,31 +19,31 @@ sleep 2
 in_ns NS1 ping_test $(Bbdd_IP 2)
 in_ns NS2 ping_test $(Bbdd_IP 1)
 
-Bbdd_setup_sockdir SD1 SD2 SD3
-in_sockdir SD1 in_ns NS1 adf_Bbdd_start
-in_sockdir SD2 in_ns NS2 adf_Bbdd_start
-in_sockdir SD3 in_ns NS3 adf_Bbdd_start
+Bbdd_setup_socket SD1 SD2 SD3
+with_socket SD1 in_ns NS1 adf_Bbdd_start
+with_socket SD2 in_ns NS2 adf_Bbdd_start
+with_socket SD3 in_ns NS3 adf_Bbdd_start
 
-in_sockdir SD1 Bbdd session add dst $(Bbdd_IP 2) discr 0x110 \
+with_socket SD1 Bbdd session add dst $(Bbdd_IP 2) discr 0x110 \
 				min-tx 200ms min-rx 200ms detect-mult 3
-in_sockdir SD2 Bbdd session add dst $(Bbdd_IP 1) discr 0x220 \
+with_socket SD2 Bbdd session add dst $(Bbdd_IP 1) discr 0x220 \
 				min-tx 200ms min-rx 200ms detect-mult 3
-in_sockdir SD3 Bbdd session add dst $(Bbdd_IP 1) discr 0x333 \
-				min-tx 200ms min-rx 200ms detect-mult 3
-
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test up 1
-in_sockdir SD3 session_state_test not_up 1
-
-in_sockdir SD2 Bbdd session del
-in_sockdir SD1 session_state_test not_up 1
-
-in_sockdir SD2 Bbdd session add dst $(Bbdd_IP 1) discr 0x222 \
+with_socket SD3 Bbdd session add dst $(Bbdd_IP 1) discr 0x333 \
 				min-tx 200ms min-rx 200ms detect-mult 3
 
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test up 1
-in_sockdir SD3 session_state_test not_up 1
+with_socket SD1 session_state_test up 1
+with_socket SD2 session_state_test up 1
+with_socket SD3 session_state_test not_up 1
+
+with_socket SD2 Bbdd session del
+with_socket SD1 session_state_test not_up 1
+
+with_socket SD2 Bbdd session add dst $(Bbdd_IP 1) discr 0x222 \
+				min-tx 200ms min-rx 200ms detect-mult 3
+
+with_socket SD1 session_state_test up 1
+with_socket SD2 session_state_test up 1
+with_socket SD3 session_state_test not_up 1
 
 in_ns NSb Ip link set dev vB nomaster
 in_ns NSb Ip link set dev vC master br # connect NS1-NS3
@@ -52,17 +52,17 @@ sleep 2
 in_ns NS1 ping_test $(Bbdd_IP 2)
 in_ns NS3 ping_test $(Bbdd_IP 1)
 
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test not_up 1
-in_sockdir SD3 session_state_test up 1
+with_socket SD1 session_state_test up 1
+with_socket SD2 session_state_test not_up 1
+with_socket SD3 session_state_test up 1
 
-in_sockdir SD1 Bbdd session del
-in_sockdir SD1 Bbdd session add dst $(Bbdd_IP 2) discr 0x111 \
+with_socket SD1 Bbdd session del
+with_socket SD1 Bbdd session add dst $(Bbdd_IP 2) discr 0x111 \
 				min-tx 200ms min-rx 200ms detect-mult 3
 
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test not_up 1
-in_sockdir SD3 session_state_test up 1
+with_socket SD1 session_state_test up 1
+with_socket SD2 session_state_test not_up 1
+with_socket SD3 session_state_test up 1
 
 in_ns NSb Ip link set dev vC nomaster
 in_ns NSb Ip link set dev vB master br # connect NS1-NS2 again
@@ -71,6 +71,6 @@ sleep 2
 in_ns NS1 ping_test $(Bbdd_IP 2)
 in_ns NS2 ping_test $(Bbdd_IP 1)
 
-in_sockdir SD1 session_state_test up 1
-in_sockdir SD2 session_state_test up 1
-in_sockdir SD3 session_state_test not_up 1
+with_socket SD1 session_state_test up 1
+with_socket SD2 session_state_test up 1
+with_socket SD3 session_state_test not_up 1

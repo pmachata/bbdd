@@ -247,7 +247,7 @@ bbdd_c_interact(struct json_object **request,
 	if (c.pctx == NULL)
 		goto mon_fini;
 
-	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
+	rc = bbdd_sock_parse_addrstr(AF_UNIX, bbdd_env.socket, &bsa, &error);
 	if (rc != 0)
 		goto poll_fini;
 
@@ -3121,7 +3121,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	if (mctx.pctx == NULL)
 		goto mon_fini;
 
-	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
+	rc = bbdd_sock_parse_addrstr(AF_UNIX, bbdd_env.socket, &bsa, &error);
 	if (rc != 0)
 		goto poll_fini;
 

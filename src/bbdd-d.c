@@ -2939,7 +2939,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		goto fini_veth;
 	}
 
-	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
+	rc = bbdd_sock_parse_addrstr(AF_UNIX, bbdd_env.socket, &bsa, &error);
 	if (rc != 0)
 		goto bpf_destroy;
 
