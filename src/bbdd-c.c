@@ -22,6 +22,7 @@
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-sock.h"
+#include "bbdd-ssk.h"
 #include "bbdd-util.h"
 
 /* State information added by bbdd-bpf. */
@@ -121,30 +122,6 @@ __bbdd_c_response_extract_result(struct json_object *j,
 	return bbdd_c_result_rc_ok;
 }
 
-static bool bbdd_c_response_extract_result(struct json_object *j,
-					   int expect_id,
-					   enum json_type result_type,
-					   struct json_object **ret_result)
-{
-	enum bbdd_c_result_rc rc;
-	char *error;
-
-	rc = __bbdd_c_response_extract_result(j, expect_id, result_type,
-					      ret_result, &error);
-	switch (rc) {
-	case bbdd_c_result_rc_fail:
-		bbdd_err_print(&error, NULL);
-		return false;
-	case bbdd_c_result_rc_ok_error:
-		return false;
-	case bbdd_c_result_rc_ok:
-		return true;
-	}
-
-	assert(!"extract_result");
-	__builtin_unreachable();
-}
-
 static void __bbdd_c_result_show_json(struct json_object *result)
 {
 	const char *dump;
@@ -162,6 +139,21 @@ static bool bbdd_c_result_show_json(struct json_object *result)
 	__bbdd_c_result_show_json(result);
 	return true;
 }
+
+struct bbdd_c {
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct bbdd_ssk_c ctl;
+
+	int (*cb)(struct json_object *result,
+		  void *data, char **error);
+	void *cb_data;
+	enum json_type cb_expected_type;
+
+	struct bbdd_ec ec; /* For error responses, even if the entire exchange
+			    * was successful, we want to have non-0 exit code. */
+};
 
 static int __bbdd_c_ctl_recv_obj(struct json_object *response,
 				 int (*cb)(struct json_object *result,
@@ -197,57 +189,30 @@ put_result:
 	return rc;
 }
 
-static struct json_object *bbdd_c_send_request_on(struct json_object *request,
-						  struct bbdd_sock *cli,
-						  struct bbdd_sock *peer)
+static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
+			       struct json_object *response, void *data,
+			       char **error)
 {
-	struct json_object *response_obj = NULL;
-	char *response;
-	char *error;
-	int err;
+	struct bbdd_c *c = data;
 
-	err = bbdd_util_jrpc_send(peer, request, &error);
-	if (err < 0) {
-		bbdd_err_print(&error, "Failed to send the RPC message");
-		return NULL;
-	}
-
-	err = bbdd_sock_recv(cli, peer, &response, &error);
-	if (err < 0) {
-		bbdd_err_print(&error, "Failed to receive an RPC response");
-		return NULL;
-	}
-
-	response_obj = json_tokener_parse(response);
-	if (response_obj == NULL) {
-		bbdd_err_fmt(&error, "Failed to parse RPC response as JSON.");
-		bbdd_err_print(&error, NULL);
-		goto free_response;
-	}
-
-free_response:
-	free(response);
-	return response_obj;
+	return __bbdd_c_ctl_recv_obj(response, c->cb, c->cb_data,
+				     c->cb_expected_type, &c->ec, error);
 }
 
-static struct json_object *bbdd_c_send_request(struct json_object *request)
+static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				     const char *buf, size_t len,
+				     void *data, char **error)
 {
-	struct json_object *response_obj = NULL;
-	struct bbdd_sock peer;
-	struct bbdd_sock cli;
-	char *error;
-	int err;
+	struct bbdd_c *c = data;
 
-	err = bbdd_sock_open_c(&cli, &peer, bbdd_env.sockdir, &error);
-	if (err < 0) {
-		bbdd_err_print(&error, "Failed to open a socket");
-		return NULL;
-	}
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, buf, len, c->tkn, error);
+}
 
-	response_obj = bbdd_c_send_request_on(request, &cli, &peer);
+static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_c *c = data;
 
-	bbdd_sock_close_c(&cli);
-	return response_obj;
+	bbdd_poll_request_quit(c->pctx);
 }
 
 static struct bbdd_ec
@@ -255,31 +220,89 @@ bbdd_c_interact(struct json_object **request,
 		int (*cb)(struct json_object *response, void *data,
 			  char **error),
 		void *data, enum json_type cb_expected_type,
-		const struct bbdd_mon_topics *)
+		const struct bbdd_mon_topics *topics)
 {
-	struct bbdd_ec ec = bbdd_ec_success;
-	struct json_object *response;
+	struct bbdd_c c = {
+		.cb = cb,
+		.cb_data = data,
+		.cb_expected_type = cb_expected_type,
+		.ec = bbdd_ec_success,
+	};
+	struct bbdd_sockaddr bsa;
+	struct bbdd_ssk_cbs cbs;
+	const char *request_str;
+	int rc = -ENOMEM;
 	char *error;
-	int rc;
 
-	response = bbdd_c_send_request(*request);
-	if (response == NULL) {
+	c.mon = bbdd_mon_create(bbdd_env.mon_eager, &error);
+	if (c.mon == NULL)
+		goto err;
+
+	rc = bbdd_mon_subscribe_cb(c.mon, bbdd_c_monitor_dispatch, NULL,
+				   *topics, &error);
+	if (rc != 0)
+		goto mon_fini;
+
+	c.pctx = bbdd_poll_init(c.mon, &error);
+	if (c.pctx == NULL)
+		goto mon_fini;
+
+	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
+	if (rc != 0)
+		goto poll_fini;
+
+	c.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, &error);
+	if (c.tkn == NULL) {
 		rc = -1;
-		goto put_request;
+		goto poll_fini;
 	}
 
-	rc = __bbdd_c_ctl_recv_obj(response, cb, data, cb_expected_type, &ec,
-				   &error);
+	cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = bbdd_c_ssk_json_tkn_rx_cb,
+		.done_cb = bbdd_c_ssk_json_tkn_done_cb,
+		.data = &c,
+	};
 
-put_request:
+	rc = bbdd_ssk_open_c(&c.ctl, c.pctx, &bsa, cbs, &error);
+	if (rc != 0)
+		goto tkn_destroy;
+
+	rc = bbdd_poll_set_signals(c.pctx, &error);
+	if (rc != 0)
+		goto ssk_close_ctl;
+
+	request_str = json_object_to_json_string(*request);
+	if (request_str == NULL) {
+		bbdd_err_fmt(&error, "Failed to serialize JSON object");
+		goto unset_signals;
+	}
+
+	rc = bbdd_ssk_c_nq(&c.ctl, request_str, strlen(request_str), &error);
+	if (rc != 0)
+		goto unset_signals;
+
 	json_object_put(*request);
 	*request = NULL;
+	request_str = NULL;
 
+	rc = bbdd_poll_loop(c.pctx, &error);
+
+unset_signals:
+	bbdd_poll_unset_signals(c.pctx);
+ssk_close_ctl:
+	bbdd_ssk_close_c(&c.ctl);
+tkn_destroy:
+	bbdd_util_ssk_json_tkn_destroy(c.tkn);
+poll_fini:
+	bbdd_poll_fini(c.pctx);
+mon_fini:
+	bbdd_mon_destroy(c.mon);
+err:
 	if (rc != 0) {
 		bbdd_err_print(&error, "Communication error");
 		return bbdd_ec_failure;
 	}
-	return ec;
+	return c.ec;
 }
 
 static int bbdd_c_cmd_noargs(int argc, char **argv, void (*help_cb)(void))
@@ -2941,58 +2964,68 @@ static void bbdd_c_monitor_handle_notif(const char *method,
 }
 
 struct bbdd_c_monitor_ctx {
-	struct bbdd_sock cli;
+	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct bbdd_ssk_c ctl;
+	struct bbdd_ec ec;
 };
 
-static int bbdd_c_monitor_recv_cb(struct bbdd_poll_ctx *pctx, short, void *arg,
+static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
+				  struct json_object *notif_obj, void *data,
 				  char **)
 {
-	struct bbdd_c_monitor_ctx *ctx = arg;
-	struct json_object *notif_obj;
+	struct bbdd_c_monitor_ctx *mctx = data;
 	struct json_object *params;
-	struct bbdd_sock sender;
 	const char *method;
 	char *error;
-	char *msg;
 	int err;
-
-	err = bbdd_sock_recv(&ctx->cli, &sender, &msg, &error);
-	if (err < 0) {
-		bbdd_err_print(&error, "Failed to receive monitor message");
-		bbdd_poll_request_quit(pctx);
-		return 0;
-	}
-
-	notif_obj = json_tokener_parse(msg);
-	if (notif_obj == NULL) {
-		fprintf(stderr, "Monitor message not JSON: `%s'\n", msg);
-		goto free_msg;
-	}
 
 	err = bbdd_jrpc_dissect_notif(notif_obj, &method, &params, &error);
 	if (err) {
-		bbdd_err_print(&error, "Failed to dissect monitor event");
-		goto put_notif_obj;
+		bbdd_err_print(&error, "monitor event");
+		return 0;
 	}
 
 	if (strcmp(method, "monitor-end") == 0) {
-		json_object_put(notif_obj);
-		free(msg);
-		bbdd_poll_request_quit(pctx);
+		bbdd_poll_request_quit(mctx->pctx);
 		return 0;
 	}
 
 	bbdd_c_monitor_handle_notif(method, params);
-
-put_notif_obj:
-	json_object_put(notif_obj);
-free_msg:
-	free(msg);
 	return 0;
 }
 
+static int bbdd_c_monitor_handshake_done_cb(struct json_object *result,
+					    void *data, char **)
+{
+	struct bbdd_c_monitor_ctx *mctx = data;
+
+	assert(json_object_get_type(result) == json_type_null);
+
+	mctx->tkn->obj_cb = bbdd_c_monitor_recv_cb;
+	assert(mctx->tkn->data == mctx);
+	return 0;
+}
+
+static int bbdd_c_monitor_handshake_cb(struct bbdd_util_ssk_json_tkn *,
+				       struct json_object *notif_obj,
+				       void *data, char **error)
+{
+	struct bbdd_c_monitor_ctx *mctx = data;
+
+	/* This gets called to handle the initial empty message. This could be
+	 * an error message, in which case __bbdd_c_ctl_recv_obj() bails out.
+	 * Otherwise the handshake is done, and we switch to the normal monitor
+	 * message handler in the above callback. */
+	return __bbdd_c_ctl_recv_obj(notif_obj,
+				     bbdd_c_monitor_handshake_done_cb, mctx,
+				     json_type_null, &mctx->ec, error);
+}
+
 static struct json_object *
-bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id)
+bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id,
+			     char **error)
 {
 	struct json_object *topics_arr;
 	struct json_object *params_obj;
@@ -3000,7 +3033,7 @@ bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id)
 
 	request = bbdd_jrpc_new_request(id, "monitor-subscribe");
 	if (request == NULL)
-		return NULL;
+		goto err;
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL)
@@ -3035,102 +3068,117 @@ put_params:
 	json_object_put(params_obj);
 put_request:
 	json_object_put(request);
+err:
+	bbdd_err_fmt(error, "Failed to build monitor request: %m");
 	return NULL;
+}
+
+static int bbdd_c_ssk_monitor_jrpc_rx_cb(struct bbdd_ssk_peer *peer,
+					 const char *buf, size_t len,
+					 void *data, char **error)
+{
+	struct bbdd_c_monitor_ctx *mctx = data;
+
+	return bbdd_util_ssk_json_tkn_rx_cb(peer, buf, len, mctx->tkn, error);
+}
+
+static void bbdd_c_ssk_monitor_jrpc_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_c_monitor_ctx *mctx = data;
+
+	bbdd_poll_request_quit(mctx->pctx);
 }
 
 static struct bbdd_ec
 bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		    struct bbdd_mon_topics remote_topics)
 {
-	struct bbdd_ec ec = bbdd_ec_failure;
-	struct bbdd_c_monitor_ctx mctx = {};
-	struct bbdd_poll_ctx *pctx;
-	struct json_object *response;
+	struct bbdd_c_monitor_ctx mctx = {
+		.ec = bbdd_ec_failure,
+	};
 	struct json_object *request;
-	struct json_object *result;
-	struct bbdd_sock peer;
-	struct bbdd_mon *mon;
+	struct bbdd_sockaddr bsa;
+	struct bbdd_ssk_cbs cbs;
+	const char *request_str;
 	const int id = 1;
+	int rc = -ENOMEM;
 	char *error;
-	int err;
 
-	err = bbdd_sock_open_c(&mctx.cli, &peer, bbdd_env.sockdir, &error);
-	if (err < 0)
+	request = bbdd_c_monitor_build_request(remote_topics, id, &error);
+	if (request == NULL)
 		goto err;
 
-	request = bbdd_c_monitor_build_request(remote_topics, id);
-	if (request == NULL) {
-		bbdd_err_fmt(&error, "Failed to build monitor request");
-		err = -1;
-		goto close_cli;
-	}
-
-	response = bbdd_c_send_request_on(request, &mctx.cli, &peer);
-	if (response == NULL) {
-		bbdd_err_fmt(&error, "Failed to send monitor request");
-		err = -1;
+	request_str = json_object_to_json_string(request);
+	if (request_str == NULL) {
+		bbdd_err_fmt(&error, "Failed to serialize JSON object");
 		goto put_request;
 	}
 
-	if (!bbdd_c_response_extract_result(response, id, json_type_null,
-					    &result)) {
-		bbdd_err_fmt(&error, "Failed to parse monitor response");
-		err = -1;
-		goto put_response;
-	}
+	mctx.mon = bbdd_mon_create(bbdd_env.mon_eager, &error);
+	if (mctx.mon == NULL)
+		goto put_request;
 
-	mon = bbdd_mon_create(bbdd_env.mon_eager, &error);
-	if (mon == NULL) {
-		err = -1;
-		goto put_response;
-	}
-
-	err = bbdd_mon_subscribe_cb(mon, bbdd_c_monitor_dispatch, NULL,
-				    *int_topics, &error);
-	if (err != 0)
+	rc = bbdd_mon_subscribe_cb(mctx.mon, bbdd_c_monitor_dispatch, NULL,
+				   *int_topics, &error);
+	if (rc != 0)
 		goto mon_fini;
 
-	pctx = bbdd_poll_init(mon, &error);
-	if (pctx == NULL) {
-		err = -1;
+	mctx.pctx = bbdd_poll_init(mctx.mon, &error);
+	if (mctx.pctx == NULL)
 		goto mon_fini;
+
+	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
+	if (rc != 0)
+		goto poll_fini;
+
+	mctx.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_monitor_handshake_cb,
+						 &mctx, &error);
+	if (mctx.tkn == NULL) {
+		rc = -1;
+		goto poll_fini;
 	}
 
-	err = bbdd_poll_set_signals(pctx, &error);
-	if (err != 0)
-		goto fini_pctx;
+	cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = bbdd_c_ssk_monitor_jrpc_rx_cb,
+		.done_cb = bbdd_c_ssk_monitor_jrpc_done_cb,
+		.data = &mctx,
+	};
 
-	err = bbdd_poll_set_fd(pctx, mctx.cli.fd, POLLIN,
-			       bbdd_c_monitor_recv_cb, &mctx, &error);
-	if (err != 0)
+	rc = bbdd_ssk_open_c(&mctx.ctl, mctx.pctx, &bsa, cbs, &error);
+	if (rc != 0)
+		goto tkn_destroy;
+
+	rc = bbdd_poll_set_signals(mctx.pctx, &error);
+	if (rc != 0)
+		goto ssk_close_ctl;
+
+
+	rc = bbdd_ssk_c_nq(&mctx.ctl, request_str, strlen(request_str), &error);
+	if (rc != 0)
 		goto unset_signals;
 
-	err = bbdd_poll_loop(pctx, &error);
-	if (err)
-		goto unset_fd;
+	rc = bbdd_poll_loop(mctx.pctx, &error);
 
-	ec = bbdd_ec_success;
-unset_fd:
-	bbdd_poll_unset_fd(pctx, mctx.cli.fd);
 unset_signals:
-	bbdd_poll_unset_signals(pctx);
-fini_pctx:
-	bbdd_poll_fini(pctx);
+	bbdd_poll_unset_signals(mctx.pctx);
+ssk_close_ctl:
+	bbdd_ssk_close_c(&mctx.ctl);
+tkn_destroy:
+	bbdd_util_ssk_json_tkn_destroy(mctx.tkn);
+poll_fini:
+	bbdd_poll_fini(mctx.pctx);
 mon_fini:
-	bbdd_mon_destroy(mon);
-put_response:
-	json_object_put(response);
+	bbdd_mon_destroy(mctx.mon);
 put_request:
 	json_object_put(request);
-close_cli:
-	bbdd_sock_close_c(&mctx.cli);
 err:
-	if (err != 0) {
-		bbdd_err_print(&error, "Monitor error");
+	if (rc != 0) {
+		bbdd_err_print(&error, "Communication error");
 		return bbdd_ec_failure;
 	}
-	return ec;
+	return mctx.ec;
 }
+
 
 static void bbdd_c_monitor_enable_all(struct bbdd_mon_topics *topics)
 {

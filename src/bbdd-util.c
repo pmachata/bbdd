@@ -10,18 +10,15 @@
 
 #include <json-c/json_tokener.h>
 
-#include "bbdd.h"
 #include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
-#include "bbdd-sock.h"
+#include "bbdd-ssk.h"
 
-int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
+int bbdd_util_jrpc_send(struct bbdd_ssk_peer *peer, struct json_object *obj,
 			char **error)
 {
 	const char *str;
-	size_t len;
-	ssize_t rc;
 
 	str = json_object_to_json_string(obj);
 	if (str == NULL) {
@@ -29,59 +26,54 @@ int bbdd_util_jrpc_send(struct bbdd_sock *sock, struct json_object *obj,
 		return -1;
 	}
 
-	len = strlen(str);
-	rc = sendto(sock->fd, str, len, 0,
-		    (struct sockaddr *) &sock->sa, sock->sa.len);
-	if (rc < 0) {
-		bbdd_err_fmt(error, "sendto: %m");
-		return -1;
-	}
-	if ((size_t)rc != len) {
-		bbdd_err_fmt(error, "sendto: Failed to write the full message");
-		return -1;
-	}
-	return 0;
+	return bbdd_ssk_peer_nq(peer, str, strlen(str), error);
 }
 
-void bbdd_util_jrpc_respond(struct bbdd_sock *ctl, struct json_object *obj)
+static int bbdd_util_jrpc_send_done(struct bbdd_ssk_peer *peer,
+				    struct json_object *obj,
+				    char **error)
+{
+	bbdd_ssk_peer_mark_done(peer);
+	return bbdd_util_jrpc_send(peer, obj, error);
+}
+
+void bbdd_util_jrpc_respond(struct bbdd_ssk_peer *peer, struct json_object *obj)
 {
 	char *error;
 	int rc;
 
-	if (obj == NULL)
-		return;
-
-	rc = bbdd_util_jrpc_send(ctl, obj, &error);
+	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send response");
 
 	json_object_put(obj);
 }
 
-void bbdd_util_jrpc_respond_inv_params(struct bbdd_sock *ctl,
+void bbdd_util_jrpc_respond_inv_params(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
 				       const char *msg)
 {
-	bbdd_util_jrpc_respond(ctl, bbdd_jrpc_new_error_inv_params(id, msg));
+	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_inv_params(id, msg));
 }
 
-void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_sock *ctl,
+
+void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_ssk_peer *peer,
 					   struct json_object *id,
 					   char **data)
 {
-	bbdd_util_jrpc_respond_inv_params(ctl, id, *data);
+	bbdd_util_jrpc_respond_inv_params(peer, id, *data);
 	free(*data);
 	*data = NULL;
 }
 
-void bbdd_util_jrpc_respond_interr(struct bbdd_sock *peer,
+void bbdd_util_jrpc_respond_interr(struct bbdd_ssk_peer *peer,
 				   struct json_object *id,
 				   const char *msg)
 {
 	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_int_error(id, msg));
 }
 
-void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
+void bbdd_util_jrpc_respond_interr_err(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
 				       char **data)
 {
@@ -91,7 +83,7 @@ void bbdd_util_jrpc_respond_interr_err(struct bbdd_sock *peer,
 }
 
 __attribute__((format(printf, 3, 4)))
-void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
+void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
 				       const char *fmt, ...)
 {
@@ -109,14 +101,15 @@ void bbdd_util_jrpc_respond_interr_fmt(struct bbdd_sock *peer,
 		return bbdd_util_jrpc_respond_interr(peer, id, fmt);
 }
 
-void bbdd_util_jrpc_respond_memerr(struct bbdd_sock *peer,
+void bbdd_util_jrpc_respond_memerr(struct bbdd_ssk_peer *peer,
 				   struct json_object *id)
 {
 	bbdd_util_jrpc_respond_interr(peer, id, "Memory allocation issue");
 }
 
-void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
-				  struct json_object *id)
+static void __bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
+					   struct json_object *id,
+					   bool keep_open)
 {
 	struct json_object *obj;
 	char *error;
@@ -129,7 +122,11 @@ void bbdd_util_jrpc_respond_empty(struct bbdd_sock *peer,
 	if (json_object_object_add(obj, "result", NULL))
 		goto put_obj;
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
+	if (keep_open)
+		rc = bbdd_util_jrpc_send(peer, obj, &error);
+	else
+		rc = bbdd_util_jrpc_send_done(peer, obj, &error);
+
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to send empty response");
 
@@ -141,7 +138,19 @@ put_obj:
 	bbdd_util_jrpc_respond_memerr(peer, id);
 }
 
-void bbdd_util_jrpc_respond_echo(struct bbdd_sock *peer,
+void bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
+				  struct json_object *id)
+{
+	__bbdd_util_jrpc_respond_empty(peer, id, false);
+}
+
+void bbdd_util_jrpc_respond_empty_no_done(struct bbdd_ssk_peer *peer,
+					  struct json_object *id)
+{
+	__bbdd_util_jrpc_respond_empty(peer, id, true);
+}
+
+void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 				 struct json_object *id,
 				 uint64_t ts, uint64_t reply_ts)
 {
@@ -166,7 +175,7 @@ void bbdd_util_jrpc_respond_echo(struct bbdd_sock *peer,
 	if (rc != 0)
 		goto put_result;
 
-	rc = bbdd_util_jrpc_send(peer, resp, &error);
+	rc = bbdd_util_jrpc_send_done(peer, resp, &error);
 	if (rc != 0)
 		// xxx monitor
 		bbdd_err_print(&error, "Failed to send echo response");
@@ -211,6 +220,9 @@ static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 	};
 	int rc;
 
+	if (request == NULL)
+		request = "(invalid message)";
+
 	mon_msg.params = json_object_new_object();
 	if (mon_msg.params == NULL)
 		return;
@@ -234,9 +246,10 @@ static void bbdd_util_ctl_mon_send(struct bbdd_mon *mon,
 	bbdd_mon_send(mon, &mon_msg, topic);
 }
 
-void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
+void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
+			    struct bbdd_ssk_peer *peer,
 			    struct bbdd_mon *mon,
-			    void (*cb)(struct bbdd_sock *peer,
+			    void (*cb)(struct bbdd_ssk_peer *peer,
 				       const char *method,
 				       struct json_object *params_obj,
 				       struct json_object *id,
@@ -244,47 +257,32 @@ void bbdd_util_ctl_activity(struct bbdd_sock *ctl,
 			    void *data)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_jrpc;
-	struct json_object *request_obj;
 	struct json_object *params;
-	struct bbdd_sock peer;
 	struct json_object *id;
-	char *request = NULL;
 	const char *method;
 	char *error;
 	int err;
 
-	err = bbdd_sock_recv(ctl, &peer, &request, &error);
-	if (err < 0) {
-		bbdd_err_print(&error, "Failed to receive response");
-		return;
-	}
-
-	request_obj = json_tokener_parse(request);
-
 	if (bbdd_mon_topic_active(mon, topic))
-		bbdd_util_ctl_mon_send(mon, topic, request, request_obj);
+		bbdd_util_ctl_mon_send(mon, topic, NULL, request_obj);
 
 	if (request_obj == NULL) {
-		bbdd_util_jrpc_respond(&peer,
+		/* JSON `null'. */
+		bbdd_util_jrpc_respond(peer,
 				       bbdd_jrpc_new_error_inv_request(NULL));
-		goto free_req;
+		return;
 	}
 
 	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
 					&error);
 	if (err) {
-		bbdd_util_jrpc_respond(&peer,
+		bbdd_util_jrpc_respond(peer,
 				       bbdd_jrpc_new_error_inv_request(error));
 		free(error);
-		goto put_req_obj;
+		return;
 	}
 
-	cb(&peer, method, params, id, data);
-
-put_req_obj:
-	json_object_put(request_obj);
-free_req:
-	free(request);
+	cb(peer, method, params, id, data);
 }
 
 uint64_t bbdd_util_now(void)

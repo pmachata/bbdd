@@ -35,6 +35,7 @@
 #include "bbdd-prog.h"
 #include "bbdd-sess.h"
 #include "bbdd-sock.h"
+#include "bbdd-ssk.h"
 #include "bbdd-util.h"
 #include "bfddp_packet.h"
 
@@ -88,13 +89,13 @@ struct bbdd_d {
 	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
-	struct bbdd_sock ctl;
+	struct bbdd_ssk_d ctl;
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-void bbdd_d_handle_echo(struct bbdd_sock *peer,
-			       struct json_object *params_obj,
-			       struct json_object *id)
+void bbdd_d_handle_echo(struct bbdd_ssk_peer *peer,
+			struct json_object *params_obj,
+			struct json_object *id)
 {
 	enum {
 		pol_ts,
@@ -121,7 +122,7 @@ void bbdd_d_handle_echo(struct bbdd_sock *peer,
 }
 
 void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
-			struct bbdd_sock *peer,
+			struct bbdd_ssk_peer *peer,
 			struct json_object *params_obj,
 			struct json_object *id)
 {
@@ -171,7 +172,7 @@ static int bbdd_d_global_diag_stats_json(struct bbdd_d *d,
 }
 
 static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
-					   struct bbdd_sock *peer,
+					   struct bbdd_ssk_peer *peer,
 					   struct json_object *params_obj,
 					   struct json_object *id)
 {
@@ -203,6 +204,7 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -987,7 +989,7 @@ put_entry_obj:
 	return NULL;
 }
 
-static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
+static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
 					  struct bbdd_bpf *bpf,
@@ -1072,6 +1074,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_sock *peer,
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -1621,7 +1624,7 @@ put_port:
 }
 
 static void bbdd_d_handle_session_add(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1649,7 +1652,7 @@ static void bbdd_d_handle_session_add(struct bbdd_d *d,
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
-static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
+static int bbdd_d_parse_select_sessions(struct bbdd_ssk_peer *peer,
 					struct json_object *params_obj,
 					struct json_object *id,
 					struct bbdd_c_session *select,
@@ -1679,7 +1682,7 @@ static int bbdd_d_parse_select_sessions(struct bbdd_sock *peer,
 	return 0;
 }
 
-static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
+static int bbdd_d_handle_session_check_bulk(struct bbdd_ssk_peer *peer,
 					    struct json_object *id,
 					    bool bulk,
 					    size_t ndiscrs)
@@ -1696,7 +1699,7 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_sock *peer,
 }
 
 static void bbdd_d_handle_session_set(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1783,7 +1786,7 @@ static int bbdd_d_handle_session_del_one(struct bbdd_d *d, uint32_t discr,
 }
 
 static void
-bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
+bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 			       struct json_object *id,
 			       struct bbdd_bpf *bpf,
 			       uint32_t *discrs,
@@ -1855,6 +1858,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_sock *peer,
 	rc = bbdd_util_jrpc_send(peer, obj, &error);
 	if (rc != 0)
 		bbdd_err_print(&error, "Failed to receive response");
+	bbdd_ssk_peer_mark_done(peer);
 
 	json_object_put(obj);
 	return;
@@ -1876,7 +1880,7 @@ put_obj:
 }
 
 static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
-					     struct bbdd_sock *peer,
+					     struct bbdd_ssk_peer *peer,
 					     struct json_object *params_obj,
 					     struct json_object *id)
 {
@@ -1897,7 +1901,7 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
 }
 
 static void bbdd_d_handle_session_stats(struct bbdd_d *d,
-					struct bbdd_sock *peer,
+					struct bbdd_ssk_peer *peer,
 					struct json_object *params_obj,
 					struct json_object *id)
 {
@@ -1918,7 +1922,7 @@ static void bbdd_d_handle_session_stats(struct bbdd_d *d,
 }
 
 static void bbdd_d_handle_session_del(struct bbdd_d *d,
-				      struct bbdd_sock *peer,
+				      struct bbdd_ssk_peer *peer,
 				      struct json_object *params_obj,
 				      struct json_object *id)
 {
@@ -1968,7 +1972,7 @@ free_discrs:
 }
 
 static void bbdd_d_handle_session_show(struct bbdd_d *d,
-				       struct bbdd_sock *peer,
+				       struct bbdd_ssk_peer *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id)
 {
@@ -2290,8 +2294,9 @@ static void bbdd_d_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
 
 struct bbdd_d_bfdd_connect_ctx {
 	struct bbdd_d *d;
-	struct bbdd_sock peer;
 	struct json_object *id;
+	struct bbdd_ssk_peer *peer;
+	struct bbdd_ssk_cbs *ssk_cbs;
 };
 
 static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
@@ -2300,7 +2305,8 @@ static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
 	struct bbdd_d *d = cctx->d;
 
 	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
-	bbdd_util_jrpc_respond_empty(&cctx->peer, cctx->id);
+	if (cctx->peer != NULL)
+		bbdd_util_jrpc_respond_empty(cctx->peer, cctx->id);
 }
 
 static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
@@ -2309,7 +2315,8 @@ static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 	struct bbdd_d *d = cctx->d;
 
-	bbdd_util_jrpc_respond_interr(&cctx->peer, cctx->id, *error);
+	if (cctx->peer != NULL)
+		bbdd_util_jrpc_respond_interr(cctx->peer, cctx->id, *error);
 	bbdd_mon_senderr(d->mon, error, "Failed to connect to BFD");
 
 	assert(d->bfdd == bfdd);
@@ -2321,17 +2328,27 @@ static void bbdd_d_bfdd_connect_free_cb(void *data)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx = data;
 
+	if (cctx->peer != NULL)
+		bbdd_ssk_peer_del_cbs(cctx->peer, cctx->ssk_cbs);
 	json_object_put(cctx->id);
 	free(cctx);
 }
 
+static void bbdd_d_bfdd_connect_peer_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_d_bfdd_connect_ctx *cctx = data;
+
+	cctx->peer = NULL;
+}
+
 static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
-				    struct bbdd_sock *peer,
+				    struct bbdd_ssk_peer *peer,
 				    struct json_object *id,
 				    const char *path,
 				    char **error)
 {
 	struct bbdd_d_bfdd_connect_ctx *cctx;
+	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_bfdd_cbs cbs;
 	int rc;
 
@@ -2347,9 +2364,16 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	}
 	*cctx = (struct bbdd_d_bfdd_connect_ctx) {
 		.d = d,
-		.peer = *peer,
+		.peer = peer,
 		.id = json_object_get(id),
 	};
+
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
+					bbdd_d_bfdd_connect_peer_done_cb, cctx,
+					error);
+	if (ssk_cbs == NULL)
+		goto cctx_free;
+	cctx->ssk_cbs = ssk_cbs;
 
 	cbs = (struct bbdd_bfdd_cbs) {
 		.conn_cb_data = cctx,
@@ -2367,18 +2391,20 @@ static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
 	d->bfdd = bbdd_bfdd_open(path, d->pctx, d->mon, &cbs, error);
 	if (d->bfdd == NULL) {
 		rc = -ENOMEM;
-		goto cctx_free;
+		goto peer_del_cbs;
 	}
 
 	return 0;
 
+peer_del_cbs:
+	bbdd_ssk_peer_del_cbs(peer, ssk_cbs);
 cctx_free:
 	free(cctx);
 	return rc;
 }
 
 static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
-				       struct bbdd_sock *peer,
+				       struct bbdd_ssk_peer *peer,
 				       struct json_object *params_obj,
 				       struct json_object *id)
 {
@@ -2431,7 +2457,7 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 }
 
 static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
-					 struct bbdd_sock *peer,
+					 struct bbdd_ssk_peer *peer,
 					 struct json_object *params_obj,
 					 struct json_object *id)
 {
@@ -2456,15 +2482,11 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 		return bbdd_util_jrpc_respond_memerr(peer, id);
 	}
 
-	rc = bbdd_util_jrpc_send(peer, obj, &error);
-	if (rc != 0)
-		bbdd_err_print(&error, "Failed to receive response");
-
-	json_object_put(obj);
+	bbdd_util_jrpc_respond(peer, obj);
 }
 
 static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
-					  struct bbdd_sock *peer,
+					  struct bbdd_ssk_peer *peer,
 					  struct json_object *params_obj,
 					  struct json_object *id)
 {
@@ -2487,7 +2509,7 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 }
 
 void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
-				     struct bbdd_sock *peer,
+				     struct bbdd_ssk_peer *peer,
 				     struct json_object *params_obj,
 				     struct json_object *id)
 {
@@ -2542,17 +2564,17 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
-	bbdd_util_jrpc_respond_empty(peer, id);
+	bbdd_util_jrpc_respond_empty_no_done(peer, id);
 }
 
-static void bbdd_d_handle_unhandled(struct bbdd_sock *peer,
+static void bbdd_d_handle_unhandled(struct bbdd_ssk_peer *peer,
 				    const char *method,
 				    struct json_object *id)
 {
 	bbdd_util_jrpc_respond(peer, bbdd_jrpc_new_error_method_nf(id, method));
 }
 
-static void bbdd_d_handle_method(struct bbdd_sock *peer,
+static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 				 const char *method,
 				 struct json_object *params_obj,
 				 struct json_object *id,
@@ -2592,13 +2614,56 @@ static void bbdd_d_handle_method(struct bbdd_sock *peer,
 		bbdd_d_handle_unhandled(peer, method, id);
 }
 
-static int bbdd_d_ctl_recv(struct bbdd_poll_ctx *, short, void *arg,
-			   char **)
+static int bbdd_d_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
+			       struct json_object *request_obj, void *data,
+			       char **)
 {
-	struct bbdd_d *d = arg;
+	struct bbdd_d *d = data;
 
-	bbdd_util_ctl_activity(&d->ctl, d->mon, bbdd_d_handle_method, d);
+	bbdd_util_ssk_recv_obj(request_obj, tkn->peer, d->mon,
+			       bbdd_d_handle_method, d);
 	return 0;
+}
+
+int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
+		      int (*recv_obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+					 struct json_object *obj,
+					 void *data, char **error),
+		      void *recv_obj_data, char **error)
+{
+	struct bbdd_util_ssk_json_tkn *tkn;
+	struct bbdd_ssk_cbs cbs;
+	int rc;
+
+	tkn = bbdd_util_ssk_json_tkn_create(recv_obj_cb, recv_obj_data, error);
+	if (tkn == NULL)
+		return -1;
+
+	cbs = (struct bbdd_ssk_cbs) {
+		.rx_cb = bbdd_util_ssk_json_tkn_rx_cb,
+		.done_cb = bbdd_util_ssk_json_tkn_done_cb,
+		.data = tkn,
+	};
+
+	rc = bbdd_ssk_d_accept(ctl, cbs, error);
+	if (rc != 0)
+		goto destroy_tkn;
+
+	return 0;
+
+destroy_tkn:
+	bbdd_util_ssk_json_tkn_destroy(tkn);
+	if (rc == -EWOULDBLOCK)
+		rc = 0;
+	return rc;
+}
+
+static int bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short,
+				void *data, char **error)
+{
+	struct bbdd_d *d = data;
+
+	return bbdd_d_ctl_accept(&d->ctl, bbdd_d_ctl_recv_obj, d, error);
 }
 
 static int bbdd_d_raise_nofile(char **error)
@@ -2833,6 +2898,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	};
 	uint32_t veth_rx_ifindex;
 	uint32_t veth_tx_ifindex;
+	struct bbdd_sockaddr bsa;
 	char *error;
 	int rc = -ENOMEM;
 
@@ -2876,12 +2942,16 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 		goto fini_veth;
 	}
 
-	rc = bbdd_sock_open_d(&d.ctl, bbdd_env.sockdir, &error);
+	rc = bbdd_ctl_sockaddr(bbdd_env.sockdir, &bsa, &error);
 	if (rc != 0)
 		goto bpf_destroy;
 
-	rc = bbdd_poll_set_fd(d.pctx, d.ctl.fd, POLLIN,
-			      bbdd_d_ctl_recv, &d, &error);
+	rc = bbdd_ssk_open_d(&d.ctl, d.pctx, &bsa, &error);
+	if (rc != 0)
+		goto bpf_destroy;
+
+	rc = bbdd_poll_set_fd(d.pctx, bbdd_ssk_d_fd(&d.ctl), POLLIN,
+			      bbdd_d_ctl_accept_cb, &d, &error);
 	if (rc != 0)
 		goto sock_close_d;
 
@@ -2898,7 +2968,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 
 	bbdd_poll_unset_signals(d.pctx);
 sock_close_d:
-	bbdd_sock_close_d(&d.ctl);
+	bbdd_ssk_close_d(&d.ctl);
 bpf_destroy:
 	bbdd_bpf_destroy(d.bpf);
 fini_veth:

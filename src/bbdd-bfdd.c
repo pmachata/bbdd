@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
+
 #include <utlist.h>
 
 #include "bbdd.h"
@@ -16,13 +17,15 @@
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-prog-stat.h"
+#include "bbdd-ssk.h"
 #include "bbdd-util.h"
 #include "bfddp.h"
 
 /* Tracking an in-flight bfdd-echo until ECHO_REPLY arrives. */
 struct bbdd_bfdd_echo_peer {
-	struct bbdd_sock peer;
 	struct bbdd_bfdd *bfdd;
+	struct bbdd_ssk_peer *peer;
+	struct bbdd_ssk_cbs *ssk_cbs;
 	struct json_object *id;
 	bool is_dp; /* true when we sent as data plane, false when as bridge */
 
@@ -363,11 +366,14 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
 }
 
+static void bbdd_bfdd_echo_peer_done(struct bbdd_ssk_peer *, void *data);
+
 static struct bbdd_bfdd_echo_peer *
-bbdd_bfdd_echo_peer_init(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
+bbdd_bfdd_echo_peer_init(struct bbdd_bfdd *bfdd, struct bbdd_ssk_peer *peer,
 			 struct json_object *id, bool is_dp, char **error)
 {
 	struct bbdd_bfdd_echo_peer *epeer;
+	struct bbdd_ssk_cbs *ssk_cbs;
 
 	bbdd_mon_send_debug(bfdd->mon, "echo peer init");
 
@@ -377,15 +383,26 @@ bbdd_bfdd_echo_peer_init(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
 		return NULL;
 	}
 
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
+					bbdd_bfdd_echo_peer_done,
+					epeer, error);
+	if (ssk_cbs == NULL)
+		goto epeer_free;
+
 	*epeer = (struct bbdd_bfdd_echo_peer) {
 		.bfdd = bfdd,
-		.peer = *peer,
+		.peer = peer,
 		.id = json_object_get(id),
 		.is_dp = is_dp,
+		.ssk_cbs = ssk_cbs,
 	};
 
 	DL_APPEND(bfdd->echo_peers, epeer);
 	return epeer;
+
+epeer_free:
+	free(epeer);
+	return NULL;
 }
 
 static void bbdd_bfdd_echo_peer_fini(struct bbdd_bfdd_echo_peer *epeer)
@@ -393,8 +410,17 @@ static void bbdd_bfdd_echo_peer_fini(struct bbdd_bfdd_echo_peer *epeer)
 	bbdd_mon_send_debug(epeer->bfdd->mon, "echo peer fini");
 
 	DL_DELETE(epeer->bfdd->echo_peers, epeer);
+	bbdd_ssk_peer_del_cbs(epeer->peer, epeer->ssk_cbs);
 	json_object_put(epeer->id);
 	free(epeer);
+}
+
+static void bbdd_bfdd_echo_peer_done(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_bfdd_echo_peer *epeer = data;
+
+	bbdd_mon_send_debug(epeer->bfdd->mon, "echo peer gone");
+	bbdd_bfdd_echo_peer_fini(epeer);
 }
 
 static void bbdd_bfdd_echo_peers_free(struct bbdd_bfdd *bfdd)
@@ -405,7 +431,8 @@ static void bbdd_bfdd_echo_peers_free(struct bbdd_bfdd *bfdd)
 		bbdd_bfdd_echo_peer_fini(epeer);
 }
 
-void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
+void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd,
+				 struct bbdd_ssk_peer *peer,
 				 struct json_object *id, bool is_dp)
 {
 	struct bbdd_bfdd_echo_peer *epeer;
@@ -414,8 +441,7 @@ void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd, struct bbdd_sock *peer,
 	int rc;
 
 	if (bfdd == NULL) {
-		bbdd_util_jrpc_respond_interr(peer, id,
-					      "No BFDD client connected");
+		bbdd_util_jrpc_respond_interr(peer, id, "No BFDD client connected");
 		return;
 	}
 
@@ -445,10 +471,10 @@ void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 
 	DL_FOREACH(bfdd->echo_peers, epeer) {
 		if (epeer->is_dp)
-			bbdd_util_jrpc_respond_echo(&epeer->peer, epeer->id,
+			bbdd_util_jrpc_respond_echo(epeer->peer, epeer->id,
 						    dp_time, bfdd_time);
 		else
-			bbdd_util_jrpc_respond_echo(&epeer->peer, epeer->id,
+			bbdd_util_jrpc_respond_echo(epeer->peer, epeer->id,
 						    bfdd_time, dp_time);
 	}
 
@@ -691,7 +717,7 @@ void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
 	struct bbdd_bfdd_echo_peer *epeer;
 
 	DL_FOREACH(bfdd->echo_peers, epeer)
-		bbdd_util_jrpc_respond_interr(&epeer->peer, epeer->id,
+		bbdd_util_jrpc_respond_interr(epeer->peer, epeer->id,
 					      "BFDD client disconnect");
 	bbdd_bfdd_echo_peers_free(bfdd);
 
