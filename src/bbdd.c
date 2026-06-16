@@ -168,6 +168,8 @@ int main(int argc, char **argv)
 						       dbg_arg);
 					return EXIT_FAILURE;
 				}
+			} else if (strcmp(optarg, "no-poll-reply") == 0) {
+				bbdd_env.no_poll_reply = true;
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);

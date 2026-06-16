@@ -35,6 +35,7 @@ extern struct bbdd_env {
 				 * dynamically from session_count. Set via
 				 * --debug=tx-cap=<N> to pin a fixed value
 				 * for queue-path testing. */
+	bool no_poll_reply;	/* Do not send poll replies. */
 } bbdd_env;
 
 struct bbdd_ec {
