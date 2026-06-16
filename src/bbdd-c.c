@@ -216,7 +216,7 @@ static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
 }
 
 static struct bbdd_ec
-bbdd_c_interact(struct json_object **request,
+bbdd_c_interact(struct json_object *request,
 		int (*cb)(struct json_object *response, void *data,
 			  char **error),
 		void *data, enum json_type cb_expected_type,
@@ -271,7 +271,7 @@ bbdd_c_interact(struct json_object **request,
 	if (rc != 0)
 		goto ssk_close_ctl;
 
-	request_str = json_object_to_json_string(*request);
+	request_str = json_object_to_json_string(request);
 	if (request_str == NULL) {
 		bbdd_err_fmt(&error, "Failed to serialize JSON object");
 		goto unset_signals;
@@ -281,8 +281,6 @@ bbdd_c_interact(struct json_object **request,
 	if (rc != 0)
 		goto unset_signals;
 
-	json_object_put(*request);
-	*request = NULL;
 	request_str = NULL;
 
 	rc = bbdd_poll_loop(c.pctx, &error);
@@ -377,7 +375,7 @@ static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
 
 	request = bbdd_jrpc_new_request(id, method);
 	if (request == NULL)
-		goto out;
+		goto err;
 
 	params = json_object_new_object();
 	if (params == NULL)
@@ -390,14 +388,14 @@ static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
 	if (bbdd_jrpc_append_obj(request, "params", &params))
 		goto put_params;
 
-	ec = bbdd_c_interact(&request, bbdd_c_echo_jrpc_res, NULL,
+	ec = bbdd_c_interact(request, bbdd_c_echo_jrpc_res, NULL,
 			     json_type_object, topics);
 
 put_params:
 	json_object_put(params);
 put_request:
 	json_object_put(request);
-out:
+err:
 	return ec;
 }
 
@@ -430,15 +428,20 @@ static int bbdd_c_stop_jrpc_res(struct json_object *, void *, char **)
 
 static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *topics)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	const int id = 1;
 
 	request = bbdd_jrpc_new_request(id, "stop");
 	if (request == NULL)
-		return bbdd_ec_failure;
+		goto err;
 
-	return bbdd_c_interact(&request, bbdd_c_stop_jrpc_res, NULL,
-			       json_type_null, topics);
+	ec = bbdd_c_interact(request, bbdd_c_stop_jrpc_res, NULL,
+			     json_type_null, topics);
+
+	json_object_put(request);
+err:
+	return ec;
 }
 
 struct bbdd_ec bbdd_c_stop(int argc, char **argv,
@@ -481,15 +484,20 @@ static int bbdd_c_global_stats_get_jrpc_res(struct json_object *result,
 static struct bbdd_ec
 bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *topics)
 {
+	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	const int id = 1;
 
 	request = bbdd_jrpc_new_request(id, "global-stats-diag");
 	if (request == NULL)
-		return bbdd_ec_failure;
+		goto err;
 
-	return bbdd_c_interact(&request, bbdd_c_global_stats_get_jrpc_res, NULL,
-			       json_type_object, topics);
+	ec = bbdd_c_interact(request, bbdd_c_global_stats_get_jrpc_res, NULL,
+			     json_type_object, topics);
+
+	json_object_put(request);
+err:
+	return ec;
 }
 
 static int bbdd_c_session_act_jrpc_result(struct json_object *,
@@ -1821,7 +1829,7 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	if (command->allow_query) {
 		select_obj = bbdd_c_jrpc_session_obj(select);
 		if (select_obj == NULL)
-			return ec;
+			goto err;
 	}
 
 	if (command->allow_change) {
@@ -1854,7 +1862,7 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
 
-	ec = bbdd_c_interact(&request,
+	ec = bbdd_c_interact(request,
 			     bbdd_c_session_jrpc_res, (void *) command,
 			     command->expected_result_type, topics);
 
@@ -1866,6 +1874,7 @@ put_select_change:
 	json_object_put(change_obj);
 put_select:
 	json_object_put(select_obj);
+err:
 	return ec;
 }
 
@@ -2040,7 +2049,7 @@ bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connect");
 	if (request == NULL)
-		return bbdd_ec_failure;
+		goto err;
 
 	params_obj = json_object_new_object();
 	if (params_obj == NULL)
@@ -2053,12 +2062,13 @@ bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
 	    bbdd_jrpc_append_obj(request, "params", &params_obj))
 		goto put_params_obj;
 
-	ec = bbdd_c_interact(&request, NULL, NULL, json_type_null, topics);
+	ec = bbdd_c_interact(request, NULL, NULL, json_type_null, topics);
 
 put_params_obj:
 	json_object_put(params_obj);
 put_request:
 	json_object_put(request);
+err:
 	return ec;
 }
 
@@ -2116,11 +2126,12 @@ bbdd_c_bfdd_disconnect_jrpc(const struct bbdd_mon_topics *topics)
 
 	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
 	if (request == NULL)
-		return bbdd_ec_failure;
+		goto err;
 
-	ec = bbdd_c_interact(&request, NULL, NULL, json_type_null, topics);
+	ec = bbdd_c_interact(request, NULL, NULL, json_type_null, topics);
 
 	json_object_put(request);
+err:
 	return ec;
 }
 
@@ -2164,15 +2175,17 @@ bbdd_c_bfdd_connected_jrpc(const struct bbdd_mon_topics *topics)
 
 	request = bbdd_jrpc_new_request(id, "bfdd-connected");
 	if (request == NULL)
-		return bbdd_ec_failure;
+		goto err;
 
-	ec = bbdd_c_interact(&request,
+	ec = bbdd_c_interact(request,
 			     bbdd_c_bfdd_connected_jrpc_res, &connected,
 			     json_type_boolean, topics);
 
 	if (bbdd_ec_is_success(ec) && !connected)
 		ec = bbdd_ec_failure;
 
+	json_object_put(request);
+err:
 	return ec;
 }
 
