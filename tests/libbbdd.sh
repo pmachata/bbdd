@@ -4,6 +4,38 @@ tmpdir=$(mktemp -d /tmp/XXXXXX)
 defer rm -Rf "$tmpdir"
 chmod a+rwx "${tmpdir}"
 
+with_show_commands()
+{
+	BBDD_SHOW_COMMANDS=1 "$@"
+}
+
+run_bbdd()
+{
+	local bground=$1; shift
+	local rc
+
+	if ((bground)); then
+		if ((BBDD_SHOW_COMMANDS)); then
+			echo "$@" '&' >/dev/stderr
+		fi
+
+		"$@" &
+		rc=$?
+	else
+		if ((BBDD_SHOW_COMMANDS)); then
+			echo -n "$@" >/dev/stderr
+		fi
+
+		"$@"
+		rc=$?
+
+		if ((BBDD_SHOW_COMMANDS)); then
+			echo " -> rc=$rc" >/dev/stderr
+		fi
+	fi
+	return $rc
+}
+
 Bbdd_setup_socket()
 {
 	local s_name
@@ -58,14 +90,14 @@ with_valgrind()
 
 Bbdd()
 {
-	$(nspfx) $(vgpfx 1) \
+	run_bbdd 0 $(nspfx) $(vgpfx 1) \
 		 "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@"
 }
 
 Bbdd_bground()
 {
-	$(nspfx) $(vgpfx 2) \
-		 "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@" &
+	run_bbdd 1 $(nspfx) $(vgpfx 2) \
+		 "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@"
 }
 
 Bbdd_stop()
