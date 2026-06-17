@@ -25,14 +25,47 @@ with_socket()
 	BBDD_SOCKET="${s_name}" "$@"
 }
 
+__with_valgrind()
+{
+	local mask=$1; shift
+
+	BBDD_VALGRIND=$((mask)) "$@"
+}
+
+vgpfx()
+{
+	local mask=$1; shift
+
+	if ((BBDD_VALGRIND & mask)); then
+		echo "valgrind --leak-check=yes"
+	fi
+}
+
+with_valgrind_c()
+{
+	__with_valgrind 1 "$@"
+}
+
+with_valgrind_d()
+{
+	__with_valgrind 2 "$@"
+}
+
+with_valgrind()
+{
+	__with_valgrind 3 "$@"
+}
+
 Bbdd()
 {
-	$(nspfx) "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@"
+	$(nspfx) $(vgpfx 1) \
+		 "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@"
 }
 
 Bbdd_bground()
 {
-	$(nspfx) "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@" &
+	$(nspfx) $(vgpfx 2) \
+		 "${bin_dir}/bbdd" --socket "${!BBDD_SOCKET}/bbdd.ctl" "$@" &
 }
 
 Bbdd_stop()
@@ -61,7 +94,12 @@ Bbdd_stop()
 
 Bbdd_wait()
 {
-	slowwait 5 Bbdd -q echo
+	local time=5
+
+	if ((BBDD_VALGRIND & 2)); then
+		time=$((time + 30))
+	fi
+	slowwait "$time" Bbdd -q echo
 
 	if [[ $? != 0 ]]; then
 		echo "failed to start bbdd" >/dev/stderr
@@ -71,7 +109,7 @@ Bbdd_wait()
 
 adf_Bbdd_start()
 {
-	Bbdd --debug=mon-eager start &
+	Bbdd_bground --debug=mon-eager start
 	defer with_socket "$BBDD_SOCKET" Bbdd_stop $!
 
 	Bbdd_wait
@@ -79,8 +117,8 @@ adf_Bbdd_start()
 
 adf_Bbdd_bridge_start()
 {
-	Bbdd --debug=mon-eager \
-	     bfdd bridge start unix:${!BBDD_SOCKET}/bfdd_dplane.sock &
+	Bbdd_bground --debug=mon-eager \
+	     bfdd bridge start unix:${!BBDD_SOCKET}/bfdd_dplane.sock
 	defer with_socket "$BBDD_SOCKET" Bbdd_stop $!
 
 	Bbdd_wait
