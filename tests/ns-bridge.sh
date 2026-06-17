@@ -99,8 +99,8 @@ bfdd_echo_race_test()
 	with_socket SD2 Bbdd_bfdd_connect SDb
 
 	for ((i = 0; i < n; i++)); do
-		with_socket SD2 Bbdd --json bfdd echo \
-			> "$tmpdir/race.$i.out" &
+		with_socket SD2 Bbdd_bground --json bfdd echo \
+			> "$tmpdir/race.$i.out"
 		pids+=($!)
 	done
 
