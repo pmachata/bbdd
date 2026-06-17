@@ -91,16 +91,17 @@ int bbdd_err_app(char **error, const char *fmt, ...)
 static void bbdd_err_vprinterr(char **error, const char *fmt, va_list ap)
 {
 	if (bbdd_err_verbosity < 0)
-		return;
+		goto out;
 
 	if (fmt != NULL)
 		vfprintf(stderr, fmt, ap);
 
-	if (*error) {
+	if (*error)
 		fprintf(stderr, "%s%s\n",
 			fmt != NULL ? ": " : "", *error);
-		free(*error);
-	}
+
+out:
+	free(*error);
 }
 
 __attribute__((format(printf, 2, 3)))
