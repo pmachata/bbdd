@@ -358,8 +358,7 @@ void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd)
 }
 
 int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
-		    const struct bbdd_sockaddr *bsa, struct bbdd_ssk_cbs cbs,
-		    char **error)
+		    const struct bbdd_sockaddr *bsa, char **error)
 {
 	struct bbdd_ssk_peer *peer;
 	int fd;
@@ -388,7 +387,7 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
 		},
 	};
 
-	peer = bbdd_ssk_peer_create(&ssc->base, fd, cbs, error);
+	peer = bbdd_ssk_peer_create_no_cb(&ssc->base, fd, error);
 	if (peer == NULL) {
 		rc = -1;
 		goto close;

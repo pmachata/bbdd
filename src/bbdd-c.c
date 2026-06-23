@@ -229,7 +229,7 @@ bbdd_c_interact(struct json_object *request,
 		.ec = bbdd_ec_success,
 	};
 	struct bbdd_sockaddr bsa;
-	struct bbdd_ssk_cbs cbs;
+	struct bbdd_ssk_cbs *cbs;
 	const char *request_str;
 	int rc = -ENOMEM;
 	char *error;
@@ -257,15 +257,17 @@ bbdd_c_interact(struct json_object *request,
 		goto poll_fini;
 	}
 
-	cbs = (struct bbdd_ssk_cbs) {
-		.rx_cb = bbdd_c_ssk_json_tkn_rx_cb,
-		.done_cb = bbdd_c_ssk_json_tkn_done_cb,
-		.data = &c,
-	};
-
-	rc = bbdd_ssk_open_c(&c.ctl, c.pctx, &bsa, cbs, &error);
+	rc = bbdd_ssk_open_c(&c.ctl, c.pctx, &bsa, &error);
 	if (rc != 0)
 		goto tkn_destroy;
+
+	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(&c.ctl),
+				    bbdd_c_ssk_json_tkn_rx_cb,
+				    bbdd_c_ssk_json_tkn_done_cb, &c, &error);
+	if (cbs == NULL) {
+		rc = -1;
+		goto ssk_close_ctl;
+	}
 
 	rc = bbdd_poll_set_signals(c.pctx, &error);
 	if (rc != 0)
@@ -3109,7 +3111,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	};
 	struct json_object *request;
 	struct bbdd_sockaddr bsa;
-	struct bbdd_ssk_cbs cbs;
+	struct bbdd_ssk_cbs *cbs;
 	const char *request_str;
 	const int id = 1;
 	int rc = -ENOMEM;
@@ -3149,15 +3151,18 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto poll_fini;
 	}
 
-	cbs = (struct bbdd_ssk_cbs) {
-		.rx_cb = bbdd_c_ssk_monitor_jrpc_rx_cb,
-		.done_cb = bbdd_c_ssk_monitor_jrpc_done_cb,
-		.data = &mctx,
-	};
-
-	rc = bbdd_ssk_open_c(&mctx.ctl, mctx.pctx, &bsa, cbs, &error);
+	rc = bbdd_ssk_open_c(&mctx.ctl, mctx.pctx, &bsa, &error);
 	if (rc != 0)
 		goto tkn_destroy;
+
+	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(&mctx.ctl),
+				    bbdd_c_ssk_monitor_jrpc_rx_cb,
+				    bbdd_c_ssk_monitor_jrpc_done_cb,
+				    &mctx, &error);
+	if (cbs == NULL) {
+		rc = -1;
+		goto ssk_close_ctl;
+	}
 
 	rc = bbdd_poll_set_signals(mctx.pctx, &error);
 	if (rc != 0)
