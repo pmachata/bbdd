@@ -89,7 +89,7 @@ struct bbdd_d {
 	struct bbdd_nl *nl;
 	struct bbdd_sess_dir *sdir;
 	struct bbdd_d_sport_alloc spa;
-	struct bbdd_ssk_d ctl;
+	struct bbdd_ssk_d *ctl;
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
@@ -2660,7 +2660,7 @@ static int bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short,
 {
 	struct bbdd_d *d = data;
 
-	return bbdd_d_ctl_accept(&d->ctl, bbdd_d_ctl_recv_obj, d, error);
+	return bbdd_d_ctl_accept(d->ctl, bbdd_d_ctl_recv_obj, d, error);
 }
 
 static int bbdd_d_raise_nofile(char **error)
@@ -2943,11 +2943,13 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (rc != 0)
 		goto bpf_destroy;
 
-	rc = bbdd_ssk_open_d(&d.ctl, d.pctx, &bsa, &error);
-	if (rc != 0)
+	d.ctl = bbdd_ssk_open_d(d.pctx, &bsa, &error);
+	if (d.ctl == NULL) {
+		rc = -1;
 		goto bpf_destroy;
+	}
 
-	rc = bbdd_poll_set_fd(d.pctx, bbdd_ssk_d_fd(&d.ctl), POLLIN,
+	rc = bbdd_poll_set_fd(d.pctx, bbdd_ssk_d_fd(d.ctl), POLLIN,
 			      bbdd_d_ctl_accept_cb, &d, &error);
 	if (rc != 0)
 		goto sock_close_d;
@@ -2963,7 +2965,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 
 	bbdd_poll_unset_signals(d.pctx);
 sock_close_d:
-	bbdd_ssk_close_d(&d.ctl);
+	bbdd_ssk_close_d(d.ctl);
 bpf_destroy:
 	bbdd_bpf_destroy(d.bpf);
 fini_veth:

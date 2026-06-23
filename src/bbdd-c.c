@@ -144,7 +144,7 @@ struct bbdd_c {
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
 	struct bbdd_util_ssk_json_tkn *tkn;
-	struct bbdd_ssk_c ctl;
+	struct bbdd_ssk_c *ctl;
 
 	int (*cb)(struct json_object *result,
 		  void *data, char **error);
@@ -257,11 +257,13 @@ bbdd_c_interact(struct json_object *request,
 		goto poll_fini;
 	}
 
-	rc = bbdd_ssk_open_c(&c.ctl, c.pctx, &bsa, &error);
-	if (rc != 0)
+	c.ctl = bbdd_ssk_open_c(c.pctx, &bsa, &error);
+	if (c.ctl == NULL) {
+		rc = -1;
 		goto tkn_destroy;
+	}
 
-	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(&c.ctl),
+	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(c.ctl),
 				    bbdd_c_ssk_json_tkn_rx_cb,
 				    bbdd_c_ssk_json_tkn_done_cb, &c, &error);
 	if (cbs == NULL) {
@@ -279,12 +281,12 @@ bbdd_c_interact(struct json_object *request,
 		goto unset_signals;
 	}
 
-	rc = bbdd_ssk_c_nq(&c.ctl, request_str, strlen(request_str), &error);
+	rc = bbdd_ssk_c_nq(c.ctl, request_str, strlen(request_str), &error);
 	if (rc != 0)
 		goto unset_signals;
 	if (bbdd_env.cli_imm_done) {
 		bbdd_mon_send_debug(c.mon, "cli-imm-done: Marking peer as done");
-		bbdd_ssk_peer_mark_done(bbdd_ssk_c_peer(&c.ctl));
+		bbdd_ssk_peer_mark_done(bbdd_ssk_c_peer(c.ctl));
 	}
 
 	request_str = NULL;
@@ -294,7 +296,7 @@ bbdd_c_interact(struct json_object *request,
 unset_signals:
 	bbdd_poll_unset_signals(c.pctx);
 ssk_close_ctl:
-	bbdd_ssk_close_c(&c.ctl);
+	bbdd_ssk_close_c(c.ctl);
 tkn_destroy:
 	bbdd_util_ssk_json_tkn_destroy(c.tkn);
 poll_fini:
@@ -2986,7 +2988,7 @@ struct bbdd_c_monitor_ctx {
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
 	struct bbdd_util_ssk_json_tkn *tkn;
-	struct bbdd_ssk_c ctl;
+	struct bbdd_ssk_c *ctl;
 	struct bbdd_ec ec;
 };
 
@@ -3151,11 +3153,13 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto poll_fini;
 	}
 
-	rc = bbdd_ssk_open_c(&mctx.ctl, mctx.pctx, &bsa, &error);
-	if (rc != 0)
+	mctx.ctl = bbdd_ssk_open_c(mctx.pctx, &bsa, &error);
+	if (mctx.ctl == NULL) {
+		rc = -1;
 		goto tkn_destroy;
+	}
 
-	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(&mctx.ctl),
+	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(mctx.ctl),
 				    bbdd_c_ssk_monitor_jrpc_rx_cb,
 				    bbdd_c_ssk_monitor_jrpc_done_cb,
 				    &mctx, &error);
@@ -3169,7 +3173,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto ssk_close_ctl;
 
 
-	rc = bbdd_ssk_c_nq(&mctx.ctl, request_str, strlen(request_str), &error);
+	rc = bbdd_ssk_c_nq(mctx.ctl, request_str, strlen(request_str), &error);
 	if (rc != 0)
 		goto unset_signals;
 
@@ -3178,7 +3182,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 unset_signals:
 	bbdd_poll_unset_signals(mctx.pctx);
 ssk_close_ctl:
-	bbdd_ssk_close_c(&mctx.ctl);
+	bbdd_ssk_close_c(mctx.ctl);
 tkn_destroy:
 	bbdd_util_ssk_json_tkn_destroy(mctx.tkn);
 poll_fini:

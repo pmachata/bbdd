@@ -42,7 +42,7 @@ struct bbdd_br {
 	struct bbdd_nl *nl;
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
-	struct bbdd_ssk_d ctl;
+	struct bbdd_ssk_d *ctl;
 	struct bbdd_sock bfdd_server;
 	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
 
@@ -417,7 +417,7 @@ static int bbdd_br_ctl_accept_cb(struct bbdd_poll_ctx *, short,
 {
 	struct bbdd_br *br = data;
 
-	return bbdd_d_ctl_accept(&br->ctl, bbdd_br_ctl_recv_obj, br, error);
+	return bbdd_d_ctl_accept(br->ctl, bbdd_br_ctl_recv_obj, br, error);
 }
 
 static void __bbdd_br_bfdd_hangup(struct bbdd_br *br, struct bbdd_bfdd *bfdd)
@@ -646,12 +646,14 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 		if (err != 0)
 			goto bfdd_poll_unset_server;
 
-		err = bbdd_ssk_open_d(&br.ctl, br.pctx, &ctl_bsa, &error);
-		if (err != 0)
+		br.ctl = bbdd_ssk_open_d(br.pctx, &ctl_bsa, &error);
+		if (br.ctl == NULL) {
+			err = -1;
 			goto bfdd_poll_unset_server;
+		}
 	}
 
-	err = bbdd_poll_set_fd(br.pctx, bbdd_ssk_d_fd(&br.ctl), POLLIN,
+	err = bbdd_poll_set_fd(br.pctx, bbdd_ssk_d_fd(br.ctl), POLLIN,
 			       bbdd_br_ctl_accept_cb, &br, &error);
 	if (err != 0) {
 		bbdd_err_print(&error, "Failed to register socket for events");
@@ -674,7 +676,7 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 	bbdd_poll_unset_signals(br.pctx);
 
 sock_close_d:
-	bbdd_ssk_close_d(&br.ctl);
+	bbdd_ssk_close_d(br.ctl);
 bfdd_poll_unset_server:
 	bbdd_poll_unset_fd(br.pctx, br.bfdd_server.fd);
 bfdd_server_close:

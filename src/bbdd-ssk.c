@@ -14,6 +14,21 @@
 #include "bbdd-poll.h"
 #include "bbdd-sb.h"
 
+struct bbdd_ssk_b {
+	struct bbdd_ssk_peer *peers;	/* DList. */
+	struct bbdd_poll_ctx *pctx;
+};
+
+struct bbdd_ssk_d {
+	struct bbdd_ssk_b base;
+	struct bbdd_sock sock;
+	struct bbdd_ssk_cbs cb;
+};
+
+struct bbdd_ssk_c {
+	struct bbdd_ssk_b base;
+};
+
 struct bbdd_ssk_peer {
 	struct bbdd_ssk_b *ssb;
 	struct bbdd_ssk_peer *prev;
@@ -313,16 +328,24 @@ close_fd:
 	return -1;
 }
 
-int bbdd_ssk_open_d(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx,
-		    const struct bbdd_sockaddr *bsa, char **error)
+struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
+				   const struct bbdd_sockaddr *bsa,
+				   char **error)
 {
+	struct bbdd_ssk_d *ssd;
 	struct bbdd_sock sock;
 	int rc;
+
+	ssd = malloc(sizeof(*ssd));
+	if (ssd == NULL) {
+		bbdd_err_fmt(error, "%m");
+		return NULL;
+	}
 
 	rc = bbdd_sock_open_sa(bsa, SOCK_STREAM | SOCK_CLOEXEC,
 			       &sock, error);
 	if (rc != 0)
-		return rc;
+		goto free_ssd;
 
 	rc = listen(sock.fd, SOMAXCONN);
 	if (rc < 0) {
@@ -336,11 +359,13 @@ int bbdd_ssk_open_d(struct bbdd_ssk_d *ssd, struct bbdd_poll_ctx *pctx,
 		},
 		.sock = sock,
 	};
-	return 0;
+	return ssd;
 
 close:
 	bbdd_sock_close(&sock);
-	return rc;
+free_ssd:
+	free(ssd);
+	return NULL;
 }
 
 static void bbdd_ssk_close_b(struct bbdd_ssk_b *ssb)
@@ -355,14 +380,23 @@ void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd)
 {
 	bbdd_ssk_close_b(&ssd->base);
 	bbdd_sock_close(&ssd->sock);
+	free(ssd);
 }
 
-int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
-		    const struct bbdd_sockaddr *bsa, char **error)
+struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
+				   const struct bbdd_sockaddr *bsa,
+				   char **error)
 {
 	struct bbdd_ssk_peer *peer;
+	struct bbdd_ssk_c *ssc;
 	int fd;
 	int rc;
+
+	ssc = malloc(sizeof(*ssc));
+	if (ssc == NULL) {
+		bbdd_err_fmt(error, "%m");
+		return NULL;
+	}
 
 	fd = ({
 		struct bbdd_sock sock;
@@ -370,7 +404,7 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
 
 		rc = bbdd_sock_open_sa_nobind(bsa, flags, &sock, error);
 		if (rc != 0)
-			return rc;
+			goto free_ssc;
 
 		sock.fd;
 	});
@@ -388,21 +422,22 @@ int bbdd_ssk_open_c(struct bbdd_ssk_c *ssc, struct bbdd_poll_ctx *pctx,
 	};
 
 	peer = bbdd_ssk_peer_create_no_cb(&ssc->base, fd, error);
-	if (peer == NULL) {
-		rc = -1;
+	if (peer == NULL)
 		goto close;
-	}
 
-	return 0;
+	return ssc;
 
 close:
 	close(fd);
-	return rc;
+free_ssc:
+	free(ssc);
+	return NULL;
 }
 
 void bbdd_ssk_close_c(struct bbdd_ssk_c *ssc)
 {
 	bbdd_ssk_close_b(&ssc->base);
+	free(ssc);
 }
 
 int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, const char *buf, size_t len,
