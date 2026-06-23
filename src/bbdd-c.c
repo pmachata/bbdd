@@ -282,7 +282,7 @@ bbdd_c_interact(struct json_object *request,
 		goto unset_signals;
 	if (bbdd_env.cli_imm_done) {
 		bbdd_mon_send_debug(c.mon, "cli-imm-done: Marking peer as done");
-		bbdd_ssk_c_mark_done(&c.ctl);
+		bbdd_ssk_peer_mark_done(bbdd_ssk_c_peer(&c.ctl));
 	}
 
 	request_str = NULL;
