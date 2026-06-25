@@ -13,6 +13,7 @@ struct bbdd_sb {
 void bbdd_sb_fini(struct bbdd_sb *sb);
 
 const char *bbdd_sb_cstr(const struct bbdd_sb *sb);
+const void *bbdd_sb_buf(const struct bbdd_sb *sb);
 size_t bbdd_sb_len(const struct bbdd_sb *sb);
 
 int bbdd_sb_push(struct bbdd_sb *sb, const char *str, char **error);

@@ -83,7 +83,7 @@ static void bbdd_d_sport_put(struct bbdd_d_sport_alloc *alloc, uint16_t port)
 
 struct bbdd_d {
 	struct bbdd_poll_ctx *pctx;
-	struct bbdd_bfdd *bfdd;
+	struct bbdd_bfdd_c *bfdd;
 	struct bbdd_bpf *bpf;
 	struct bbdd_mon *mon;
 	struct bbdd_nl *nl;
@@ -1094,7 +1094,7 @@ put_obj:
 static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 					 struct bbdd_bpf *bpf,
 					 struct bbdd_mon *mon,
-					 struct bbdd_bfdd *bfdd)
+					 struct bbdd_bfdd_c *bfdd_c)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_session;
 	struct bbdd_mon_message mon_msg;
@@ -1103,8 +1103,8 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 	char *error = NULL;
 	int rc = -1;
 
-	if (bfdd != NULL) {
-		if (bbdd_bfdd_send_state_change(bfdd, dsess, &error) != 0)
+	if (bfdd_c != NULL) {
+		if (bbdd_bfdd_c_send_state_change(bfdd_c, dsess, &error) != 0)
 			bbdd_mon_senderr(mon, &error,
 					 "session %u: failed to send state change to bfdd",
 					 dsess->local.discr);
@@ -2168,8 +2168,8 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	}
 
 reply:
-	rc2 = bbdd_bfdd_reply_counters(d->bfdd, bbdd_ntoh16(msg->header.id),
-				       discr, &stats, &error2);
+	rc2 = bbdd_bfdd_c_reply_counters(d->bfdd, bbdd_ntoh16(msg->header.id),
+					 discr, &stats, &error2);
 	if (rc2 != 0) {
 		++d->diag_stats.dp_buffer_error;
 		bbdd_err_app(&error2, "reply DP_REQUEST_SESSION_COUNTERS");
@@ -2178,23 +2178,41 @@ reply:
 	return bbdd_err_pick(rc1, error1, rc2, &error2);
 }
 
-int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
-				    struct bbdd_d_global_diag_stats *diag_stats,
-				    const struct bfddp_message *msg,
-				    bool is_dp, char **error)
+static int bbdd_d_bfdd_handle_echo_request_pre(struct bbdd_d_global_diag_stats *diag_stats,
+					       const struct bfddp_message *msg,
+					       char **error)
 {
-	int rc;
-
 	if (bbdd_env.bfdd_delay_ms > 0)
 		usleep(bbdd_env.bfdd_delay_ms);
 
-	rc = bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
-				      error);
+	return bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
+					error);
+}
+
+int bbdd_d_bfdd_c_handle_echo_request(struct bbdd_bfdd_c *c,
+				      struct bbdd_d_global_diag_stats *diag_stats,
+				      const struct bfddp_message *msg,
+				      char **error)
+{
+	int rc = bbdd_d_bfdd_handle_echo_request_pre(diag_stats, msg, error);
+
 	if (rc != 0)
 		return rc;
+	return bbdd_bfdd_c_reply_echo(c, bbdd_ntoh16(msg->header.id),
+				      &msg->data.echo, error);
+}
 
-	return bbdd_bfdd_reply_echo(bfdd, bbdd_ntoh16(msg->header.id),
-				    &msg->data.echo, is_dp, error);
+int bbdd_d_bfdd_d_handle_echo_request(struct bbdd_bfdd_d *d,
+				      struct bbdd_d_global_diag_stats *diag_stats,
+				      const struct bfddp_message *msg,
+				      char **error)
+{
+	int rc = bbdd_d_bfdd_handle_echo_request_pre(diag_stats, msg, error);
+
+	if (rc != 0)
+		return rc;
+	return bbdd_bfdd_d_reply_echo(d, bbdd_ntoh16(msg->header.id),
+				      &msg->data.echo, error);
 }
 
 static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
@@ -2232,12 +2250,12 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		break;
 
 	case ECHO_REQUEST:
-		rc = bbdd_d_bfdd_handle_echo_request(d->bfdd, &d->diag_stats,
-						     msg, true, &error);
+		rc = bbdd_d_bfdd_c_handle_echo_request(d->bfdd, &d->diag_stats,
+						       msg, &error);
 		break;
 
 	case ECHO_REPLY:
-		bbdd_bfdd_echo_handle_reply(d->bfdd, msg);
+		bbdd_bfdd_c_echo_handle_reply(d->bfdd, msg);
 		return;
 
 	/* Outgoing messages that BFDD shouldn't be sending to us. */
@@ -2257,147 +2275,47 @@ senderr:
 	bbdd_mon_senderr(d->mon, &error, "bfdd");
 }
 
-static int bbdd_d_bfdd_message_cb(struct bbdd_bfdd *,
-				  struct bfddp_message *msg,
+static int bbdd_d_bfdd_message_cb(const struct bfddp_message *msg,
 				  void *data, char **)
 {
 	struct bbdd_d *d = data;
 
-	__bbdd_d_bfdd_message_cb(d, msg);
+	__bbdd_d_bfdd_message_cb(d, (struct bfddp_message *) msg);
 	return 0;
 }
 
-static void bbdd_d_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *error,
-				   void *data)
+static void bbdd_d_bfdd_done_cb(void *data)
 {
 	struct bbdd_d *d = data;
 
-	if (error != NULL) {
-		char *error_copy = strdup(error);
-		bbdd_mon_senderr(d->mon, &error_copy, "BFD socket closed");
-	} else {
-		bbdd_mon_send_debug(d->mon, "BFD socket closed");
-	}
+	bbdd_mon_send_debug(d->mon, "BFD socket closed");
 
-	assert(d->bfdd == bfdd);
-	bbdd_bfdd_close(d->bfdd);
+	bbdd_bfdd_close_c(d->bfdd);
 	d->bfdd = NULL;
 }
 
-static void bbdd_d_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
-{
-	bbdd_d_bfdd_sockerr_cb(bfdd, NULL, data);
-}
-
-struct bbdd_d_bfdd_connect_ctx {
-	struct bbdd_d *d;
-	struct json_object *id;
-	struct bbdd_ssk_peer *peer;
-	struct bbdd_ssk_cbs *ssk_cbs;
-};
-
-static void bbdd_d_bfdd_connected_cb(struct bbdd_bfdd *, void *data)
-{
-	struct bbdd_d_bfdd_connect_ctx *cctx = data;
-	struct bbdd_d *d = cctx->d;
-
-	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
-	if (cctx->peer != NULL)
-		bbdd_util_jrpc_respond_empty(cctx->peer, cctx->id);
-}
-
-static void bbdd_d_bfdd_connect_fail_cb(struct bbdd_bfdd *bfdd, char **error,
-					void *data)
-{
-	struct bbdd_d_bfdd_connect_ctx *cctx = data;
-	struct bbdd_d *d = cctx->d;
-
-	if (cctx->peer != NULL)
-		bbdd_util_jrpc_respond_interr(cctx->peer, cctx->id, *error);
-	bbdd_mon_senderr(d->mon, error, "Failed to connect to BFD");
-
-	assert(d->bfdd == bfdd);
-	bbdd_bfdd_close(d->bfdd);
-	d->bfdd = NULL;
-}
-
-static void bbdd_d_bfdd_connect_free_cb(void *data)
-{
-	struct bbdd_d_bfdd_connect_ctx *cctx = data;
-
-	if (cctx->peer != NULL)
-		bbdd_ssk_peer_del_cbs(cctx->peer, cctx->ssk_cbs);
-	json_object_put(cctx->id);
-	free(cctx);
-}
-
-static void bbdd_d_bfdd_connect_peer_done_cb(struct bbdd_ssk_peer *, void *data)
-{
-	struct bbdd_d_bfdd_connect_ctx *cctx = data;
-
-	cctx->peer = NULL;
-}
-
-static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d,
-				    struct bbdd_ssk_peer *peer,
-				    struct json_object *id,
-				    const char *path,
+static int bbdd_d_bfdd_connect_unix(struct bbdd_d *d, const char *path,
 				    char **error)
 {
-	struct bbdd_d_bfdd_connect_ctx *cctx;
-	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_bfdd_cbs cbs;
-	int rc;
 
 	if (d->bfdd != NULL) {
 		bbdd_err_fmt(error, "Already connected to a BFD daemon");
 		return -1;
 	}
 
-	cctx = malloc(sizeof(*cctx));
-	if (cctx == NULL) {
-		bbdd_err_fmt(error, "%m");
-		return -ENOMEM;
-	}
-	*cctx = (struct bbdd_d_bfdd_connect_ctx) {
-		.d = d,
-		.peer = peer,
-		.id = json_object_get(id),
-	};
-
-	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
-					bbdd_d_bfdd_connect_peer_done_cb, cctx,
-					error);
-	if (ssk_cbs == NULL)
-		goto cctx_free;
-	cctx->ssk_cbs = ssk_cbs;
-
 	cbs = (struct bbdd_bfdd_cbs) {
-		.conn_cb_data = cctx,
-		.connected_cb = bbdd_d_bfdd_connected_cb,
-		.connect_failed_cb = bbdd_d_bfdd_connect_fail_cb,
-		.connect_free_cb = bbdd_d_bfdd_connect_free_cb,
-
-		.sock_cb_data = d,
-		.hangup_cb = bbdd_d_bfdd_hangup_cb,
-		.sockerr_cb = bbdd_d_bfdd_sockerr_cb,
+		.data = d,
+		.done_cb = bbdd_d_bfdd_done_cb,
 		.message_cb = bbdd_d_bfdd_message_cb,
-		.sock_free_cb = NULL,
 	};
 
-	d->bfdd = bbdd_bfdd_open(path, d->pctx, d->mon, &cbs, error);
-	if (d->bfdd == NULL) {
-		rc = -ENOMEM;
-		goto peer_del_cbs;
-	}
+	d->bfdd = bbdd_bfdd_open_c(path, d->pctx, d->mon, &cbs, error);
+	if (d->bfdd == NULL)
+		return -1;
 
+	bbdd_mon_send_debug(d->mon, "bfdd: Connected");
 	return 0;
-
-peer_del_cbs:
-	bbdd_ssk_peer_del_cbs(peer, ssk_cbs);
-cctx_free:
-	free(cctx);
-	return rc;
 }
 
 static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
@@ -2446,11 +2364,11 @@ static void bbdd_d_handle_bfdd_connect(struct bbdd_d *d,
 	if (port != NULL)
 		return bbdd_util_jrpc_respond_inv_params(peer, id, "`unix' address schema doesn't support ports");
 
-	rc = bbdd_d_bfdd_connect_unix(d, peer, id, addr, &error);
+	rc = bbdd_d_bfdd_connect_unix(d, addr, &error);
 	if (rc < 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
-	/* Response for successful cases is handled asynchronously. */
+	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
 static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
@@ -2467,7 +2385,7 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	connected = d->bfdd != NULL && bbdd_bfdd_is_connected(d->bfdd);
+	connected = d->bfdd != NULL && bbdd_bfdd_c_is_connected(d->bfdd);
 
 	obj = bbdd_jrpc_new_object(id);
 	if (obj == NULL)
@@ -2497,7 +2415,7 @@ static void bbdd_d_handle_bfdd_disconnect(struct bbdd_d *d,
 	if (d->bfdd == NULL)
 		return bbdd_util_jrpc_respond_interr(peer, id, "Not connected to a BFD daemon");
 
-	bbdd_bfdd_close(d->bfdd);
+	bbdd_bfdd_close_c(d->bfdd);
 	d->bfdd = NULL;
 
 	bbdd_mon_send_debug(d->mon, "bfdd: Disconnected");
@@ -2584,7 +2502,7 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(d->bfdd, peer, id, true);
+		bbdd_bfdd_c_echo_handle_start(d->bfdd, peer, id);
 	else if (strcmp(method, "global-stats-diag") == 0)
 		bbdd_d_handle_global_stats_get(d, peer, params_obj, id);
 	else if (strcmp(method, "session-show") == 0)
@@ -2653,7 +2571,7 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 		.data = tkn,
 	};
 
-	rc = bbdd_ssk_d_accept(ctl, cbs, error);
+	rc = bbdd_ssk_d_accept(ctl, cbs, NULL, error);
 	if (rc != 0)
 		goto destroy_tkn;
 
@@ -2972,7 +2890,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	rc = bbdd_poll_loop(d.pctx, &error);
 
 	if (d.bfdd != NULL)
-		bbdd_bfdd_close(d.bfdd);
+		bbdd_bfdd_close_c(d.bfdd);
 
 	bbdd_poll_unset_signals(d.pctx);
 sock_close_d:

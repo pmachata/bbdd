@@ -10,10 +10,13 @@
 
 #include <json-c/json_tokener.h>
 
+#include "bbdd-be.h"
 #include "bbdd-err.h"
 #include "bbdd-jrpc.h"
 #include "bbdd-mon.h"
+#include "bbdd-sb.h"
 #include "bbdd-ssk.h"
+#include "bfddp_packet.h"
 
 int bbdd_util_jrpc_send_keep(struct bbdd_ssk_peer *peer,
 			     struct json_object *obj,
@@ -454,4 +457,79 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 	}
 
 	return 0;
+}
+
+struct bbdd_util_ssk_bfddp_tkn {
+	//uint8_t buf[sizeof(struct bfddp_message)];
+	struct bbdd_sb sb;
+	size_t len;
+
+	int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+		      const struct bfddp_message *msg, void *data,
+		      char **error);
+	void *data;
+};
+
+struct bbdd_util_ssk_bfddp_tkn *
+bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+					     const struct bfddp_message *msg,
+					     void *data, char **error),
+			       void *data, char **error)
+{
+	struct bbdd_util_ssk_bfddp_tkn *tkn;
+
+	tkn = malloc(sizeof(*tkn));
+	if (tkn == NULL) {
+		bbdd_err_fmt(error, "bfddp tkn alloc: %m");
+		return NULL;
+	}
+
+	*tkn = (struct bbdd_util_ssk_bfddp_tkn) {
+		.obj_cb = obj_cb,
+		.data = data,
+	};
+
+	return tkn;
+}
+
+void bbdd_util_ssk_bfddp_tkn_destroy(struct bbdd_util_ssk_bfddp_tkn *tkn)
+{
+	bbdd_sb_fini(&tkn->sb);
+	free(tkn);
+}
+
+int bbdd_util_ssk_bfddp_tkn_rx_cb(struct bbdd_ssk_peer *,
+				  const char *buf, size_t len,
+				  void *data, char **error)
+{
+	struct bbdd_util_ssk_bfddp_tkn *tkn = data;
+	int rc;
+
+	rc = bbdd_sb_push_len(&tkn->sb, buf, len, error);
+	if (rc != 0)
+		return rc;
+
+	while (true) {
+		size_t sb_len = bbdd_sb_len(&tkn->sb);
+		const struct bfddp_message *msg;
+		size_t msg_len;
+
+		if (sb_len < sizeof(msg->header))
+			/* We don't even have enough to look at length. */
+			return 0;
+
+		msg = bbdd_sb_buf(&tkn->sb);
+		msg_len = bbdd_ntoh16(msg->header.length);
+		if (sb_len < msg_len)
+			/* We don't have the full message yet. */
+			return 0;
+
+		rc = tkn->obj_cb(tkn, msg, tkn->data, error);
+
+		/* Discard the message even if the cb failed. */
+		bbdd_sb_pull(&tkn->sb, msg_len);
+
+		if (rc != 0)
+			return rc;
+	}
 }

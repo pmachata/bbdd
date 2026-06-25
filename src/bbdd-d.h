@@ -119,10 +119,14 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 					 void *data, char **error),
 		      void *recv_obj_data, char **error);
 
-int bbdd_d_bfdd_handle_echo_request(struct bbdd_bfdd *bfdd,
-				    struct bbdd_d_global_diag_stats *diag_stats,
-				    const struct bfddp_message *msg,
-				    bool is_dp, char **error);
+int bbdd_d_bfdd_c_handle_echo_request(struct bbdd_bfdd_c *c,
+				      struct bbdd_d_global_diag_stats *diag_stats,
+				      const struct bfddp_message *msg,
+				      char **error);
+int bbdd_d_bfdd_d_handle_echo_request(struct bbdd_bfdd_d *d,
+				      struct bbdd_d_global_diag_stats *diag_stats,
+				      const struct bfddp_message *msg,
+				      char **error);
 
 const char *bbdd_d_bfd_state_to_str(enum bbdd_bfd_pkt_state sv);
 int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);

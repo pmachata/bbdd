@@ -17,13 +17,14 @@
 #include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-prog-stat.h"
+#include "bbdd-sock.h"
 #include "bbdd-ssk.h"
 #include "bbdd-util.h"
-#include "bfddp.h"
+#include "bfddp_packet.h"
 
 /* Tracking an in-flight bfdd-echo until ECHO_REPLY arrives. */
 struct bbdd_bfdd_echo_peer {
-	struct bbdd_bfdd *bfdd;
+	struct bbdd_bfdd_b *bfdd_b;
 	struct bbdd_ssk_peer *peer;
 	struct bbdd_ssk_cbs *ssk_cbs;
 	struct json_object *id;
@@ -33,316 +34,230 @@ struct bbdd_bfdd_echo_peer {
 	struct bbdd_bfdd_echo_peer *prev;
 };
 
-struct bbdd_bfdd {
-	struct bfddp_ctx *bctx;
-	int fd;
+struct bbdd_bfdd_b {
+	/* the bfddp peer. null after the peer was destroyed. */
+	struct bbdd_ssk_peer *peer;
+	struct bbdd_ssk_cbs *plf_cbs;	/* Peer lifetime callback. */
+	struct bbdd_util_ssk_bfddp_tkn *tkn;
+
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
+	struct bbdd_bfdd_cbs cbs;	/* Callbacks from our user. */
+	struct bbdd_bfdd_echo_peer *echo_peers;	/* dlist */
 
-	struct bbdd_bfdd_cbs cbs;
-	struct bbdd_bfdd_echo_peer *echo_peers;	/* DList */
+	/* set by bbdd_bfdd_close_{c,d} so that the subsequent peer-done
+	 * callback does not re-invoke the user's done_cb. */
+	bool closing;
 };
 
-static int bbdd_bfdd_handle_messages(struct bbdd_bfdd *bfdd, char **error)
+/* Client (data-plane) role: owns the underlying ssk_c that holds the
+ * bfddp peer. */
+struct bbdd_bfdd_c {
+	struct bbdd_bfdd_b base;
+	struct bbdd_ssk_c *ssc;
+};
+
+/* Server (BFD-daemon) role: attached to an ssk peer that the caller
+ * (e.g. the bridge) owns via its own ssk_d. */
+struct bbdd_bfdd_d {
+	struct bbdd_bfdd_b base;
+};
+
+static int bbdd_bfdd_dispatch_message(struct bbdd_util_ssk_bfddp_tkn *,
+				      const struct bfddp_message *msg,
+				      void *data, char **error)
 {
-	struct bfddp_message *msg;
-	int rc;
+	struct bbdd_bfdd_b *bfdd_b = data;
 
-	do {
-		msg = bfddp_next_message(bfdd->bctx);
-		if (msg == NULL)
-			break;
-
-		rc = bfdd->cbs.message_cb(bfdd, msg, bfdd->cbs.sock_cb_data,
-					  error);
-		if (rc < 0)
-			return rc;
-	} while (msg != NULL);
-
-	bfddp_read_finish(bfdd->bctx);
-	return 0;
+	bbdd_bfdd_mon_send_i(bfdd_b->mon, msg);
+	return bfdd_b->cbs.message_cb(msg, bfdd_b->cbs.data, error);
 }
 
-static int bbdd_bfdd_poll_unset(struct bbdd_bfdd *bfdd)
+static void bbdd_bfdd_peer_done_cb(struct bbdd_ssk_peer *, void *data)
 {
-	int rc;
+	struct bbdd_bfdd_b *bfdd_b = data;
 
-	if (bfdd->fd >= 0) {
-		rc = bbdd_poll_unset_fd(bfdd->pctx, bfdd->fd);
-		if (rc < 0)
-			return rc;
-		bfdd->fd = -1;
-	}
-	return 0;
+	bfdd_b->peer = NULL;
+	bfdd_b->plf_cbs = NULL;	/* about to be freed by ssk */
+	if (!bfdd_b->closing)
+		bfdd_b->cbs.done_cb(bfdd_b->cbs.data);
 }
 
-static int bbdd_bfdd_fmterr_errno(char **error)
+static void bbdd_bfdd_bfddp_tkn_destroy(struct bbdd_ssk_peer *, void *data)
 {
-	if (errno == 0)
-		*error = NULL;
-	else
-		bbdd_err_fmt(error, "%m");
-	return -1;
+	struct bbdd_util_ssk_bfddp_tkn *tkn = data;
+
+	bbdd_util_ssk_bfddp_tkn_destroy(tkn);
 }
 
-static int bbdd_bfdd_read_event(struct bbdd_bfdd *bfdd, char **error)
+struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
+				     struct bbdd_poll_ctx *pctx,
+				     struct bbdd_mon *mon,
+				     const struct bbdd_bfdd_cbs *cbs,
+				     char **error)
 {
-	ssize_t rv;
-
-	rv = bfddp_read(bfdd->bctx);
-	if (rv == -1)
-		return bbdd_bfdd_fmterr_errno(error);
-
-	if (rv > 0)
-		bbdd_mon_send_debug(bfdd->mon, "bfdd: received %zd bytes", rv);
-
-	return bbdd_bfdd_handle_messages(bfdd, error);
-}
-
-static int bbdd_bfdd_write_event(struct bbdd_bfdd *bfdd, char **error)
-{
-	ssize_t rv;
-
-	rv = bfddp_write(bfdd->bctx);
-	if (rv == -1)
-		return bbdd_bfdd_fmterr_errno(error);
-
-	if (rv > 0)
-		bbdd_mon_send_debug(bfdd->mon, "bfdd: sent %zd bytes", rv);
-
-	return 0;
-}
-
-static int bbdd_bfdd_event(struct bbdd_poll_ctx *pctx, short revents,
-			   void *data, char **)
-{
-	struct bbdd_bfdd *bfdd = data;
-	short events = POLLIN | POLLHUP;
-	char *error;
-	int rc;
-
-	if (revents & POLLHUP) {
-		/* Like for the error case, unset FD because the callback
-		 * doesn't have to. */
-		bbdd_bfdd_poll_unset(bfdd);
-
-		assert(bfdd->cbs.hangup_cb != NULL);
-		bfdd->cbs.hangup_cb(bfdd, bfdd->cbs.sock_cb_data);
-		return 0;
-	}
-
-	if (revents & POLLIN) {
-		rc = bbdd_bfdd_read_event(bfdd, &error);
-		if (rc < 0)
-			goto error;
-	}
-
-	if (revents & POLLOUT) {
-		rc = bbdd_bfdd_write_event(bfdd, &error);
-		if (rc < 0)
-			goto error;
-	}
-
-	if (bfddp_write_pending(bfdd->bctx))
-		events |= POLLOUT;
-
-	rc = bbdd_poll_set_fd(pctx, bfdd->fd, events,
-			      bbdd_bfdd_event, bfdd, &error);
-	if (rc < 0) {
-		bbdd_err_print(&error, "Failed to reset BFD poll FD");
-		goto error;
-	}
-
-	return 0;
-
-error:
-	/* The sockerr callback below could call bbdd_bfdd_close(). But doesn't
-	 * have to, so unset the poll FD now. */
-	bbdd_bfdd_poll_unset(bfdd);
-
-	bfdd->cbs.sockerr_cb(bfdd, error, bfdd->cbs.sock_cb_data);
-	free(error);
-
-	return 0;
-}
-
-static int bbdd_bfdd_connected(struct bbdd_poll_ctx *pctx, short,
-			       void *data, char **)
-{
-	struct bbdd_bfdd *bfdd = data;
-	char *error;
-	int rv;
-
-	rv = bfddp_is_connected(bfdd->bctx);
-	if (rv == 1)
-		/* bfddp_is_connected() returns `1` if still not connected. Just
-		 * keep the same event handler and wait for more. */
-		return 0;
-
-	if (rv == -1) {
-		bbdd_err_fmt(&error, "Error connecting to the BFD DP socket");
-		goto error;
-	}
-
-	rv = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLHUP,
-			      bbdd_bfdd_event, bfdd, &error);
-	if (rv < 0)
-		goto error;
-
-	bfdd->cbs.connected_cb(bfdd, bfdd->cbs.conn_cb_data);
-	return 0;
-
-error:
-	/* The callback could call bbdd_bfdd_close(). But doesn't have to, so
-	 * unset the poll FD now. */
-	bbdd_bfdd_poll_unset(bfdd);
-	bfdd->cbs.connect_failed_cb(bfdd, &error, bfdd->cbs.conn_cb_data);
-
-	/* Keep any errors that we encountered here to ourselves, the daemon
-	 * should stay up and running. */
-	return 0;
-}
-
-struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
-				 struct bbdd_poll_ctx *pctx,
-				 struct bbdd_mon *mon,
-				 const struct bbdd_bfdd_cbs *cbs,
-				 char **error)
-{
+	struct bbdd_util_ssk_bfddp_tkn *tkn;
+	struct bbdd_ssk_cbs *plf_cbs;
+	struct bbdd_ssk_cbs *ssk_cbs;
+	struct bbdd_bfdd_c *bfdd_c;
+	struct bbdd_ssk_peer *peer;
 	struct bbdd_sockaddr sa;
-	struct bfddp_ctx *bctx;
-	struct bbdd_bfdd *bfdd;
+	struct bbdd_ssk_c *ssc;
 	int rc;
-	int fd;
 
 	rc = bbdd_sock_parse_addrstr(AF_UNIX, path, &sa, error);
 	if (rc < 0)
 		return NULL;
 
-	bctx = bfddp_new(4096, 4096);
-	if (bctx == NULL) {
-		bbdd_err_fmt(error, "Failed to open libbfd context");
+	bfdd_c = malloc(sizeof(*bfdd_c));
+	if (bfdd_c == NULL) {
+		bbdd_err_fmt(error, "%m");
 		return NULL;
 	}
 
-	rc = bfddp_connect(bctx, &sa.sa, sa.len);
-	if (rc < 0) {
-		bbdd_err_fmt(error, "Failed to connect to bfd datapath socket");
-		goto free_bfddp;
-	}
+	ssc = bbdd_ssk_open_c(pctx, &sa, error);
+	if (ssc == NULL)
+		goto free_bfdd_c;
+	peer = bbdd_ssk_c_peer(ssc);
 
-	fd = bfddp_get_fd(bctx);
-	if (fd < 0) {
-		/* This shouldn't happen. */
-		bbdd_err_fmt(error, "libbfd socket closed");
-		goto free_bfddp;
-	}
+	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_bfdd_dispatch_message,
+					     &bfdd_c->base, error);
+	if (tkn == NULL)
+		goto close_ssc;
 
-	bfdd = malloc(sizeof(*bfdd));
-	if (bfdd == NULL) {
-		bbdd_err_fmt(error, "%m");
-		goto free_bfddp;
-	}
-	*bfdd = (struct bbdd_bfdd) {
-		.bctx = bctx,
-		.fd = fd,
-		.pctx = pctx,
-		.mon = mon,
-		.cbs = *cbs,
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer,
+					bbdd_util_ssk_bfddp_tkn_rx_cb,
+					bbdd_bfdd_bfddp_tkn_destroy,
+					tkn, error);
+	if (ssk_cbs == NULL)
+		goto close_ssc;
+
+	plf_cbs = bbdd_ssk_peer_add_cbs(peer,
+					NULL,
+					bbdd_bfdd_peer_done_cb,
+					&bfdd_c->base, error);
+	if (plf_cbs == NULL)
+		goto destroy_tkn;
+
+	*bfdd_c = (struct bbdd_bfdd_c) {
+		.ssc = ssc,
+		.base = {
+			.peer = peer,
+			.plf_cbs = plf_cbs,
+			.tkn = tkn,
+			.pctx = pctx,
+			.mon = mon,
+			.cbs = *cbs,
+		},
 	};
 
-	rc = bbdd_poll_set_fd(pctx, fd, POLLOUT,
-			      bbdd_bfdd_connected, bfdd,
-			      error);
-	if (rc < 0)
-		goto free_bfdd;
+	return bfdd_c;
 
-	return bfdd;
-
-free_bfdd:
-	free(bfdd);
-free_bfddp:
-	bfddp_free(bctx);
+destroy_tkn:
+	bbdd_util_ssk_bfddp_tkn_destroy(tkn);
+close_ssc:
+	/* ssk_close_c fires the tokener's own done_cb, which destroys it. */
+	bbdd_ssk_close_c(ssc);
+free_bfdd_c:
+	free(bfdd_c);
 	return NULL;
 }
 
-struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
-					struct bbdd_poll_ctx *pctx,
-					struct bbdd_mon *mon,
-					const struct bbdd_bfdd_cbs *cbs,
-					char **error)
+struct bbdd_bfdd_d *bbdd_bfdd_attach_d(struct bbdd_ssk_peer *peer,
+				       struct bbdd_poll_ctx *pctx,
+				       struct bbdd_mon *mon,
+				       const struct bbdd_bfdd_cbs *cbs,
+				       char **error)
 {
-	struct bfddp_ctx *bctx;
-	struct bbdd_bfdd *bfdd;
-	int rc;
+	struct bbdd_util_ssk_bfddp_tkn *tkn;
+	struct bbdd_ssk_cbs *ssk_cbs;
+	struct bbdd_ssk_cbs *plf_cbs;
+	struct bbdd_bfdd_d *bfdd_d;
 
-	bctx = bfddp_new(4096, 4096);
-	if (bctx == NULL) {
-		bbdd_err_fmt(error, "Failed to open libbfd context");
+	bfdd_d = malloc(sizeof(*bfdd_d));
+	if (bfdd_d == NULL) {
+		bbdd_err_fmt(error, "%m");
 		return NULL;
 	}
 
-	bfddp_set_fd(bctx, fd);
+	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_bfdd_dispatch_message,
+					     &bfdd_d->base, error);
+	if (tkn == NULL)
+		goto free_bfdd_d;
 
-	bfdd = malloc(sizeof(*bfdd));
-	if (bfdd == NULL) {
-		bbdd_err_fmt(error, "%m");
-		goto free_bfddp;
-	}
-	*bfdd = (struct bbdd_bfdd) {
-		.bctx = bctx,
-		.fd = fd,
-		.pctx = pctx,
-		.mon = mon,
-		.cbs = *cbs,
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer,
+					bbdd_util_ssk_bfddp_tkn_rx_cb,
+					bbdd_bfdd_bfddp_tkn_destroy,
+					tkn, error);
+	if (ssk_cbs == NULL)
+		goto destroy_tkn;
+
+	plf_cbs = bbdd_ssk_peer_add_cbs(peer,
+					NULL,
+					bbdd_bfdd_peer_done_cb,
+					&bfdd_d->base, error);
+	if (plf_cbs == NULL)
+		goto destroy_tkn;
+
+	*bfdd_d = (struct bbdd_bfdd_d) {
+		.base = {
+			.peer = peer,
+			.plf_cbs = plf_cbs,
+			.tkn = tkn,
+
+			.pctx = pctx,
+			.mon = mon,
+			.cbs = *cbs,
+		},
 	};
+	return bfdd_d;
 
-	rc = bbdd_poll_set_fd(pctx, bfdd->fd, POLLIN | POLLHUP,
-			      bbdd_bfdd_event, bfdd, error);
-	if (rc < 0)
-		goto free_bfdd;
-
-	return bfdd;
-
-free_bfdd:
-	free(bfdd);
-free_bfddp:
-	bfddp_free(bctx);
+destroy_tkn:
+	bbdd_util_ssk_bfddp_tkn_destroy(tkn);
+free_bfdd_d:
+	free(bfdd_d);
 	return NULL;
 }
 
-bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd)
+static bool bbdd_bfdd_is_connected(const struct bbdd_bfdd_b *bfdd_b)
 {
-	return bfddp_is_connected(bfdd->bctx) == 0;
+	return bfdd_b->peer != NULL;
 }
 
-static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd *bfdd,
+bool bbdd_bfdd_c_is_connected(const struct bbdd_bfdd_c *bfdd_c)
+{
+	return bbdd_bfdd_is_connected(&bfdd_c->base);
+}
+
+bool bbdd_bfdd_d_is_connected(const struct bbdd_bfdd_d *bfdd_d)
+{
+	return bbdd_bfdd_is_connected(&bfdd_d->base);
+}
+
+static int bbdd_bfdd_write_enqueue(struct bbdd_bfdd_b *bfdd_b,
 				   const struct bfddp_message *msg,
 				   char **error)
 {
-	size_t written;
+	uint16_t msglen = bbdd_ntoh16(msg->header.length);
 	int rc;
 
-	rc = bbdd_poll_set_fd(bfdd->pctx, bfdd->fd, POLLIN | POLLOUT | POLLHUP,
-			      bbdd_bfdd_event, bfdd, error);
-	if (rc != 0)
-		return rc;
-
-	/* returns 0 on full buffer or the number of bytes buffered. */
-	written = bfddp_write_enqueue(bfdd->bctx, msg);
-	if (written == 0) {
-		bbdd_err_fmt(error, "bfdd: Buffer full");
+	if (bfdd_b->peer == NULL) {
+		bbdd_err_fmt(error, "bfdd: peer is gone");
 		return -1;
 	}
 
-	bbdd_bfdd_mon_send_o(bfdd->mon, msg);
+	rc = bbdd_ssk_peer_nq(bfdd_b->peer, (const char *) msg, msglen, error);
+	if (rc != 0)
+		return rc;
+
+	bbdd_bfdd_mon_send_o(bfdd_b->mon, msg);
 	return 0;
 }
 
-int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
-			     uint16_t msg_id, uint32_t discr,
-			     const struct bbdd_prog_session_data_stats *stats,
-			     char **error)
+int bbdd_bfdd_c_reply_counters(struct bbdd_bfdd_c *bfdd_c,
+			       uint16_t msg_id, uint32_t discr,
+			       const struct bbdd_prog_session_data_stats *stats,
+			       char **error)
 {
 	struct bfddp_message msg;
 
@@ -363,19 +278,19 @@ int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
 		},
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(&bfdd_c->base, &msg, error);
 }
 
 static void bbdd_bfdd_echo_peer_done(struct bbdd_ssk_peer *, void *data);
 
 static struct bbdd_bfdd_echo_peer *
-bbdd_bfdd_echo_peer_init(struct bbdd_bfdd *bfdd, struct bbdd_ssk_peer *peer,
+bbdd_bfdd_echo_peer_init(struct bbdd_bfdd_b *bfdd_b, struct bbdd_ssk_peer *peer,
 			 struct json_object *id, bool is_dp, char **error)
 {
 	struct bbdd_bfdd_echo_peer *epeer;
 	struct bbdd_ssk_cbs *ssk_cbs;
 
-	bbdd_mon_send_debug(bfdd->mon, "echo peer init");
+	bbdd_mon_send_debug(bfdd_b->mon, "echo peer init");
 
 	epeer = malloc(sizeof(*epeer));
 	if (epeer == NULL) {
@@ -390,14 +305,14 @@ bbdd_bfdd_echo_peer_init(struct bbdd_bfdd *bfdd, struct bbdd_ssk_peer *peer,
 		goto epeer_free;
 
 	*epeer = (struct bbdd_bfdd_echo_peer) {
-		.bfdd = bfdd,
+		.bfdd_b = bfdd_b,
 		.peer = peer,
 		.id = json_object_get(id),
 		.is_dp = is_dp,
 		.ssk_cbs = ssk_cbs,
 	};
 
-	DL_APPEND(bfdd->echo_peers, epeer);
+	DL_APPEND(bfdd_b->echo_peers, epeer);
 	return epeer;
 
 epeer_free:
@@ -407,9 +322,9 @@ epeer_free:
 
 static void bbdd_bfdd_echo_peer_fini(struct bbdd_bfdd_echo_peer *epeer)
 {
-	bbdd_mon_send_debug(epeer->bfdd->mon, "echo peer fini");
+	bbdd_mon_send_debug(epeer->bfdd_b->mon, "echo peer fini");
 
-	DL_DELETE(epeer->bfdd->echo_peers, epeer);
+	DL_DELETE(epeer->bfdd_b->echo_peers, epeer);
 	bbdd_ssk_peer_del_cbs(epeer->peer, epeer->ssk_cbs);
 	json_object_put(epeer->id);
 	free(epeer);
@@ -419,38 +334,41 @@ static void bbdd_bfdd_echo_peer_done(struct bbdd_ssk_peer *, void *data)
 {
 	struct bbdd_bfdd_echo_peer *epeer = data;
 
-	bbdd_mon_send_debug(epeer->bfdd->mon, "echo peer gone");
+	bbdd_mon_send_debug(epeer->bfdd_b->mon, "echo peer gone");
 	bbdd_bfdd_echo_peer_fini(epeer);
 }
 
-static void bbdd_bfdd_echo_peers_free(struct bbdd_bfdd *bfdd)
+static void bbdd_bfdd_echo_peers_free(struct bbdd_bfdd_b *bfdd_b)
 {
 	struct bbdd_bfdd_echo_peer *epeer, *tmp;
 
-	DL_FOREACH_SAFE(bfdd->echo_peers, epeer, tmp)
+	DL_FOREACH_SAFE(bfdd_b->echo_peers, epeer, tmp)
 		bbdd_bfdd_echo_peer_fini(epeer);
 }
 
-void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd,
-				 struct bbdd_ssk_peer *peer,
-				 struct json_object *id, bool is_dp)
+static int bbdd_bfdd_send_echo(struct bbdd_bfdd_b *bfdd_b, uint16_t msg_id,
+			       uint64_t time_us, bool is_dp, char **error);
+
+static void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd_b *bfdd_b,
+					struct bbdd_ssk_peer *peer,
+					struct json_object *id, bool is_dp)
 {
 	struct bbdd_bfdd_echo_peer *epeer;
 	uint64_t ts;
 	char *error;
 	int rc;
 
-	if (bfdd == NULL) {
+	if (bfdd_b == NULL) {
 		bbdd_util_jrpc_respond_interr(peer, id, "No BFDD client connected");
 		return;
 	}
 
-	epeer = bbdd_bfdd_echo_peer_init(bfdd, peer, id, is_dp, &error);
+	epeer = bbdd_bfdd_echo_peer_init(bfdd_b, peer, id, is_dp, &error);
 	if (epeer == NULL)
 		goto err;
 
 	ts = bbdd_util_now();
-	rc = bbdd_bfdd_send_echo(bfdd, 1, ts, is_dp, &error);
+	rc = bbdd_bfdd_send_echo(bfdd_b, 1, ts, is_dp, &error);
 	if (rc != 0)
 		goto epeer_fini;
 
@@ -462,14 +380,32 @@ err:
 	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
-void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
-				 const struct bfddp_message *msg)
+void bbdd_bfdd_c_echo_handle_start(struct bbdd_bfdd_c *bfdd_c,
+				   struct bbdd_ssk_peer *peer,
+				   struct json_object *id)
+{
+	struct bbdd_bfdd_b *bfdd_b = bfdd_c ? &bfdd_c->base : NULL;
+
+	bbdd_bfdd_echo_handle_start(bfdd_b, peer, id, true);
+}
+
+void bbdd_bfdd_d_echo_handle_start(struct bbdd_bfdd_d *bfdd_d,
+				   struct bbdd_ssk_peer *peer,
+				   struct json_object *id)
+{
+	struct bbdd_bfdd_b *bfdd_b = bfdd_d ? &bfdd_d->base : NULL;
+
+	bbdd_bfdd_echo_handle_start(bfdd_b, peer, id, false);
+}
+
+static void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd_b *bfdd_b,
+					const struct bfddp_message *msg)
 {
 	uint64_t bfdd_time = bbdd_ntoh64(msg->data.echo.bfdd_time);
 	uint64_t dp_time = bbdd_ntoh64(msg->data.echo.dp_time);
 	struct bbdd_bfdd_echo_peer *epeer;
 
-	DL_FOREACH(bfdd->echo_peers, epeer) {
+	DL_FOREACH(bfdd_b->echo_peers, epeer) {
 		if (epeer->is_dp)
 			bbdd_util_jrpc_respond_echo(epeer->peer, epeer->id,
 						    dp_time, bfdd_time);
@@ -478,13 +414,25 @@ void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
 						    bfdd_time, dp_time);
 	}
 
-	bbdd_bfdd_echo_peers_free(bfdd);
+	bbdd_bfdd_echo_peers_free(bfdd_b);
 }
 
-int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
-			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo,
-			 bool is_dp, char **error)
+void bbdd_bfdd_c_echo_handle_reply(struct bbdd_bfdd_c *bfdd_c,
+				   const struct bfddp_message *msg)
+{
+	bbdd_bfdd_echo_handle_reply(&bfdd_c->base, msg);
+}
+
+void bbdd_bfdd_d_echo_handle_reply(struct bbdd_bfdd_d *bfdd_d,
+				   const struct bfddp_message *msg)
+{
+	bbdd_bfdd_echo_handle_reply(&bfdd_d->base, msg);
+}
+
+static int bbdd_bfdd_reply_echo(struct bbdd_bfdd_b *bfdd_b,
+				uint16_t msg_id,
+				const struct bfddp_echo *in_echo,
+				bool is_dp, char **error)
 {
 	uint64_t now = bbdd_util_now();
 	struct bfddp_message msg;
@@ -504,11 +452,23 @@ int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
 		},
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(bfdd_b, &msg, error);
 }
 
-int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t time_us, bool is_dp, char **error)
+int bbdd_bfdd_c_reply_echo(struct bbdd_bfdd_c *bfdd_c, uint16_t msg_id,
+			   const struct bfddp_echo *in_echo, char **error)
+{
+	return bbdd_bfdd_reply_echo(&bfdd_c->base, msg_id, in_echo, true, error);
+}
+
+int bbdd_bfdd_d_reply_echo(struct bbdd_bfdd_d *bfdd_d, uint16_t msg_id,
+			   const struct bfddp_echo *in_echo, char **error)
+{
+	return bbdd_bfdd_reply_echo(&bfdd_d->base, msg_id, in_echo, false, error);
+}
+
+static int bbdd_bfdd_send_echo(struct bbdd_bfdd_b *bfdd_b, uint16_t msg_id,
+			       uint64_t time_us, bool is_dp, char **error)
 {
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
@@ -524,7 +484,7 @@ int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 		},
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(bfdd_b, &msg, error);
 }
 
 static int bbdd_bfdd_session_d_from_c(struct bbdd_nl *nl,
@@ -562,10 +522,11 @@ static int bbdd_bfdd_msg_fill_netif(int ifindex, char *buf, char **error)
 	return -EINVAL;
 }
 
-int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
-				const struct bbdd_d_session *dsess,
-				char **error)
+int bbdd_bfdd_c_send_state_change(struct bbdd_bfdd_c *bfdd_c,
+				  const struct bbdd_d_session *dsess,
+				  char **error)
 {
+	struct bbdd_bfdd_b *bfdd_b = &bfdd_c->base;
 	uint32_t remote_flags = 0;
 
 	if (dsess->remote.flags.cpi)
@@ -589,14 +550,15 @@ int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
 		},
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(bfdd_b, &msg, error);
 }
 
-int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
-			  struct bbdd_nl *nl,
-			  const struct bbdd_c_session *csess,
-			  uint16_t msg_id, char **error)
+int bbdd_bfdd_d_add_session(struct bbdd_bfdd_d *bfdd_d,
+			    struct bbdd_nl *nl,
+			    const struct bbdd_c_session *csess,
+			    uint16_t msg_id, char **error)
 {
+	struct bbdd_bfdd_b *bfdd_b = &bfdd_d->base;
 	struct bbdd_d_session dsess;
 	struct bfddp_message msg = {};
 	struct in6_addr src = {};
@@ -673,11 +635,11 @@ int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
 	if (rc != 0)
 		return rc;
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(bfdd_b, &msg, error);
 }
 
-int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			  uint32_t discr, char **error)
+int bbdd_bfdd_d_del_session(struct bbdd_bfdd_d *bfdd_d, uint16_t msg_id,
+			    uint32_t discr, char **error)
 {
 	struct bfddp_message msg = {
 		.header.version = BFD_DP_VERSION,
@@ -689,11 +651,11 @@ int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 		.data.session.lid = bbdd_hton32(discr),
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(&bfdd_d->base, &msg, error);
 }
 
-int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			       uint32_t discr, char **error)
+int bbdd_bfdd_d_request_counters(struct bbdd_bfdd_d *bfdd_d, uint16_t msg_id,
+				 uint32_t discr, char **error)
 {
 	struct bfddp_message msg;
 
@@ -709,25 +671,51 @@ int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
 		},
 	};
 
-	return bbdd_bfdd_write_enqueue(bfdd, &msg, error);
+	return bbdd_bfdd_write_enqueue(&bfdd_d->base, &msg, error);
 }
 
-void bbdd_bfdd_close(struct bbdd_bfdd *bfdd)
+/* Common teardown: respond to any pending bfdd-echo JRPC clients, free
+ * the echo-peer list, and mark the bfdd as closing so the peer-done
+ * callback does not re-invoke the user. The actual peer destruction is
+ * role-specific. */
+static void bbdd_bfdd_close_common(struct bbdd_bfdd_b *bfdd_b)
 {
 	struct bbdd_bfdd_echo_peer *epeer;
 
-	DL_FOREACH(bfdd->echo_peers, epeer)
+	DL_FOREACH(bfdd_b->echo_peers, epeer)
 		bbdd_util_jrpc_respond_interr(epeer->peer, epeer->id,
 					      "BFDD client disconnect");
-	bbdd_bfdd_echo_peers_free(bfdd);
+	bbdd_bfdd_echo_peers_free(bfdd_b);
 
-	bbdd_bfdd_poll_unset(bfdd);
-	bfddp_free(bfdd->bctx);
-	if (bfdd->cbs.connect_free_cb != NULL)
-		bfdd->cbs.connect_free_cb(bfdd->cbs.conn_cb_data);
-	if (bfdd->cbs.sock_free_cb != NULL)
-		bfdd->cbs.sock_free_cb(bfdd->cbs.sock_cb_data);
-	free(bfdd);
+	bfdd_b->closing = true;
+}
+
+void bbdd_bfdd_close_c(struct bbdd_bfdd_c *bfdd_c)
+{
+	bbdd_bfdd_close_common(&bfdd_c->base);
+
+	if (bfdd_c->base.peer != NULL) {
+		/* Synchronously destroys the peer; the tokener's done_cb
+		 * fires inside and frees the tokener. */
+		bbdd_ssk_close_c(bfdd_c->ssc);
+		bfdd_c->base.peer = NULL;
+	}
+
+	free(bfdd_c);
+}
+
+void bbdd_bfdd_close_d(struct bbdd_bfdd_d *bfdd_d)
+{
+	bbdd_bfdd_close_common(&bfdd_d->base);
+
+	if (bfdd_d->base.peer != NULL) {
+		/* Externally-owned peer (bridge accepted it); destroy the
+		 * per-peer state synchronously. */
+		bbdd_ssk_peer_destroy(bfdd_d->base.peer);
+		bfdd_d->base.peer = NULL;
+	}
+
+	free(bfdd_d);
 }
 
 static int bbdd_bfdd_session_to_c_addr(struct bbdd_c_session_addr *to,

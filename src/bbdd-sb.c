@@ -15,9 +15,14 @@ void bbdd_sb_fini(struct bbdd_sb *sb)
 	free(sb->buf);
 }
 
-const char *bbdd_sb_cstr(const struct bbdd_sb *sb)
+const void *bbdd_sb_buf(const struct bbdd_sb *sb)
 {
 	return sb->buf + sb->off;
+}
+
+const char *bbdd_sb_cstr(const struct bbdd_sb *sb)
+{
+	return bbdd_sb_buf(sb);
 }
 
 size_t bbdd_sb_len(const struct bbdd_sb *sb)

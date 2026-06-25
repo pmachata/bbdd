@@ -97,3 +97,19 @@ void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn);
 int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 				 const char *buf, size_t len,
 				 void *data, char **error);
+
+/* Length-prefixed framing for bfddp wire protocol. Buffers incoming bytes
+ * until a complete struct bfddp_message has arrived, then invokes obj_cb
+ * with a pointer into the helper's own buffer. */
+struct bfddp_message;
+
+struct bbdd_util_ssk_bfddp_tkn *
+bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+					     const struct bfddp_message *msg,
+					     void *data, char **error),
+			       void *data, char **error);
+void bbdd_util_ssk_bfddp_tkn_destroy(struct bbdd_util_ssk_bfddp_tkn *tkn);
+
+int bbdd_util_ssk_bfddp_tkn_rx_cb(struct bbdd_ssk_peer *peer,
+				  const char *buf, size_t len,
+				  void *data, char **error);

@@ -25,7 +25,6 @@
 #include "bbdd-sock.h"
 #include "bbdd-ssk.h"
 #include "bbdd-util.h"
-#include "bfddp.h"
 #include "bfddp_packet.h"
 
 struct bbdd_br;
@@ -43,8 +42,8 @@ struct bbdd_br {
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
 	struct bbdd_ssk_d *ctl;
-	struct bbdd_sock bfdd_server;
-	struct bbdd_bfdd *bfdd; /* non-NULL while a bfdd client is connected */
+	struct bbdd_ssk_d *bfdd_server;
+	struct bbdd_bfdd_d *bfdd; /* non-NULL while a bfdd client is connected */
 
 	struct bbdd_br_stats *stats; /* non-NULL = session-stats awaiting
 				      * BFD_SESSION_COUNTERS */
@@ -111,7 +110,7 @@ static void bbdd_br_bfdd_client_close(struct bbdd_br *br)
 	bbdd_mon_send_debug(br->mon, "bfdd: Client disconnected");
 
 	assert(br->bfdd != NULL);
-	bbdd_bfdd_close(br->bfdd);
+	bbdd_bfdd_close_d(br->bfdd);
 	br->bfdd = NULL;
 
 	if (br->stats != NULL) {
@@ -297,7 +296,7 @@ static void bbdd_br_handle_session_add(struct bbdd_br *br,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	rc = bbdd_bfdd_add_session(br->bfdd, br->nl, &csess, 1, &error);
+	rc = bbdd_bfdd_d_add_session(br->bfdd, br->nl, &csess, 1, &error);
 	if (rc == -EINVAL)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	else if (rc != 0)
@@ -323,7 +322,7 @@ static void bbdd_br_handle_session_del(struct bbdd_br *br,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 
-	rc = bbdd_bfdd_del_session(br->bfdd, 1, discr, &error);
+	rc = bbdd_bfdd_d_del_session(br->bfdd, 1, discr, &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
@@ -355,7 +354,7 @@ static void bbdd_br_handle_session_stats(struct bbdd_br *br,
 	if (br->stats == NULL)
 		goto err;
 
-	rc = bbdd_bfdd_request_counters(br->bfdd, 1, discr, &error);
+	rc = bbdd_bfdd_d_request_counters(br->bfdd, 1, discr, &error);
 	if (rc != 0)
 		goto stats_free;
 
@@ -388,7 +387,7 @@ static void bbdd_br_handle_method(struct bbdd_ssk_peer *peer,
 	else if (strcmp(method, "echo") == 0)
 		bbdd_d_handle_echo(peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
-		bbdd_bfdd_echo_handle_start(br->bfdd, peer, id, false);
+		bbdd_bfdd_d_echo_handle_start(br->bfdd, peer, id);
 	else if (strcmp(method, "session-add") == 0)
 		bbdd_br_handle_session_add(br, peer, params_obj, id);
 	else if (strcmp(method, "session-del") == 0)
@@ -420,9 +419,8 @@ static int bbdd_br_ctl_accept_cb(struct bbdd_poll_ctx *, short,
 	return bbdd_d_ctl_accept(br->ctl, bbdd_br_ctl_recv_obj, br, error);
 }
 
-static void __bbdd_br_bfdd_hangup(struct bbdd_br *br, struct bbdd_bfdd *bfdd)
+static void __bbdd_br_bfdd_hangup(struct bbdd_br *br)
 {
-	assert(br->bfdd == bfdd);
 	bbdd_br_bfdd_client_close(br);
 }
 
@@ -472,14 +470,14 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	bmt = bbdd_ntoh16(msg->header.type);
 	switch (bmt) {
 	case ECHO_REPLY:
-		return bbdd_bfdd_echo_handle_reply(br->bfdd, msg);
+		return bbdd_bfdd_d_echo_handle_reply(br->bfdd, msg);
 	case BFD_SESSION_COUNTERS:
 		return bbdd_br_bfdd_handle_session_counters(br, msg);
 	case BFD_STATE_CHANGE:
 		return bbdd_br_bfdd_handle_state_change(br, msg);
 	case ECHO_REQUEST:
-		rc = bbdd_d_bfdd_handle_echo_request(br->bfdd, &br->diag_stats,
-						     msg, false, &error);
+		rc = bbdd_d_bfdd_d_handle_echo_request(br->bfdd, &br->diag_stats,
+						       msg, &error);
 		if (rc != 0)
 			goto senderr;
 		return;
@@ -496,95 +494,56 @@ senderr:
 	bbdd_mon_senderr(br->mon, &error, "bfdd");
 }
 
-static void bbdd_br_bfdd_hangup_cb(struct bbdd_bfdd *bfdd, void *data)
+static void bbdd_br_bfdd_done_cb(void *data)
 {
 	struct bbdd_br *br = data;
 
-	__bbdd_br_bfdd_hangup(br, bfdd);
+	__bbdd_br_bfdd_hangup(br);
 }
 
-static void bbdd_br_bfdd_sockerr_cb(struct bbdd_bfdd *bfdd, const char *,
-				    void *data)
-{
-	struct bbdd_br *br = data;
-
-	__bbdd_br_bfdd_hangup(br, bfdd);
-}
-
-static int bbdd_br_bfdd_message_cb(struct bbdd_bfdd *,
-				   struct bfddp_message *msg,
+static int bbdd_br_bfdd_message_cb(const struct bfddp_message *msg,
 				   void *data, char **)
 {
 	struct bbdd_br *br = data;
 
-	__bbdd_br_bfdd_message_cb(br, msg);
+	__bbdd_br_bfdd_message_cb(br, (struct bfddp_message *) msg);
 	return 0;
 }
 
-static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *pctx, short,
+static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *, short,
 				      void *arg, char **error)
 {
 	struct bbdd_br *br = arg;
+	struct bbdd_ssk_cbs ssk_cbs = {};
 	struct bbdd_bfdd_cbs cbs;
-	int fd;
+	struct bbdd_ssk_peer *peer;
+	int rc;
 
 	bbdd_mon_send_debug(br->mon, "bfdd: Client connected");
 
-	fd = accept4(br->bfdd_server.fd, NULL, NULL,
-		     SOCK_NONBLOCK | SOCK_CLOEXEC);
-	if (fd < 0) {
-		bbdd_err_fmt(error, "accept4: %m");
-		goto err;
-	}
-
+	/* Evict the existing client first; the bridge serves at most one
+	 * bfdd peer at a time. */
 	if (br->bfdd != NULL)
 		bbdd_br_bfdd_client_close(br);
 
-	cbs = (struct bbdd_bfdd_cbs) {
-		.sock_cb_data = br,
-		.hangup_cb = bbdd_br_bfdd_hangup_cb,
-		.sockerr_cb = bbdd_br_bfdd_sockerr_cb,
-		.message_cb = bbdd_br_bfdd_message_cb,
-		.sock_free_cb = NULL,
-	};
-	br->bfdd = bbdd_bfdd_open_client(fd, pctx, br->mon, &cbs, error);
-	if (br->bfdd == NULL)
-		goto fd_close;
-
-	return 0;
-
-fd_close:
-	close(fd);
-err:
-	bbdd_err_app(error, "BFDD client accept");
-	return -1;
-}
-
-static int bbdd_br_open_bfdd_server(const struct bbdd_sockaddr *bsa,
-				    struct bbdd_sock *sock, char **error)
-{
-	int rc;
-
-	rc = bbdd_sock_open_sa(bsa, SOCK_STREAM | SOCK_CLOEXEC, sock, error);
+	rc = bbdd_ssk_d_accept(br->bfdd_server, ssk_cbs, &peer, error);
+	if (rc == -EWOULDBLOCK)
+		return 0;
 	if (rc != 0)
 		return rc;
 
-	rc = listen(sock->fd, SOMAXCONN);
-	if (rc < 0) {
-		bbdd_err_fmt(error, "listen: %m");
-		goto close_sock;
+	cbs = (struct bbdd_bfdd_cbs) {
+		.data = br,
+		.done_cb = bbdd_br_bfdd_done_cb,
+		.message_cb = bbdd_br_bfdd_message_cb,
+	};
+	br->bfdd = bbdd_bfdd_attach_d(peer, br->pctx, br->mon, &cbs, error);
+	if (br->bfdd == NULL) {
+		bbdd_ssk_peer_destroy(peer);
+		return -1;
 	}
 
 	return 0;
-
-close_sock:
-	bbdd_sock_close(sock);
-	return -1;
-}
-
-static void bbdd_br_close_bfdd_server(struct bbdd_sock *sock)
-{
-	bbdd_sock_close(sock);
 }
 
 static struct bbdd_ec bbdd_br_do_start(const char *addr,
@@ -625,13 +584,13 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 		goto mon_fini;
 	}
 
-	err = bbdd_br_open_bfdd_server(&bfdd_bsa, &br.bfdd_server, &error);
-	if (err != 0) {
+	br.bfdd_server = bbdd_ssk_open_d(br.pctx, &bfdd_bsa, &error);
+	if (br.bfdd_server == NULL) {
 		bbdd_err_print(&error, "Failed to open BFDD server socket");
 		goto mon_fini;
 	}
 
-	err = bbdd_poll_set_fd(br.pctx, br.bfdd_server.fd, POLLIN,
+	err = bbdd_poll_set_fd(br.pctx, bbdd_ssk_d_fd(br.bfdd_server), POLLIN,
 			       bbdd_br_bfdd_client_accept, &br, &error);
 	if (err != 0) {
 		bbdd_err_print(&error, "Failed to register BFDD server socket");
@@ -678,9 +637,9 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 sock_close_d:
 	bbdd_ssk_close_d(br.ctl);
 bfdd_poll_unset_server:
-	bbdd_poll_unset_fd(br.pctx, br.bfdd_server.fd);
+	bbdd_poll_unset_fd(br.pctx, bbdd_ssk_d_fd(br.bfdd_server));
 bfdd_server_close:
-	bbdd_br_close_bfdd_server(&br.bfdd_server);
+	bbdd_ssk_close_d(br.bfdd_server);
 poll_fini:
 	bbdd_poll_fini(br.pctx);
 mon_fini:
