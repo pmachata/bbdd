@@ -455,10 +455,3 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 
 	return 0;
 }
-
-void bbdd_util_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
-{
-	struct bbdd_util_ssk_json_tkn *tkn = data;
-
-	bbdd_util_ssk_json_tkn_destroy(tkn);
-}

@@ -2622,6 +2622,13 @@ static int bbdd_d_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
 	return 0;
 }
 
+static void bbdd_d_ctl_accept_peer_done_cb(struct bbdd_ssk_peer *, void *data)
+{
+	struct bbdd_util_ssk_json_tkn *tkn = data;
+
+	bbdd_util_ssk_json_tkn_destroy(tkn);
+}
+
 int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 		      int (*recv_obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 					 struct json_object *obj,
@@ -2638,7 +2645,7 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 
 	cbs = (struct bbdd_ssk_cbs) {
 		.rx_cb = bbdd_util_ssk_json_tkn_rx_cb,
-		.done_cb = bbdd_util_ssk_json_tkn_done_cb,
+		.done_cb = bbdd_d_ctl_accept_peer_done_cb,
 		.data = tkn,
 	};
 

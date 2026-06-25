@@ -143,7 +143,6 @@ static bool bbdd_c_result_show_json(struct json_object *result)
 struct bbdd_c {
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
-	struct bbdd_util_ssk_json_tkn *tkn;
 	struct bbdd_ssk_c *ctl;
 
 	int (*cb)(struct json_object *result,
@@ -199,15 +198,6 @@ static int bbdd_c_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *,
 				     c->cb_expected_type, &c->ec, error);
 }
 
-static int bbdd_c_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
-				     const char *buf, size_t len,
-				     void *data, char **error)
-{
-	struct bbdd_c *c = data;
-
-	return bbdd_util_ssk_json_tkn_rx_cb(peer, buf, len, c->tkn, error);
-}
-
 static void bbdd_c_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *, void *data)
 {
 	struct bbdd_c *c = data;
@@ -228,6 +218,7 @@ bbdd_c_interact(struct json_object *request,
 		.cb_expected_type = cb_expected_type,
 		.ec = bbdd_ec_success,
 	};
+	struct bbdd_util_ssk_json_tkn *tkn;
 	struct bbdd_sockaddr bsa;
 	struct bbdd_ssk_cbs *cbs;
 	const char *request_str;
@@ -251,8 +242,8 @@ bbdd_c_interact(struct json_object *request,
 	if (rc != 0)
 		goto poll_fini;
 
-	c.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, &error);
-	if (c.tkn == NULL) {
+	tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, &error);
+	if (tkn == NULL) {
 		rc = -1;
 		goto poll_fini;
 	}
@@ -264,8 +255,18 @@ bbdd_c_interact(struct json_object *request,
 	}
 
 	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(c.ctl),
-				    bbdd_c_ssk_json_tkn_rx_cb,
-				    bbdd_c_ssk_json_tkn_done_cb, &c, &error);
+				    bbdd_util_ssk_json_tkn_rx_cb,
+				    NULL,
+				    tkn, &error);
+	if (cbs == NULL) {
+		rc = -1;
+		goto ssk_close_ctl;
+	}
+
+	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(c.ctl),
+				    NULL,
+				    bbdd_c_ssk_json_tkn_done_cb,
+				    &c, &error);
 	if (cbs == NULL) {
 		rc = -1;
 		goto ssk_close_ctl;
@@ -298,7 +299,7 @@ unset_signals:
 ssk_close_ctl:
 	bbdd_ssk_close_c(c.ctl);
 tkn_destroy:
-	bbdd_util_ssk_json_tkn_destroy(c.tkn);
+	bbdd_util_ssk_json_tkn_destroy(tkn);
 poll_fini:
 	bbdd_poll_fini(c.pctx);
 mon_fini:

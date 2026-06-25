@@ -97,5 +97,3 @@ void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn);
 int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 				 const char *buf, size_t len,
 				 void *data, char **error);
-void bbdd_util_ssk_json_tkn_done_cb(struct bbdd_ssk_peer *peer,
-				    void *data);
