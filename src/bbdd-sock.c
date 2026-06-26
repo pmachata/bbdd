@@ -546,7 +546,8 @@ int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 
 	rc = bind(sock->fd, &bsa->sa, bsa->len);
 	if (rc < 0) {
-		bbdd_err_fmt(error, "Failed to bind socket: %m");
+		bbdd_err_fmt(error, "Failed to bind socket `%s': %m",
+			     bbdd_sockaddr_ntop(bsa).buf);
 		goto close_sock;
 	}
 
