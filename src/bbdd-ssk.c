@@ -126,18 +126,18 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 		rc = bbdd_ssk_peer_rx(peer, &error);
 		if (rc != 0) {
 			bbdd_err_print(&error, "client_rx");
-			goto error;
+			goto destroy;
 		}
 	}
 
 	if (revents & POLLHUP)
-		goto error;
+		goto destroy;
 
 	if (revents & POLLOUT) {
 		rc = bbdd_ssk_peer_tx(peer, &error);
 		if (rc != 0) {
 			bbdd_err_print(&error, "client_tx");
-			goto error;
+			goto destroy;
 		}
 	}
 
@@ -152,14 +152,14 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 			      bbdd_ssk_peer_event, peer, &error);
 	if (rc < 0) {
 		bbdd_err_print(&error, "Failed to reset SSK poll FD");
-		goto error;
+		goto destroy;
 	}
 
 	return 0;
 
-error:
+destroy:
 	bbdd_ssk_peer_destroy(peer);
-	return rc;
+	return 0;
 }
 
 struct bbdd_ssk_cbs *
