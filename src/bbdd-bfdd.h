@@ -21,60 +21,62 @@
 #define BBDD_BFDD_DEFAULT_ADDR "unix:/var/run/frr/bfdd_dplane.sock"
 
 struct bbdd_bfdd_cbs {
-	void *conn_cb_data;
-	void (*connected_cb)(struct bbdd_bfdd *, void *);
-	void (*connect_failed_cb)(struct bbdd_bfdd *, char **, void *);
-	void (*connect_free_cb)(void *);
-
-	void *sock_cb_data;
-	void (*hangup_cb)(struct bbdd_bfdd *, void *);
-	void (*sockerr_cb)(struct bbdd_bfdd *, const char *, void *);
-	int (*message_cb)(struct bbdd_bfdd *, struct bfddp_message *,
-			  void *, char **);
-	void (*sock_free_cb)(void *);
+	void *data;
+	/* Fired when the bfddp peer is disappearing (hangup, socket error, or
+	 * direct close). */
+	void (*peer_done_cb)(void *);
+	int (*message_cb)(const struct bfddp_message *, void *, char **);
 };
 
-struct bbdd_bfdd *bbdd_bfdd_open(const char *path,
-				 struct bbdd_poll_ctx *pctx,
-				 struct bbdd_mon *mon,
-				 const struct bbdd_bfdd_cbs *cbs,
-				 char **error);
-struct bbdd_bfdd *bbdd_bfdd_open_client(int fd,
-					struct bbdd_poll_ctx *pctx,
-					struct bbdd_mon *mon,
-					const struct bbdd_bfdd_cbs *cbs,
-					char **error);
-void bbdd_bfdd_close(struct bbdd_bfdd *bfdd);
+/* Client side (data-plane role): connect to a BFD daemon at `path'. */
+struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
+				     struct bbdd_poll_ctx *pctx,
+				     struct bbdd_mon *mon,
+				     const struct bbdd_bfdd_cbs *cbs,
+				     char **error);
+void bbdd_bfdd_close_c(struct bbdd_bfdd_c *c);
 
-bool bbdd_bfdd_is_connected(const struct bbdd_bfdd *bfdd);
+/* Server side (BFD-daemon role): attach to an ssk peer that the caller
+ * (e.g. the bridge) has already accepted. The peer remains owned by the
+ * caller's ssk_d. */
+struct bbdd_bfdd_d *bbdd_bfdd_attach_d(struct bbdd_ssk_peer *peer,
+				       struct bbdd_poll_ctx *pctx,
+				       struct bbdd_mon *mon,
+				       const struct bbdd_bfdd_cbs *cbs,
+				       char **error);
+void bbdd_bfdd_close_d(struct bbdd_bfdd_d *d);
 
-void bbdd_bfdd_echo_handle_start(struct bbdd_bfdd *bfdd,
-				 struct bbdd_ssk_peer *peer,
-				 struct json_object *id, bool is_dp);
-void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd *bfdd,
-				 const struct bfddp_message *msg);
+/* Client side (data-plane role) operations. */
+void bbdd_bfdd_c_echo_handle_start(struct bbdd_bfdd_c *c,
+				   struct bbdd_ssk_peer *peer,
+				   struct json_object *id);
+void bbdd_bfdd_c_echo_handle_reply(struct bbdd_bfdd_c *c,
+				   const struct bfddp_message *msg);
+int bbdd_bfdd_c_reply_echo(struct bbdd_bfdd_c *c, uint16_t msg_id,
+			   const struct bfddp_echo *in_echo, char **error);
+int bbdd_bfdd_c_send_state_change(struct bbdd_bfdd_c *c,
+				  const struct bbdd_d_session *dsess,
+				  char **error);
+int bbdd_bfdd_c_reply_counters(struct bbdd_bfdd_c *c,
+			       uint16_t msg_id, uint32_t discr,
+			       const struct bbdd_prog_session_data_stats *stats,
+			       char **error);
 
-int bbdd_bfdd_send_echo(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			uint64_t time_us, bool is_dp, char **error);
-int bbdd_bfdd_reply_echo(struct bbdd_bfdd *bfdd,
-			 uint16_t msg_id,
-			 const struct bfddp_echo *in_echo,
-			 bool is_dp, char **error);
-int bbdd_bfdd_send_state_change(struct bbdd_bfdd *bfdd,
-				const struct bbdd_d_session *dsess,
-				char **error);
-int bbdd_bfdd_add_session(struct bbdd_bfdd *bfdd,
-			  struct bbdd_nl *nl,
-			  const struct bbdd_c_session *csess,
-			  uint16_t msg_id, char **error);
-int bbdd_bfdd_del_session(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			  uint32_t discr, char **error);
-int bbdd_bfdd_request_counters(struct bbdd_bfdd *bfdd, uint16_t msg_id,
-			       uint32_t discr, char **error);
-int bbdd_bfdd_reply_counters(struct bbdd_bfdd *bfdd,
-			     uint16_t msg_id, uint32_t discr,
-			     const struct bbdd_prog_session_data_stats *stats,
-			     char **error);
+/* Server side (BFD-daemon role) operations. */
+void bbdd_bfdd_d_echo_handle_start(struct bbdd_bfdd_d *d,
+				   struct bbdd_ssk_peer *peer,
+				   struct json_object *id);
+void bbdd_bfdd_d_echo_handle_reply(struct bbdd_bfdd_d *d,
+				   const struct bfddp_message *msg);
+int bbdd_bfdd_d_reply_echo(struct bbdd_bfdd_d *d, uint16_t msg_id,
+			   const struct bfddp_echo *in_echo, char **error);
+int bbdd_bfdd_d_add_session(struct bbdd_bfdd_d *d, struct bbdd_nl *nl,
+			    const struct bbdd_c_session *csess,
+			    uint16_t msg_id, char **error);
+int bbdd_bfdd_d_del_session(struct bbdd_bfdd_d *d, uint16_t msg_id,
+			    uint32_t discr, char **error);
+int bbdd_bfdd_d_request_counters(struct bbdd_bfdd_d *d, uint16_t msg_id,
+				 uint32_t discr, char **error);
 
 int bbdd_bfdd_session_msg_to_c(const struct bfddp_message *msg,
 			       struct bbdd_c_session *csess,
