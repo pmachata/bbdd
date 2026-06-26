@@ -46,9 +46,6 @@ const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 				  size_t *size, char **error);
 
 /* Returns 0 or 1 for false or true; or < 0 for errors. */
-int bbdd_sockaddr_is_zero(const struct bbdd_sockaddr *sa, char **error);
-
-/* Returns 0 or 1 for false or true; or < 0 for errors. */
 int bbdd_sockaddr_eq(const struct bbdd_sockaddr *sa,
 		     const struct bbdd_sockaddr *sb, char **error);
 
