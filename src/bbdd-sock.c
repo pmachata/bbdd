@@ -183,25 +183,51 @@ int bbdd_sockaddr_eq(const struct bbdd_sockaddr *sa,
 	return memcmp(ba, bb, sza) == 0;
 }
 
-int bbdd_sockaddr_ntop(socklen_t bufsize;
-		       const struct bbdd_sockaddr *sa,
-		       char buf[bufsize], socklen_t bufsize, char **error)
+static int __bbdd_sockaddr_ntop(socklen_t bufsize;
+				const struct bbdd_sockaddr *sa,
+				char buf[bufsize], socklen_t bufsize,
+				char **error)
 {
 	int af = sa->sa.sa_family;
 	const char *ret = NULL;
 	const void *addrbuf;
 
+	if (af == AF_UNIX) {
+		if (strlen(sa->sun.sun_path) >= bufsize) {
+			bbdd_err_fmt(error, "UNIX domain socket address too long for output buffer");
+			return -ENOSPC;
+		}
+		strcpy(buf, sa->sun.sun_path);
+		return 0;
+	}
+
 	addrbuf = bbdd_sockaddr_addrbuf(sa, NULL, error);
 	if (addrbuf == NULL)
-		return -1;
+		return -EAFNOSUPPORT;
 
 	ret = inet_ntop(af, addrbuf, buf, bufsize);
 	if (ret == NULL) {
 		bbdd_err_fmt(error, "Failed to format address: %m");
-		return -1;
+		return -errno;
 	}
 
 	return 0;
+}
+
+struct bbdd_sockaddr_str bbdd_sockaddr_ntop(const struct bbdd_sockaddr *sa)
+{
+	struct bbdd_sockaddr_str buf = {};
+	int rc;
+
+	/* This function can fail for one of two reasons: buffer is not large
+	 * enough, or AF is unsupported. We really really shouldn't see
+	 * unsupported AF addresses here. And `buf' ought to be large enough by
+	 * definition. So all this better pass.
+	 */
+
+	rc = __bbdd_sockaddr_ntop(sa, buf.buf, sizeof(buf.buf), NULL);
+	assert(rc == 0);
+	return buf;
 }
 
 static int bbdd_sock_split_addr_unix(char *addr,

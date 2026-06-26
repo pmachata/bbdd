@@ -1581,7 +1581,6 @@ static struct json_object *
 bbdd_bpf_jrpc_addr_obj(uint16_t ethtype, const struct bbdd_bpf_addr *bpf_addr,
 		       char **error)
 {
-	char buf[INET6_ADDRSTRLEN];
 	struct bbdd_sockaddr addr;
 	int err;
 
@@ -1590,11 +1589,8 @@ bbdd_bpf_jrpc_addr_obj(uint16_t ethtype, const struct bbdd_bpf_addr *bpf_addr,
 	if (err != 0)
 		return NULL;
 
-	err = bbdd_sockaddr_ntop(&addr, buf, sizeof(buf), error);
-	if (err != 0)
-		return NULL;
-
-	return bbdd_util_jrpc_addr_obj(buf, addr.sa.sa_family);
+	return bbdd_util_jrpc_addr_obj(bbdd_sockaddr_ntop(&addr).buf,
+				       addr.sa.sa_family);
 }
 
 static struct json_object *

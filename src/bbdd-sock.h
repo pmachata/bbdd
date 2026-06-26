@@ -30,6 +30,17 @@ struct bbdd_sock {
 	struct bbdd_sockaddr sa;
 };
 
+#define bbdd_sockaddr_sun_len \
+		sizeof(((struct sockaddr_un *)0)->sun_path)
+
+/* A string buffer long enough to render an address into. */
+struct bbdd_sockaddr_str {
+	char buf[INET6_ADDRSTRLEN > bbdd_sockaddr_sun_len ?
+		 INET6_ADDRSTRLEN : bbdd_sockaddr_sun_len];
+};
+
+#undef bbdd_sockaddr_sun_len
+
 int bbdd_sock_parse_u32(const char *str, uint32_t *ret, const char *what,
 			char **error);
 int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what,
@@ -38,9 +49,7 @@ int bbdd_sock_parse_u8(const char *str, uint8_t *ret, const char *what,
 int bbdd_inet_pton(int af, const char *restrict addr, void *restrict dst,
 		   char **error);
 
-int bbdd_sockaddr_ntop(socklen_t bufsize;
-		       const struct bbdd_sockaddr *sa,
-		       char buf[bufsize], socklen_t bufsize, char **error);
+struct bbdd_sockaddr_str bbdd_sockaddr_ntop(const struct bbdd_sockaddr *sa);
 
 const void *bbdd_sockaddr_addrbuf(const struct bbdd_sockaddr *sa,
 				  size_t *size, char **error);
