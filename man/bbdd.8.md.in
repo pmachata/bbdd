@@ -54,10 +54,17 @@ OPTIONS
 
 `-v, --verbose, -q, --quiet`
 
-: Be more or less verbose, these options compensate each other. When just
-  `-q` is given, show no output (beyond command line parsing), not even
-  error messages. When `-v` show debug messages in addition to error
-  messages.
+: Be more or less verbose. The default verbosity is 0, `-v` increases the
+  verbosity, `-q` decreases it.
+
+  When the resulting verbosity is below 0, show no output, not even error
+  messages (beyond command line parsing).
+
+  When the resulting verbosity is at least 0, show normal output.
+
+  When the resulting verbosity is at least 1, show detailed output.
+
+  When the resulting verbosity is at least 2, show debug messages.
 
 `-N`
 

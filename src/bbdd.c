@@ -174,7 +174,7 @@ int main(int argc, char **argv)
 
 	if (verbosity >= 0)
 		topics.enabled[BBDD_MON_TOPIC_error] = true;
-	if (verbosity >= 1)
+	if (verbosity >= 2)
 		topics.enabled[BBDD_MON_TOPIC_debug] = true;
 	bbdd_env.verbosity = verbosity;
 	bbdd_err_verbosity = verbosity;
