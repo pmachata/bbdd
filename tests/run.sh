@@ -25,6 +25,7 @@ source ${tests_dir}/lib.sh
 	ns-delay.sh
 	err.sh
 	cli.sh
+	jrpc-mangled.sh
 }"
 
 printf -v divider '%*s' 74 ''
