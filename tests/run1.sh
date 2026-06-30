@@ -13,11 +13,6 @@ source ${tests_dir}/lib.sh
 source ${tests_dir}/libbbdd.sh
 source ${tests_dir}/libfrr.sh
 
-if [[ "$(id -u)" -ne 0 ]]; then
-	log_test_skip "need root privileges"
-	exit "$EXIT_STATUS"
-fi
-
 if [[ ! -e "$T" ]]; then
 	log_test_skip "The test file $T does not exist"
 else

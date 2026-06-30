@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+root_require
 
 # Feed the daemon malformed JRPC requests over a raw socket and assert
 # that it bounces them with the expected JRPC errors (or, for byte-level

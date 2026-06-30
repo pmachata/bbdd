@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+root_require
 
 Bbdd_setup_ns NS1
 Bbdd_setup_socket SD1

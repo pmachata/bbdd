@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-
-source ${tests_dir}/libfrr.sh
+root_require
 Frr_require
 
 Bbdd_setup_ns NS1 NS2

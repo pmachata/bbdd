@@ -968,3 +968,11 @@ now()
 {
 	date +%s%6N
 }
+
+root_require()
+{
+	if [[ "$(id -u)" -ne 0 ]]; then
+		log_test_skip "need root privileges"
+		exit "$EXIT_STATUS"
+	fi
+}

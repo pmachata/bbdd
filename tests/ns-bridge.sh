@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
+root_require
 
 Bbdd_setup_ns NS1 NS2
 Bbdd_connect_ns NS1 v1 $(Bbdd_IP_mask 1) \
