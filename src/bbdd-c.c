@@ -169,11 +169,13 @@ static int __bbdd_c_ctl_recv_obj(struct json_object *response,
 					       &result, error);
 	switch (rrc) {
 	case bbdd_c_result_rc_fail:
+		*ec = bbdd_ec_failure;
 		return -1;
 	case bbdd_c_result_rc_ok_error:
 		*ec = bbdd_ec_failure;
 		return 0;
 	case bbdd_c_result_rc_ok:
+		*ec = bbdd_ec_success;
 		break;
 	}
 
@@ -216,7 +218,7 @@ bbdd_c_interact(struct json_object *request,
 		.cb = cb,
 		.cb_data = data,
 		.cb_expected_type = cb_expected_type,
-		.ec = bbdd_ec_success,
+		.ec = bbdd_ec_failure,
 	};
 	struct bbdd_util_ssk_json_tkn *tkn;
 	struct bbdd_sockaddr bsa;
