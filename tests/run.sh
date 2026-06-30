@@ -27,6 +27,7 @@ source ${tests_dir}/lib.sh
 	cli.sh
 	jrpc-mangled.sh
 	jrpc-client-mangled.sh
+	jrpc-monitor-mangled.sh
 }"
 
 printf -v divider '%*s' 74 ''
