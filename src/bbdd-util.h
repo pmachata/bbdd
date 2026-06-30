@@ -84,6 +84,13 @@ struct bbdd_util_ssk_json_tkn {
 
 	int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 		      struct json_object *obj, void *data, char **error);
+
+	/* Optional. Invoked when the tokenizer hits a parse error. Return 0 to
+	 * skip the offending byte and keep parsing; non-zero to propagate the
+	 * error and tear the peer down. err_cb of NULL is treated as if a
+	 * callback returned a non-zero rc. */
+	int (*err_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+		      void *data, char **error);
 	void *data;
 };
 

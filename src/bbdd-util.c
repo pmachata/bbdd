@@ -441,8 +441,22 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 		struct json_object *obj;
 
 		rc = bbdd_util_jrpc_tokenize(tkn->tok, &buf, &len, &obj, error);
-		if (rc < 0) /* Error. */
-			return rc;
+		if (rc < 0) {
+			if (tkn->err_cb == NULL)
+				return rc;
+			rc = tkn->err_cb(tkn, tkn->data, error);
+			if (rc != 0)
+				return rc;
+			/* Resync: the tokenizer stopped at the offending byte
+			 * without consuming it. Skip past it and start a
+			 * fresh parse. */
+			json_tokener_reset(tkn->tok);
+			if (len > 0) {
+				buf++;
+				len--;
+			}
+			continue;
+		}
 		if (rc > 0) {
 			/* Continue. */
 			assert(len == 0);
