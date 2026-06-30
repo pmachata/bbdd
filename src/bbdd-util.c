@@ -280,7 +280,7 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 
 	/* request_obj is JSON `null'. */
 	if (request_obj == NULL) {
-		obj = bbdd_jrpc_new_error_inv_request(NULL);
+		obj = bbdd_jrpc_new_error_inv_request("null");
 		bbdd_util_jrpc_respond(peer, &obj);
 		return;
 	}
