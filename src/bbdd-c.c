@@ -3014,6 +3014,14 @@ static int bbdd_c_monitor_recv_cb(struct bbdd_util_ssk_json_tkn *,
 	return 0;
 }
 
+static int bbdd_c_monitor_err_cb(struct bbdd_util_ssk_json_tkn *,
+				 void *, char **error)
+{
+	/* Tolerate garbage in the notification stream: just log it. */
+	bbdd_err_print(error, "monitor stream");
+	return 0;
+}
+
 static int bbdd_c_monitor_handshake_done_cb(struct json_object *result,
 					    void *data, char **)
 {
@@ -3022,6 +3030,7 @@ static int bbdd_c_monitor_handshake_done_cb(struct json_object *result,
 	assert(json_object_get_type(result) == json_type_null);
 
 	mctx->tkn->obj_cb = bbdd_c_monitor_recv_cb;
+	mctx->tkn->err_cb = bbdd_c_monitor_err_cb;
 	assert(mctx->tkn->data == mctx);
 	return 0;
 }
