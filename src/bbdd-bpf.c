@@ -683,6 +683,18 @@ bbdd_bpf_session_detect_time_us(const struct bbdd_bpf_session_data *eff_data,
 	return detect_time_us;
 }
 
+static int bbdd_bpf_inject_rearm_packet(struct bbdd_bpf *bpf,
+					const struct bbdd_d_session *dsess,
+					struct bbdd_bpf_session *bsess,
+					char **error)
+{
+	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
+			    dsess->local.discr);
+	return bbdd_bpf_session_inject_pkt(dsess, bsess,
+					   bpf->veth_rx_ifindex,
+					   0, error);
+}
+
 static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 				     const struct bbdd_d_session *dsess,
 				     struct bbdd_bpf_session *bsess,
@@ -791,11 +803,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	}
 
 	if (rearm_timer > bsess->timer_armed) {
-		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
-				    dsess->local.discr);
-		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
-						 bpf->veth_rx_ifindex,
-						 0, error);
+		rc = bbdd_bpf_inject_rearm_packet(bpf, dsess, bsess, error);
 		if (rc != 0)
 			return rc;
 	}
@@ -1291,6 +1299,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	struct bbdd_bpf_session *bsess;
 	bool final_recvd;
 	bool poll_recvd;
+	char *error;
 	int err;
 
 	/* Errors here are problematic, but not worth killing the daemon
@@ -1350,6 +1359,12 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (err)
 		return;
 
+	/* The packet was trapped as unexpected, so we didn't rearm the receive
+	 * timer. At this point we know the packet was valid, so rearm. */
+	err = bbdd_bpf_inject_rearm_packet(bpf, dsess, bsess, &error);
+	if (err != 0)
+		bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "Failed to rearm timer for unexpected packet");
+
 	if (dsess->remote.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN) {
 		if (dsess->local.state.state != BBDD_BFD_PKT_STATE_DOWN) {
 			dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
@@ -1408,8 +1423,6 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 
 	if (poll_recvd) {
-		char *error;
-
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting final packet",
 				    dsess->local.discr);
 		err = bbdd_bpf_session_inject_pkt(dsess, bsess,

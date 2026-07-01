@@ -734,10 +734,18 @@ int bbdd_recv(struct __sk_buff *skb)
 		return TC_ACT_SHOT;
 	}
 
+	/* RFC: "If the packet was not discarded, it has been received for
+	 * purposes of the Detection Time expiration rules in section 6.8.4."
+	 *
+	 * That is in context of packet discards: only non-discarded packets
+	 * should rearm the timer. For unexpected packets we don't know if they
+	 * should be discarded, userspace does that, so we only rearm the timer
+	 * now that we know the packet was expected. */
+	bbdd_recv_rearm_timer(discr, config, data);
+
 	BUMP(data->stats.rx_packets);
 	__sync_fetch_and_add(&data->stats.rx_bytes, digest.wire_len);
 
-	bbdd_recv_rearm_timer(discr, config, data);
 	return TC_ACT_SHOT;
 }
 
