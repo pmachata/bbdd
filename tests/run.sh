@@ -23,6 +23,7 @@ source ${tests_dir}/lib.sh
 	vrf-ifbound.sh
 	vrf-scale.sh
 	ns-delay.sh
+	ns-poll-timing.sh
 	err.sh
 	cli.sh
 	jrpc-mangled.sh
