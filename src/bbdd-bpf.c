@@ -256,6 +256,44 @@ __invalid_on_hold_abort(struct bbdd_bpf_session *bsess, const char *func)
 
 #define invalid_on_hold_abort(BSESS) __invalid_on_hold_abort((BSESS), __func__)
 
+static int bbdd_bpf_session_send(int sock_fd,
+				 const struct sockaddr_ll *dst,
+				 socklen_t dstlen,
+				 const void *pkt, size_t pktlen,
+				 uint32_t mark, char **error)
+{
+	struct iovec iov = {
+		.iov_base = (void *)pkt,
+		.iov_len  = pktlen,
+	};
+	union {
+		struct cmsghdr align;
+		char           buf[CMSG_SPACE(sizeof(uint32_t))];
+	} cmsg_buf = {};
+	struct msghdr msg = {
+		.msg_name       = (void *)dst,
+		.msg_namelen    = dstlen,
+		.msg_iov        = &iov,
+		.msg_iovlen     = 1,
+		.msg_control    = cmsg_buf.buf,
+		.msg_controllen = sizeof(cmsg_buf.buf),
+	};
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	ssize_t rc;
+
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type  = SO_MARK;
+	cmsg->cmsg_len   = CMSG_LEN(sizeof(mark));
+	memcpy(CMSG_DATA(cmsg), &mark, sizeof(mark));
+
+	rc = sendmsg(sock_fd, &msg, 0);
+	if (rc < 0) {
+		bbdd_err_fmt(error, "sendmsg(bfd_tx): %d %m", errno);
+		return -1;
+	}
+	return 0;
+}
+
 static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 				       struct bbdd_bpf_session *bsess,
 				       uint32_t tx_ifindex,
@@ -268,7 +306,6 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 		struct sockaddr_ll sll;
 	} dst_sa = {};
 	uint8_t ttl;
-	ssize_t rc;
 
 	/* RFC: When a BFD session is directly connected across a single link
 	 * (physical, or a secure tunnel such as IPsec), the TTL or Hop Count
@@ -332,8 +369,10 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
 
-		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
-			    &dst_sa.sa, sizeof(dst_sa.sll));
+		return bbdd_bpf_session_send(bsess->sock_fd,
+					     &dst_sa.sll, sizeof(dst_sa.sll),
+					     &pkt, sizeof(pkt),
+					     bsess->gen_id, error);
 	} else {
 		struct {
 			struct ip6_hdr ip6;
@@ -358,15 +397,11 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 						       udp_len);
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
-		rc = sendto(bsess->sock_fd, &pkt, sizeof(pkt), 0,
-			    &dst_sa.sa, sizeof(dst_sa.sll));
+		return bbdd_bpf_session_send(bsess->sock_fd,
+					     &dst_sa.sll, sizeof(dst_sa.sll),
+					     &pkt, sizeof(pkt),
+					     bsess->gen_id, error);
 	}
-
-	if (rc < 0) {
-		bbdd_err_fmt(error, "sendto(bfd_tx): %d %m", errno);
-		return -1;
-	}
-	return 0;
 }
 
 static int
@@ -643,21 +678,6 @@ static void bbdd_bpf_session_conf_delete(struct bbdd_bpf *bpf, uint32_t discr)
 			discr);
 }
 
-static int bbdd_bpf_session_set_mark(const struct bbdd_bpf_session *bsess,
-				     char **error)
-{
-	uint32_t mark = bsess->gen_id;
-	int rc;
-
-	rc = setsockopt(bsess->sock_fd, SOL_SOCKET, SO_MARK,
-			&mark, sizeof(mark));
-	if (rc < 0) {
-		bbdd_err_fmt(error, "setsockopt(SO_MARK): %m");
-		return -1;
-	}
-	return 0;
-}
-
 enum { BBDD_BPF_NS_PER_US = 1 * 1000 };
 
 static uint32_t
@@ -751,10 +771,6 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		else
 			max_interval_us = interval_us;
 	}
-
-	rc = bbdd_bpf_session_set_mark(bsess, error);
-	if (rc != 0)
-		return rc;
 
 	if (tbid != 0)
 		fib_flags |= BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_TBID;
