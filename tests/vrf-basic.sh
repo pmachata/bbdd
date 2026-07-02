@@ -38,3 +38,17 @@ Bbdd session vrf V2 set multihop
 
 session_state_test up 1 vrf V1
 session_state_test up 1 vrf V2
+
+# Any session-set bumps gen_id, retiring the packet still spinning in
+# fq for the affected session. Verify the BPF drop rule actually fires:
+# bump ttl (does not trigger a poll sequence, so no confounders), wait
+# comfortably past max_interval, and check tx_wrong_gen_id climbed.
+before=$(Bbdd --json session vrf V1 diag stats |
+	jq '.sessions[0].stats.tx_wrong_gen_id')
+Bbdd session vrf V1 set ttl 254
+sleep 0.3
+after=$(Bbdd --json session vrf V1 diag stats |
+	jq '.sessions[0].stats.tx_wrong_gen_id')
+((after > before))
+check_err $? "tx_wrong_gen_id did not climb (before=$before after=$after)"
+Bbdd_log_test "BPF drops obsolete gen_id packets"
