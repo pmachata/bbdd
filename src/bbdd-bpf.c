@@ -256,7 +256,8 @@ __invalid_on_hold_abort(struct bbdd_bpf_session *bsess, const char *func)
 
 #define invalid_on_hold_abort(BSESS) __invalid_on_hold_abort((BSESS), __func__)
 
-static int bbdd_bpf_session_send(int sock_fd,
+static int bbdd_bpf_session_send(struct bbdd_bpf *bpf,
+				 int sock_fd,
 				 const struct sockaddr_ll *dst,
 				 socklen_t dstlen,
 				 const void *pkt, size_t pktlen,
@@ -291,10 +292,12 @@ static int bbdd_bpf_session_send(int sock_fd,
 		bbdd_err_fmt(error, "sendmsg(bfd_tx): %d %m", errno);
 		return -1;
 	}
+	bpf->diag_stats.sk_sent_count++;
 	return 0;
 }
 
-static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
+static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
+				       const struct bbdd_d_session *dsess,
 				       struct bbdd_bpf_session *bsess,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error)
@@ -369,7 +372,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
 
-		return bbdd_bpf_session_send(bsess->sock_fd,
+		return bbdd_bpf_session_send(bpf, bsess->sock_fd,
 					     &dst_sa.sll, sizeof(dst_sa.sll),
 					     &pkt, sizeof(pkt),
 					     bsess->gen_id, error);
@@ -397,7 +400,7 @@ static int bbdd_bpf_session_inject_pkt(const struct bbdd_d_session *dsess,
 						       udp_len);
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
-		return bbdd_bpf_session_send(bsess->sock_fd,
+		return bbdd_bpf_session_send(bpf, bsess->sock_fd,
 					     &dst_sa.sll, sizeof(dst_sa.sll),
 					     &pkt, sizeof(pkt),
 					     bsess->gen_id, error);
@@ -710,7 +713,7 @@ static int bbdd_bpf_inject_rearm_packet(struct bbdd_bpf *bpf,
 {
 	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Arming timer",
 			    dsess->local.discr);
-	return bbdd_bpf_session_inject_pkt(dsess, bsess,
+	return bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
 					   bpf->veth_rx_ifindex,
 					   0, error);
 }
@@ -811,7 +814,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		uint8_t bfd_flags;
 
 		bfd_flags = bbdd_bpf_get_inject_bfd_flags(dsess, bsess);
-		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,
+		rc = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
 						 bpf->veth_tx_ifindex,
 						 bfd_flags, error);
 		if (rc != 0)
@@ -1441,7 +1444,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	if (poll_recvd) {
 		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting final packet",
 				    dsess->local.discr);
-		err = bbdd_bpf_session_inject_pkt(dsess, bsess,
+		err = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
 						  bpf->veth_tx_ifindex,
 						  BBDD_BFD_PKT_BIT_FINAL,
 						  &error);
