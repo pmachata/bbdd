@@ -377,11 +377,30 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	if (data == NULL)
 		goto tx_no_session;
 
-	if (skb->mark != config->gen_id) {
-		/* Obsolete packet. */
+	if (config->tx_discard) {
+		BUMP(data->diag_stats.tx_forced_discard);
+		return TC_ACT_SHOT;
+	}
+
+	/* last_seen_gen_id tracks the highest gen_id we've seen. This is
+	 * necessary because gen_id needs to be bumped _before_ new packet is
+	 * injected, so that the new packet is not dropped right away. We
+	 * tolerate packets with mark in last_seen .. gen_id, and update
+	 * last_seen according to what is actually seen on the wire. Thus when
+	 * gen_id is bumped, but packet injection fails and needs to be retried
+	 * later, we don't lose the sole spinner packet we have.
+	 *
+	 * The (int32_t) cast turns the comparison into a wrap-around-safe
+	 * TCP-style one. We would need to inject 4G packets per session to
+	 * wrap-around, but the cost of this is zero. */
+
+	if ((__s32)(skb->mark - data->last_seen_gen_id) < 0 ||
+	    (__s32)(skb->mark - config->gen_id) > 0) {
 		BUMP(data->diag_stats.tx_wrong_gen_id);
 		return TC_ACT_SHOT;
 	}
+	if ((__s32)(skb->mark - data->last_seen_gen_id) > 0)
+		data->last_seen_gen_id = skb->mark;
 
 	/* FQ sometimes blocks packets that arrive later, but should be scheduled
 	 * earlier, before packets that are already in the queue. This tends to

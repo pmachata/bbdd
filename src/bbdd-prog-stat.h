@@ -33,6 +33,7 @@
 	FIELD(tx_fail_redir)			\
 	FIELD(tx_loopback_filter)		\
 	FIELD(tx_wrong_gen_id)		        \
+	FIELD(tx_forced_discard)		\
 	FIELD(rx_admin_down)			\
 	FIELD(rx_ttl_low)			\
 	FIELD(rx_unsupported)			\

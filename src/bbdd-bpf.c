@@ -556,6 +556,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 					uint32_t max_interval_us,
 					uint32_t detect_time_us,
 					bool rearm_timer,
+					bool tx_discard,
 					char **error)
 {
 	bool admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
@@ -583,6 +584,7 @@ static int bbdd_bpf_session_conf_update(struct bbdd_bpf *bpf,
 		.gen_id = bsess->gen_id,
 		.admin_down = admdown,
 		.rearm_timer = rearm_timer,
+		.tx_discard = tx_discard,
 		.ttl = dsess->ttl,
 		.rx_expect = bbdd_bpf_make_packet(dsess->remote.discr,
 						  &dsess->remote.timing,
@@ -639,7 +641,7 @@ static int bbdd_bpf_session_conf_add(struct bbdd_bpf *bpf,
 	/* All sessions start on hold. Just create a shell of future config for
 	 * update as the session stops being on hold. */
 	err = bbdd_bpf_session_conf_update(bpf, dsess, bsess, 0, 0, 0, 0, 0, 0,
-					   false, error);
+					   false, true, error);
 	if (err)
 		return err;
 
@@ -783,17 +785,6 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	}
 
 	bool rearm_timer = !(down || admdown);
-	rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
-					  tbid, fib_flags,
-					  min_interval_us,
-					  max_interval_us,
-					  detect_time_us,
-					  rearm_timer, error);
-	if (rc != 0)
-		return rc;
-
-	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
-			    dsess->local.discr, bsess->gen_id);
 
 	/* When admin down and stable, we are past the shwait and don't need to
 	 * send packets anymore. */
@@ -807,8 +798,21 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	if (dsess->remote.discr == 0 && dsess->local.flags.passive)
 		should_inject = false;
 
+	rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
+					  tbid, fib_flags,
+					  min_interval_us,
+					  max_interval_us,
+					  detect_time_us,
+					  rearm_timer,
+					  !should_inject, error);
+	if (rc != 0)
+		return rc;
+
 	if (should_inject) {
 		uint8_t bfd_flags;
+
+		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
+				    dsess->local.discr, bsess->gen_id);
 
 		bfd_flags = bbdd_bpf_get_inject_bfd_flags(dsess, bsess);
 		rc = bbdd_bpf_session_inject_pkt(dsess, bsess,

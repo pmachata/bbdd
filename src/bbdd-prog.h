@@ -14,6 +14,12 @@ struct bbdd_prog_session_config {
 	__u32 gen_id;
 	bool admin_down;
 	bool rearm_timer;
+
+	/* The gen_id mechanism on its own can't be used to drop packets,
+	 * because it's tolerant of old packets until it sees the new packet
+	 * actually spinning. When we want to drop, there is no new packet.
+	 * Hence this flag to request that dataplane drops all packets. */
+	bool tx_discard;
 	__u8 ttl;
 	struct bbdd_bfd_pkt rx_expect;
 };
@@ -30,6 +36,9 @@ struct bbdd_prog_session_data {
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
 	bool timer_initd;
+
+	/* Highest skb->mark value the data plane has seen for this session. */
+	__u32 last_seen_gen_id;
 };
 
 #define BFD_SINGLE_HOP_PORT	3784
