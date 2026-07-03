@@ -351,6 +351,43 @@ nsessions_test()
 	Bbdd_log_test "$xN ${descr}session$pl reported"
 }
 
+# Assert the TX socket-buffer accounting invariant:
+#
+#   sk_sent_count - sk_released_count == expected spinners in flight.
+#
+# In steady state, that equals the number of sessions currently
+# injecting packets — everything not on-hold and not
+# admin-down-while-stable. Callers pass the expected count directly
+# because the "which sessions are currently injecting" question is
+# awkward to answer from JSON alone (passive-without-remote-discr
+# sessions don't inject either, and the on-hold window is transient).
+#
+# The invariant only holds once transitions have settled, so poll
+# briefly instead of asserting synchronously.
+sk_pinned_test()
+{
+	local xN=$1; shift
+	local i
+	local sent
+	local released
+	local pinned
+
+	for ((i = 0; i < 20; i++)); do
+		read sent released < <(Bbdd --json global diag stats |
+			jq -r '"\(.sk_sent_count) \(.sk_released_count)"')
+		pinned=$((sent - released))
+		if ((pinned == xN)); then
+			break
+		fi
+		sleep 0.1
+	done
+
+	((pinned == xN))
+	check_err $? "$pinned spinners pinned, $xN expected (sent=$sent released=$released)"
+
+	Bbdd_log_test "sk_wmem: $xN spinner$( ((xN != 1)) && echo s ) pinned"
+}
+
 # Count sessions whose local & remote states both equal $goal.
 Bbdd_nsessions_in_state()
 {
