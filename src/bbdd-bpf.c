@@ -269,6 +269,24 @@ __invalid_on_hold_abort(struct bbdd_bpf_session *bsess, const char *func)
 
 #define invalid_on_hold_abort(BSESS) __invalid_on_hold_abort((BSESS), __func__)
 
+static uint32_t bbdd_bpf_tx_pinned(const struct bbdd_bpf *bpf)
+{
+	uint64_t sent = bpf->diag_stats.sk_sent_count;
+	uint64_t released =
+		bpf->skel->bss->bbdd_prog_global_diag_stats.sk_released_count;
+
+	/* sent >= released is an invariant: sent is bumped when userspace
+	 * enters an skb into the socket, released when the skb leaves it.
+	 * The u32 truncation is safe because in-flight packet count is
+	 * bounded by session_count, which fits comfortably. */
+	return (uint32_t)(sent - released);
+}
+
+static bool bbdd_bpf_tx_have_capacity(const struct bbdd_bpf *bpf)
+{
+	return bbdd_bpf_tx_pinned(bpf) < bpf->tx_capacity;
+}
+
 static int bbdd_bpf_session_send(struct bbdd_bpf *bpf,
 				 int sock_fd,
 				 const struct sockaddr_ll *dst,
@@ -756,10 +774,37 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	 * we've got two sessions and it's broken. So we just treat errors by
 	 * basically shrugging and bailing out early. */
 
-	bsess->gen_id++;
-
 	down = dsess->local.state.state == BBDD_BFD_PKT_STATE_DOWN;
 	admdown = dsess->local.state.state == BBDD_BFD_PKT_STATE_ADMINDOWN;
+
+	/* When admin down and stable, we are past the shwait and don't need to
+	 * send packets anymore. */
+	if (admdown && bsess->bstate == BBDD_BPF_SESSION_STATE_STABLE)
+		should_inject = false;
+
+	/* A system taking the Passive role MUST NOT begin sending BFD packets
+	 * for a particular session until it has received a BFD packet for that
+	 * session, and thus has learned the remote system's discriminator
+	 * value. */
+	if (dsess->remote.discr == 0 && dsess->local.flags.passive)
+		should_inject = false;
+
+	/* Preserve bump-and-send atomicity from the wire's point of view:
+	 * if we cannot inject the replacement right now, do not bump gen_id
+	 * either. The old spinner keeps flowing under the equality check;
+	 * drain will retry the whole update when capacity is available. */
+	if (should_inject && !bbdd_bpf_tx_have_capacity(bpf)) {
+		uint8_t bfd_flags = bbdd_bpf_get_inject_bfd_flags(dsess, bsess);
+		bool is_final = bfd_flags & BBDD_BFD_PKT_BIT_FINAL;
+		struct bbdd_tx_slot *slot = is_final ? &bsess->final_slot
+						     : &bsess->periodic_slot;
+
+		bbdd_tx_enqueue(bpf->tx, slot, is_final, dsess->local.discr,
+				bpf->veth_tx_ifindex, bfd_flags);
+		return 0;
+	}
+
+	bsess->gen_id++;
 
 	if (down)
 		/* If the session goes Down, the transmission of Echo
@@ -810,18 +855,6 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 	bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting packet, gen_id %u",
 			    dsess->local.discr, bsess->gen_id);
-
-	/* When admin down and stable, we are past the shwait and don't need to
-	 * send packets anymore. */
-	if (admdown && bsess->bstate == BBDD_BPF_SESSION_STATE_STABLE)
-		should_inject = false;
-
-	/* A system taking the Passive role MUST NOT begin sending BFD packets
-	 * for a particular session until it has received a BFD packet for that
-	 * session, and thus has learned the remote system's discriminator
-	 * value. */
-	if (dsess->remote.discr == 0 && dsess->local.flags.passive)
-		should_inject = false;
 
 	if (should_inject) {
 		uint8_t bfd_flags;
@@ -1455,14 +1488,26 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		bbdd_bpf_session_state_changed(bpf, dsess, bsess);
 
 	if (poll_recvd) {
-		bbdd_mon_send_debug(bpf->rb_ctx->mon, "session discr %u: Injecting final packet",
-				    dsess->local.discr);
-		err = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
-						  bpf->veth_tx_ifindex,
-						  BBDD_BFD_PKT_BIT_FINAL,
-						  &error);
-		if (err != 0)
-			bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "Failed to respond to a poll packet");
+		if (!bbdd_bpf_tx_have_capacity(bpf)) {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon,
+					    "session discr %u: Queueing final packet",
+					    dsess->local.discr);
+			bbdd_tx_enqueue(bpf->tx, &bsess->final_slot,
+					true,
+					dsess->local.discr,
+					bpf->veth_tx_ifindex,
+					BBDD_BFD_PKT_BIT_FINAL);
+		} else {
+			bbdd_mon_send_debug(bpf->rb_ctx->mon,
+					    "session discr %u: Injecting final packet",
+					    dsess->local.discr);
+			err = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
+							  bpf->veth_tx_ifindex,
+							  BBDD_BFD_PKT_BIT_FINAL,
+							  &error);
+			if (err != 0)
+				bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "Failed to respond to a poll packet");
+		}
 	}
 
 	switch (bsess->bstate) {
