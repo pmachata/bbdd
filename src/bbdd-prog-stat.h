@@ -13,6 +13,8 @@
 	FIELD(ring_buffer_error)		\
 	FIELD(sk_lookup_no_socket)		\
 	FIELD(sk_lookup_assign_error)		\
+	FIELD(sk_sent_count)			\
+	FIELD(sk_released_count)		\
 	FIELD(ra_not_bfd) /* ra=re-arm*/	\
 	FIELD(ra_no_session)			\
 	/**/

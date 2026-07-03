@@ -378,8 +378,8 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		goto tx_no_session;
 
 	if (skb->mark != config->gen_id) {
-		/* Obsolete packet. */
 		BUMP(data->diag_stats.tx_wrong_gen_id);
+		BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 		return TC_ACT_SHOT;
 	}
 
@@ -460,6 +460,7 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 		if (final_rc == TC_ACT_SHOT) {
 			/* Final packets shouldn't spin around. */
 			BUMP(data->diag_stats.tx_fail_redir);
+			BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 			return final_rc;
 		}
 	} else {
@@ -476,8 +477,10 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 	__sync_fetch_and_add(&data->stats.tx_bytes, skb->len);
 
 out:
-	if (final)
+	if (final) {
+		BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 		return final_rc;
+	}
 
 	interval_us = config->max_interval_us - config->min_interval_us;
 	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
@@ -491,6 +494,7 @@ tx_not_bfd:
 
 tx_no_session:
 	BUMP(bbdd_prog_global_diag_stats.tx_no_session);
+	BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 	return TC_ACT_SHOT;
 }
 
@@ -563,7 +567,7 @@ int bbdd_xmit_veth_rx_xmit(struct __sk_buff *skb)
 	bfd = bbdd_tx_get_bfd(skb, bfd_buf, sizeof bfd_buf, &tot_len);
 	if (bfd == NULL) {
 		BUMP(bbdd_prog_global_diag_stats.ra_not_bfd);
-		goto shot;
+		return TC_ACT_SHOT;
 	}
 
 	discr = bbdd_ntoh32(bfd->my_disc);
@@ -576,11 +580,12 @@ int bbdd_xmit_veth_rx_xmit(struct __sk_buff *skb)
 		goto ra_no_session;
 
 	bbdd_recv_rearm_timer(discr, config, data);
+	BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 	return TC_ACT_STOLEN;
 
 ra_no_session:
 	BUMP(bbdd_prog_global_diag_stats.ra_no_session);
-shot:
+	BUMP(bbdd_prog_global_diag_stats.sk_released_count);
 	return TC_ACT_SHOT;
 }
 
