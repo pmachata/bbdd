@@ -31,12 +31,12 @@ void bbdd_tx_destroy(struct bbdd_tx *tx)
 	free(tx);
 }
 
-void bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
+bool bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
 		     bool is_final,
 		     uint32_t discr, uint32_t tx_ifindex, uint8_t bfd_flags)
 {
 	if (slot->linked)
-		return;
+		return false;
 
 	slot->discr       = discr;
 	slot->tx_ifindex  = tx_ifindex;
@@ -48,6 +48,7 @@ void bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
 		DL_APPEND(tx->finals, slot);
 	else
 		DL_APPEND(tx->periodics, slot);
+	return true;
 }
 
 struct bbdd_tx_slot *bbdd_tx_peek(const struct bbdd_tx *tx)

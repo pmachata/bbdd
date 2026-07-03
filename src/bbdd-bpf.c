@@ -362,6 +362,7 @@ static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **error)
 		}
 		if (rc != 0)
 			break;
+		bpf->diag_stats.sk_deq_count++;
 	}
 
 	/* Disarm the timer if the queue is empty; otherwise keep polling.
@@ -908,8 +909,9 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 		struct bbdd_tx_slot *slot = is_final ? &bsess->final_slot
 						     : &bsess->periodic_slot;
 
-		bbdd_tx_enqueue(bpf->tx, slot, is_final, dsess->local.discr,
-				bpf->veth_tx_ifindex, bfd_flags);
+		if (bbdd_tx_enqueue(bpf->tx, slot, is_final, dsess->local.discr,
+				    bpf->veth_tx_ifindex, bfd_flags))
+			bpf->diag_stats.sk_enq_count++;
 		bbdd_bpf_tx_arm_drain(bpf);
 		return 0;
 	}
@@ -1602,11 +1604,12 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 			bbdd_mon_send_debug(bpf->rb_ctx->mon,
 					    "session discr %u: Queueing final packet",
 					    dsess->local.discr);
-			bbdd_tx_enqueue(bpf->tx, &bsess->final_slot,
-					true,
-					dsess->local.discr,
-					bpf->veth_tx_ifindex,
-					BBDD_BFD_PKT_BIT_FINAL);
+			if (bbdd_tx_enqueue(bpf->tx, &bsess->final_slot,
+					    true,
+					    dsess->local.discr,
+					    bpf->veth_tx_ifindex,
+					    BBDD_BFD_PKT_BIT_FINAL))
+				bpf->diag_stats.sk_enq_count++;
 			bbdd_bpf_tx_arm_drain(bpf);
 		} else {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon,
@@ -2488,7 +2491,7 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	bpf->pctx = pctx;
 	bpf->veth_rx_ifindex = veth_rx_ifindex;
 	bpf->veth_tx_ifindex = veth_tx_ifindex;
-	bpf->tx_capacity = UINT32_MAX;
+	bpf->tx_capacity = bbdd_env.tx_capacity;
 
 	bpf->tx = bbdd_tx_create(error);
 	if (bpf->tx == NULL)

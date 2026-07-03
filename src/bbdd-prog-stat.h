@@ -15,6 +15,8 @@
 	FIELD(sk_lookup_assign_error)		\
 	FIELD(sk_sent_count)			\
 	FIELD(sk_released_count)		\
+	FIELD(sk_enq_count)			\
+	FIELD(sk_deq_count)			\
 	FIELD(ra_not_bfd) /* ra=re-arm*/	\
 	FIELD(ra_no_session)			\
 	/**/

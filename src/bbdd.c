@@ -13,11 +13,13 @@
 #include "bbdd-d.h"
 #include "bbdd-err.h"
 #include "bbdd-mon.h"
+#include "bbdd-sock.h"
 #include "bbdd-util.h"
 #include "config.h"
 
 struct bbdd_env bbdd_env = {
 	.verbosity = 0,
+	.tx_capacity = UINT32_MAX,
 };
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";
@@ -156,6 +158,16 @@ int main(int argc, char **argv)
 				bbdd_env.cli_imm_done = true;
 			} else if (strcmp(optarg, "mon-eager") == 0) {
 				bbdd_env.mon_eager = true;
+			} else if (bbdd_util_startswith(optarg, "tx-cap=",
+							&dbg_arg)) {
+				rc = bbdd_sock_parse_u32(dbg_arg,
+							 &bbdd_env.tx_capacity,
+							 "tx-cap", &error);
+				if (rc != 0) {
+					bbdd_err_print(&error, "tx-cap `%s'",
+						       dbg_arg);
+					return EXIT_FAILURE;
+				}
 			} else {
 				fprintf(stderr, "Unknown --debug value: %s\n",
 					optarg);
