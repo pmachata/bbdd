@@ -54,6 +54,12 @@ get_tx_packets()
 		jq -j '.sessions[].stats.tx_packets'
 }
 
+get_tx_forced_discard()
+{
+	with_socket SD1 Bbdd --json session diag stats |
+		jq -j '.sessions[].stats.tx_forced_discard'
+}
+
 tx_packets_0=$(get_tx_packets)
 
 with_socket SD1 Bbdd session set shutdown
@@ -62,6 +68,8 @@ BBDD_SESSION_WAIT_TIME=3 with_socket SD1 session_state_test bpf_stable 1
 
 tx_packets_1=$(get_tx_packets)
 tx_packets_d=$((tx_packets_1 - tx_packets_0))
+
+tx_discards_1=$(get_tx_forced_discard)
 
 # With detect-mult of 6, we should see about 6 AdminDown packets before the
 # session is bpf_stable again. Due to netem, if we were to look at what gets out
@@ -85,6 +93,12 @@ tx_packets_d=$((tx_packets_2 - tx_packets_1))
 ((tx_packets_d == 0))
 check_err $? "Expected no more packets, got $tx_packets_d"
 Bbdd_log_test "Traffic stops after shutdown eventually"
+
+tx_discards_2=$(get_tx_forced_discard)
+tx_discards_d=$((tx_discards_2 - tx_discards_1))
+((tx_discards_d == 1))
+check_err $? "Expected one discard, got $tx_discards_d"
+Bbdd_log_test "Forced discard counted"
 
 with_socket SD1 session_state_test local_admindown 1
 with_socket SD2 session_state_test not_up 1
