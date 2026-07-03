@@ -77,6 +77,9 @@ defer_scope_push
 		# SD1 is not passive anymore and both should now reach up.
 		with_socket SD1 session_state_test up 1
 		with_socket SD2 session_state_test up 1
+
+		with_socket SD1 sk_pinned_test 1
+		with_socket SD2 sk_pinned_test 1
 	defer_scope_pop
 
 	OUT=$(cat ${SD1}/monout)
@@ -104,6 +107,7 @@ with_socket SD2 session_state_test not_up 1
 
 with_socket SD2 Bbdd session set shutdown
 
+with_socket SD2 sk_pinned_test 0
 with_socket SD2 packet_size_test
 with_socket SD2 session_stats_consistency_test
 with_socket SD2 session_diag_stats_consistency_test

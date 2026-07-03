@@ -22,8 +22,12 @@ Bbdd session add vrf V2 src $(Bbdd_IP 2) dst $(Bbdd_IP 1) \
 hold_time_test 5 vrf V1
 session_state_test up 1 vrf V2
 
+sk_pinned_test 2
+
 Bbdd session bulk del
 nsessions_test 0
+
+sk_pinned_test 0
 
 Bbdd session add vrf V1 src $(Bbdd_IP 1) dst $(Bbdd_IP 2) \
 		 min-tx 200ms min-rx 200ms detect-mult 3 multihop
@@ -38,6 +42,8 @@ Bbdd session vrf V2 set multihop
 
 session_state_test up 1 vrf V1
 session_state_test up 1 vrf V2
+
+sk_pinned_test 2
 
 # Any session-set bumps gen_id, retiring the packet still spinning in
 # fq for the affected session. Verify the BPF drop rule actually fires:
