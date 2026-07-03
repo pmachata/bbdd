@@ -30,8 +30,10 @@ void bbdd_tx_destroy(struct bbdd_tx *tx);
 /* Link the slot at the tail of the finals or periodics list per
  * is_final; if it is already linked, do nothing (the older enqueue
  * subsumes the new one). On a fresh link, the slot's discr /
- * tx_ifindex / bfd_flags are stamped from the arguments. */
-void bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
+ * tx_ifindex / bfd_flags are stamped from the arguments. Returns
+ * true if the slot was freshly linked, false if the call coalesced
+ * onto an existing entry. */
+bool bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
 		     bool is_final,
 		     uint32_t discr, uint32_t tx_ifindex, uint8_t bfd_flags);
 

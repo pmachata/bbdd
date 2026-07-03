@@ -24,6 +24,7 @@ source ${tests_dir}/lib.sh
 	vrf-scale.sh
 	ns-delay.sh
 	ns-poll-timing.sh
+	ns-tx-cap.sh
 	err.sh
 	cli.sh
 	jrpc-mangled.sh
