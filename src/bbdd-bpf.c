@@ -33,6 +33,7 @@
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
 #include "bbdd-prog.h"
+#include "bbdd-tx.h"
 #include "bbdd-util.h"
 
 #pragma GCC diagnostic push
@@ -71,6 +72,12 @@ struct bbdd_bpf {
 
 	struct bbdd_prog_global_diag_stats diag_stats;
 	struct bbdd_poll_ctx *pctx;
+
+	/* TX-side deferred-injection queue. Enqueue happens when
+	 * `pinned + 1 > tx_capacity`, i.e. when a fresh sendmsg would exceed
+	 * the shared TX socket's sndbuf headroom. */
+	struct bbdd_tx *tx;
+	uint32_t tx_capacity;
 };
 
 struct bbdd_bpf_session_data {
@@ -156,6 +163,12 @@ struct bbdd_bpf_session {
 
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
+
+	/* TX queue slots for deferred injections. See struct bbdd_bpf.tx.
+	 * The two are independent: a session may simultaneously have a
+	 * Final and a Periodic pending. */
+	struct bbdd_tx_slot final_slot;
+	struct bbdd_tx_slot periodic_slot;
 
 	UT_hash_handle hh;
 };
@@ -2319,6 +2332,11 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	bpf->pctx = pctx;
 	bpf->veth_rx_ifindex = veth_rx_ifindex;
 	bpf->veth_tx_ifindex = veth_tx_ifindex;
+	bpf->tx_capacity = UINT32_MAX;
+
+	bpf->tx = bbdd_tx_create(error);
+	if (bpf->tx == NULL)
+		goto free_bpf;
 
 	libbpf_set_print(bbdd_bpf_print);
 
@@ -2400,6 +2418,7 @@ free_rb_ctx:
 destroy_prog:
 	bbdd_prog__destroy(bpf->skel);
 free_bpf:
+	bbdd_tx_destroy(bpf->tx);
 	free(bpf);
 err:
 	bbdd_err_app(error, "Failed to initialize BPF");
@@ -2413,6 +2432,9 @@ static void __bbdd_bpf_session_del(struct bbdd_bpf *bpf,
 		bbdd_bpf_hold_stop(bsess);
 	if (bsess->shwait != NULL)
 		bbdd_bpf_shwait_stop(bpf, bsess);
+
+	bbdd_tx_unlink(bpf->tx, &bsess->final_slot);
+	bbdd_tx_unlink(bpf->tx, &bsess->periodic_slot);
 
 	HASH_DEL(bpf->sdir, bsess);
 
@@ -2447,6 +2469,7 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
+	bbdd_tx_destroy(bpf->tx);
 	free(bpf);
 }
 
