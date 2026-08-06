@@ -26,7 +26,7 @@ Frr_bground()
 		 --vty_socket "${!BBDD_SOCKET}" \
 		 --pid_file "${!BBDD_SOCKET}/bfdd.pid" \
 		 --socket "${!BBDD_SOCKET}/zserv.api" \
-		 --log file:/dev/stderr --log-level error "$@" &
+		 --log stdout --log-level error "$@" &
 }
 
 adf_Frr_bfdd_start()
