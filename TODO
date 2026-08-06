@@ -1,0 +1,22 @@
+- We just need one packet socket. We need to set the buffer size
+  appropriately though, because the packets consume it until they are
+  dropped. I think it's 3 (TX packet, timer packet, final packet) *
+  nsessions + 100, the fudge factor of 100 to cover in-flight
+  configurations, where packets will take time before they get looped
+  around and dropped.
+
+  The mark then needs to be transferred as cmsg, not set through socket
+  option.
+
+- What if bound interface is in a VRF, but the session isn't? Or what if it
+  is in a different VRF? That is a problem mainly with reception IMHO,
+  where we get VRF ifindex, but the VRF is determined from the ingress
+  interface. And we don't have the original ifindex anymore. Such
+  cross-bound session would never be matched. So I guess the setting should
+  be bounced.
+
+- Maybe we could announce the randomly-chosen discriminator through
+  BFD_STATE_CHANGE? I.e. allow zero discriminator?
+
+- No-fudge scale test. We might need a no-fudge scale test as well, to test the
+  lookup speed for unexpected packets.
