@@ -2920,10 +2920,8 @@ int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
 	return 0;
 }
 
-static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
-				    uint32_t veth_tx_ifindex, char **error)
+static int bbdd_d_session_open_sock(uint32_t veth_tx_ifindex, char **error)
 {
-	uint16_t proto;
 	union {
 		struct sockaddr sa;
 		struct sockaddr_ll sll;
@@ -2931,27 +2929,15 @@ static int bbdd_d_session_open_sock(const struct bbdd_d_session *dsess,
 	int fd;
 	int rc;
 
-	switch (dsess->dst.sa.sa_family) {
-	case AF_INET:
-		proto = ETH_P_IP;
-		break;
-	case AF_INET6:
-		proto = ETH_P_IPV6;
-		break;
-	default:
-		bbdd_err_fmt(error, "Unsupported address family %d",
-			     dsess->src.sa.sa_family);
-		return -1;
-	}
-
-	fd = socket(AF_PACKET, SOCK_DGRAM, htons(proto));
+	fd = socket(AF_PACKET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+		    htons(ETH_P_ALL));
 	if (fd < 0) {
 		bbdd_err_fmt(error, "socket(AF_PACKET): %m");
 		return -1;
 	}
 
 	sa.sll.sll_family   = AF_PACKET;
-	sa.sll.sll_protocol = htons(proto);
+	sa.sll.sll_protocol = htons(ETH_P_ALL);
 	sa.sll.sll_ifindex  = (int)veth_tx_ifindex;
 
 	rc = bind(fd, &sa.sa, sizeof(sa));
@@ -2981,7 +2967,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	sock_fd = bbdd_d_session_open_sock(dsess, bpf->veth_tx_ifindex, error);
+	sock_fd = bbdd_d_session_open_sock(bpf->veth_tx_ifindex, error);
 	if (sock_fd < 0) {
 		err = sock_fd;
 		goto free_bsess;
