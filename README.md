@@ -35,13 +35,26 @@ high-frequency path.
 
 ### Dependencies
 
-| Component         | Tools / libraries                      |
-|-------------------|----------------------------------------|
-| C compilation     | Any C compiler (e.g. GCC)              |
-| BPF programs      | LLVM: `clang`, `llvm-strip`, `bpftool` |
-| Runtime libraries | `libbpf`, `json-c`, `libmnl`           |
-| Man pages         | `pandoc`                               |
-| Coverage reports  | `gcovr`                                |
+Before building, make sure the following dependencies are installed on the
+system:
+
+- A C compiler, such as `gcc`
+- `clang`, `llvm-strip`
+- `libbpf`, `bpftool`
+- `json-c`, `libmnl`, `uthash`
+
+For building man pages further:
+
+- `pandoc`
+
+For testing:
+
+- `frr`
+- `socat`
+
+For test code coverage reports:
+
+- `gcovr`
 
 ### Build
 
@@ -61,12 +74,30 @@ Optional variables (passed on the `make` command line):
 | `SYSTEMDDIR`  | `$(PREFIX)/lib/systemd/system` | systemd unit directory               |
 | `COVERAGE`    | `0`                   | Set to `1` to enable coverage instrumentation |
 
+### Testing
+
+After successful build, tests can be run. Tests need root permission,
+because they create network namespaces and temporary netdevices such as
+VRFs and VETH pairs:
+
+```
+sudo ./tests/run.sh
+```
+
+After tests conclude, and if the build was done with COVERAGE=1, you may
+want to generate a code coverage report:
+
+```
+make coverage
+```
+
+The report is saved as HTML under `.output/coverage/`.
+
+### Installation
+
 ```
 make install
 ```
-
-After a coverage build, run `make coverage` to generate an HTML report under
-`.output/coverage/`.
 
 ## Limitations
 
