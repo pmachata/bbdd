@@ -19,7 +19,7 @@
 
 struct bbdd_env bbdd_env = {
 	.verbosity = 0,
-	.tx_capacity = UINT32_MAX,
+	.tx_capacity = 0, /* = dynamic */
 };
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";

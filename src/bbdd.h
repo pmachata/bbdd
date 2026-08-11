@@ -30,7 +30,9 @@ extern struct bbdd_env {
 	uint32_t bfdd_delay_ms;	/* The amount of sleep in us between reception
 				 * of a BFDD message and the response. */
 	uint32_t tx_capacity;	/* Tx-queue capacity override: max pinned
-				 * packets before enqueue kicks in. Set via
+				 * packets before enqueue kicks in. 0 means
+				 * "unset", and the daemon sizes the socket
+				 * dynamically from session_count. Set via
 				 * --debug=tx-cap=<N> to pin a fixed value
 				 * for queue-path testing. */
 } bbdd_env;
