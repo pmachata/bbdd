@@ -75,9 +75,17 @@ struct bbdd_bpf {
 
 	/* TX-side deferred-injection queue. Enqueue happens when
 	 * `pinned + 1 > tx_capacity`, i.e. when a fresh sendmsg would exceed
-	 * the shared TX socket's sndbuf headroom. */
+	 * the shared TX socket's sndbuf headroom.
+	 *
+	 * tx_drain_timer_fd is a timerfd armed periodically while the queue
+	 * is non-empty and disarmed once it drains. It is our stand-in for
+	 * a proper POLLOUT trigger — kernel-signalled sndbuf headroom on
+	 * per-session sockets does not correspond to global released_count
+	 * advancing, so we poll at a coarse interval instead. Step 3's
+	 * shared socket will replace this with POLLOUT on that one fd. */
 	struct bbdd_tx *tx;
 	uint32_t tx_capacity;
+	int tx_drain_timer_fd;
 };
 
 struct bbdd_bpf_session_data {
@@ -172,6 +180,11 @@ struct bbdd_bpf_session {
 
 	UT_hash_handle hh;
 };
+
+static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
+				     const struct bbdd_d_session *dsess,
+				     struct bbdd_bpf_session *bsess,
+				     char **error);
 
 static struct bbdd_bpf_session *
 bbdd_bpf_sdir_get_session(struct bbdd_bpf *bpf, uint32_t discr)
@@ -285,6 +298,102 @@ static uint32_t bbdd_bpf_tx_pinned(const struct bbdd_bpf *bpf)
 static bool bbdd_bpf_tx_have_capacity(const struct bbdd_bpf *bpf)
 {
 	return bbdd_bpf_tx_pinned(bpf) < bpf->tx_capacity;
+}
+
+static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
+				       const struct bbdd_d_session *dsess,
+				       struct bbdd_bpf_session *bsess,
+				       uint32_t tx_ifindex,
+				       uint8_t bfd_flags, char **error);
+
+enum { bbdd_bpf_tx_drain_interval_ms = 50 };
+
+static int bbdd_bpf_tx_drain_timer_set(struct bbdd_bpf *bpf, bool arm,
+				       char **error)
+{
+	struct itimerspec ts = {};
+
+	if (arm) {
+		ts.it_value.tv_nsec  = bbdd_bpf_tx_drain_interval_ms * 1000000;
+		ts.it_interval.tv_sec  = ts.it_value.tv_sec;
+		ts.it_interval.tv_nsec = ts.it_value.tv_nsec;
+	}
+
+	if (timerfd_settime(bpf->tx_drain_timer_fd, 0, &ts, NULL) < 0) {
+		bbdd_err_fmt(error, "timerfd_settime(tx_drain): %m");
+		return -1;
+	}
+	return 0;
+}
+
+static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **error)
+{
+	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
+	struct bbdd_tx_slot *slot;
+	int rc = 0;
+
+	while ((slot = bbdd_tx_peek(bpf->tx)) != NULL) {
+		struct bbdd_bpf_session *bsess;
+		struct bbdd_d_session *dsess;
+
+		if (!bbdd_bpf_tx_have_capacity(bpf))
+			break;
+
+		/* Note: slot is owned by bsess, unlink mereley removes the slot
+		 * from its list. We can still dereference the pointer. */
+		bbdd_tx_unlink(bpf->tx, slot);
+
+		dsess = cbs->find_session(slot->discr, cbs->data);
+		bsess = bbdd_bpf_sdir_get_session(bpf, slot->discr);
+		assert(dsess != NULL);
+		assert(bsess != NULL);
+
+		if (slot->is_final) {
+			rc = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
+							 slot->tx_ifindex,
+							 slot->bfd_flags,
+							 error);
+		} else {
+			/* Periodic: rerun the full session-update cycle so
+			 * gen_id is bumped, the config map is refreshed, and
+			 * the packet reflects current session state. */
+			rc = __bbdd_bpf_session_update(bpf, dsess, bsess,
+						       error);
+		}
+		if (rc != 0)
+			break;
+	}
+
+	/* Disarm the timer if the queue is empty; otherwise keep polling.
+	 * Deliberately best-effort — a settime failure here just leaves us
+	 * with extra wakeups, not a correctness bug. */
+	if (rc == 0 && !bbdd_tx_pending(bpf->tx))
+		(void) bbdd_bpf_tx_drain_timer_set(bpf, false, error);
+
+	return rc;
+}
+
+static int bbdd_bpf_tx_drain_timer_cb(struct bbdd_poll_ctx *, short,
+				      void *data, char **error)
+{
+	struct bbdd_bpf *bpf = data;
+	uint64_t expirations;
+
+	(void) read(bpf->tx_drain_timer_fd, &expirations, sizeof(expirations));
+	return bbdd_bpf_tx_drain(bpf, error);
+}
+
+/* Called from the enqueue sites. If the queue was empty before this
+ * enqueue, the drain timer needs to start firing. Idempotent — arming
+ * an already-armed periodic timer just resets its next fire, which is
+ * harmless. */
+static void bbdd_bpf_tx_arm_drain(struct bbdd_bpf *bpf)
+{
+	char *error = NULL;
+
+	if (bbdd_bpf_tx_drain_timer_set(bpf, true, &error) != 0)
+		bbdd_mon_senderr(bpf->rb_ctx->mon, &error,
+				 "arm tx drain timer");
 }
 
 static int bbdd_bpf_session_send(struct bbdd_bpf *bpf,
@@ -801,6 +910,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 
 		bbdd_tx_enqueue(bpf->tx, slot, is_final, dsess->local.discr,
 				bpf->veth_tx_ifindex, bfd_flags);
+		bbdd_bpf_tx_arm_drain(bpf);
 		return 0;
 	}
 
@@ -1497,6 +1607,7 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 					dsess->local.discr,
 					bpf->veth_tx_ifindex,
 					BBDD_BFD_PKT_BIT_FINAL);
+			bbdd_bpf_tx_arm_drain(bpf);
 		} else {
 			bbdd_mon_send_debug(bpf->rb_ctx->mon,
 					    "session discr %u: Injecting final packet",
@@ -2383,12 +2494,24 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	if (bpf->tx == NULL)
 		goto free_bpf;
 
+	bpf->tx_drain_timer_fd = timerfd_create(CLOCK_MONOTONIC,
+						TFD_NONBLOCK | TFD_CLOEXEC);
+	if (bpf->tx_drain_timer_fd < 0) {
+		bbdd_err_fmt(error, "timerfd_create(tx_drain): %m");
+		goto destroy_tx;
+	}
+
+	err = bbdd_poll_set_fd(pctx, bpf->tx_drain_timer_fd, POLLIN,
+			       bbdd_bpf_tx_drain_timer_cb, bpf, error);
+	if (err != 0)
+		goto close_tx_drain_timer_fd;
+
 	libbpf_set_print(bbdd_bpf_print);
 
 	bpf->skel = bbdd_prog__open_and_load();
 	if (!bpf->skel) {
 		bbdd_err_fmt(error, "bbdd_prog__open_and_load: %m");
-		goto free_bpf;
+		goto unset_poll_fd;
 	}
 
 	bpf->rb_ctx = bbdd_bpf_rb_init(cbs, bpf->skel, pctx, nl, mon, error);
@@ -2462,8 +2585,13 @@ free_rb_ctx:
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 destroy_prog:
 	bbdd_prog__destroy(bpf->skel);
-free_bpf:
+unset_poll_fd:
+	bbdd_poll_unset_fd(pctx, bpf->tx_drain_timer_fd);
+close_tx_drain_timer_fd:
+	close(bpf->tx_drain_timer_fd);
+destroy_tx:
 	bbdd_tx_destroy(bpf->tx);
+free_bpf:
 	free(bpf);
 err:
 	bbdd_err_app(error, "Failed to initialize BPF");
@@ -2514,6 +2642,9 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 
 	bbdd_bpf_rb_fini(bpf->rb_ctx);
 	bbdd_prog__destroy(bpf->skel);
+
+	bbdd_poll_unset_fd(bpf->pctx, bpf->tx_drain_timer_fd);
+	close(bpf->tx_drain_timer_fd);
 	bbdd_tx_destroy(bpf->tx);
 	free(bpf);
 }
