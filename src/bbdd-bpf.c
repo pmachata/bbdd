@@ -306,6 +306,39 @@ static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error);
 
+static int bbdd_d_session_open_sock(uint32_t veth_tx_ifindex, char **error)
+{
+	union {
+		struct sockaddr sa;
+		struct sockaddr_ll sll;
+	} sa = {};
+	int fd;
+	int rc;
+
+	fd = socket(AF_PACKET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+		    htons(ETH_P_ALL));
+	if (fd < 0) {
+		bbdd_err_fmt(error, "socket(AF_PACKET): %m");
+		return -1;
+	}
+
+	sa.sll.sll_family   = AF_PACKET;
+	sa.sll.sll_protocol = htons(ETH_P_ALL);
+	sa.sll.sll_ifindex  = (int)veth_tx_ifindex;
+
+	rc = bind(fd, &sa.sa, sizeof(sa));
+	if (rc < 0) {
+		bbdd_err_fmt(error, "bind(AF_PACKET): %m");
+		goto close_fd;
+	}
+
+	return fd;
+
+close_fd:
+	close(fd);
+	return -1;
+}
+
 enum { bbdd_bpf_tx_drain_interval_ms = 50 };
 
 static int bbdd_bpf_tx_drain_timer_set(struct bbdd_bpf *bpf, bool arm,
@@ -2918,39 +2951,6 @@ int bbdd_bpf_session_stats_fill(struct bbdd_bpf *bpf, uint32_t discr,
 #undef FIELD
 
 	return 0;
-}
-
-static int bbdd_d_session_open_sock(uint32_t veth_tx_ifindex, char **error)
-{
-	union {
-		struct sockaddr sa;
-		struct sockaddr_ll sll;
-	} sa = {};
-	int fd;
-	int rc;
-
-	fd = socket(AF_PACKET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-		    htons(ETH_P_ALL));
-	if (fd < 0) {
-		bbdd_err_fmt(error, "socket(AF_PACKET): %m");
-		return -1;
-	}
-
-	sa.sll.sll_family   = AF_PACKET;
-	sa.sll.sll_protocol = htons(ETH_P_ALL);
-	sa.sll.sll_ifindex  = (int)veth_tx_ifindex;
-
-	rc = bind(fd, &sa.sa, sizeof(sa));
-	if (rc < 0) {
-		bbdd_err_fmt(error, "bind(AF_PACKET): %m");
-		goto close_fd;
-	}
-
-	return fd;
-
-close_fd:
-	close(fd);
-	return -1;
 }
 
 int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
