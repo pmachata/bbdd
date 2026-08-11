@@ -86,6 +86,9 @@ struct bbdd_bpf {
 	struct bbdd_tx *tx;
 	uint32_t tx_capacity;
 	int tx_drain_timer_fd;
+
+	/* Socket for packet injection. */
+	int tx_sock_fd;
 };
 
 struct bbdd_bpf_session_data {
@@ -119,7 +122,6 @@ enum bbdd_bpf_session_state {
 struct bbdd_bpf_session {
 	uint32_t discr;
 	uint32_t gen_id;
-	int sock_fd;
 
 	/* Certain configuration changes prompt a poll sequence. These changes
 	 * only become effective when the poll sequence is closed by arrival of
@@ -306,7 +308,7 @@ static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
 				       uint32_t tx_ifindex,
 				       uint8_t bfd_flags, char **error);
 
-static int bbdd_d_session_open_sock(uint32_t veth_tx_ifindex, char **error)
+static int bbdd_bpf_tx_sock_open(uint32_t veth_tx_ifindex, char **error)
 {
 	union {
 		struct sockaddr sa;
@@ -546,7 +548,7 @@ static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IP);
 
-		return bbdd_bpf_session_send(bpf, bsess->sock_fd,
+		return bbdd_bpf_session_send(bpf, bpf->tx_sock_fd,
 					     &dst_sa.sll, sizeof(dst_sa.sll),
 					     &pkt, sizeof(pkt),
 					     bsess->gen_id, error);
@@ -574,7 +576,7 @@ static int bbdd_bpf_session_inject_pkt(struct bbdd_bpf *bpf,
 						       udp_len);
 
 		dst_sa.sll.sll_protocol = htons(ETH_P_IPV6);
-		return bbdd_bpf_session_send(bpf, bsess->sock_fd,
+		return bbdd_bpf_session_send(bpf, bpf->tx_sock_fd,
 					     &dst_sa.sll, sizeof(dst_sa.sll),
 					     &pkt, sizeof(pkt),
 					     bsess->gen_id, error);
@@ -2504,6 +2506,73 @@ static void bbdd_bpf_sk_lookup_detach(struct bbdd_bpf *bpf)
 			strerror(-err));
 }
 
+/* Sizing constants for the shared TX socket:
+ *
+ *   tx_capacity (packet slots) = session_count × BBDD_BPF_TX_CAP_MULT
+ *   sndbuf (bytes)            = tx_capacity × BBDD_BPF_TX_SKB_TRUE_SIZE
+ *
+ * BBDD_BPF_TX_CAP_MULT is the "current spinner + one in-flight
+ * replacement per session" headroom, plus a little slack for
+ * cross-session Final bursts.
+ *
+ * BBDD_BPF_TX_SKB_TRUE_SIZE is a conservative upper bound on the
+ * skb->truesize charge the kernel puts on sk_wmem_alloc for a small
+ * BFD packet — actual measured values are ~700-900B; 2048 leaves
+ * headroom for allocator overhead differences. The kernel also
+ * doubles SO_SNDBUFFORCE internally to account for overhead, so
+ * effective usable bytes are 2×. */
+enum {
+	BBDD_BPF_TX_CAP_MULT      = 2,
+	BBDD_BPF_TX_SKB_TRUE_SIZE = 2048,
+};
+
+static uint32_t bbdd_bpf_tx_dyn_capacity(const struct bbdd_bpf *bpf, bool add)
+{
+	uint32_t n = HASH_COUNT(bpf->sdir) + (add ? 1 : 0);
+	return n * BBDD_BPF_TX_CAP_MULT;
+}
+
+static int bbdd_bpf_tx_apply_capacity(struct bbdd_bpf *bpf, uint32_t cap,
+				      char **error)
+{
+	uint64_t sndbuf = ((uint64_t) cap) * BBDD_BPF_TX_SKB_TRUE_SIZE;
+	int sndbuf32;
+	int rc;
+
+	/* Kernel doubles the size, and the argument type is int32_t, so we need
+	 * to fit INT32_MAX / 2. */
+	if (sndbuf > INT32_MAX / 2) {
+		bbdd_err_fmt(error, "Cannot reserve capacity %u: buffer over 2G",
+			     cap);
+		return -1;
+	}
+
+	sndbuf32 = (int32_t) sndbuf;
+	rc = setsockopt(bpf->tx_sock_fd, SOL_SOCKET, SO_SNDBUFFORCE,
+			&sndbuf32, sizeof(sndbuf32));
+	if (rc < 0) {
+		bbdd_err_fmt(error, "setsockopt(SO_SNDBUFFORCE=%d): %m",
+			     sndbuf32);
+		return -1;
+	}
+
+	bpf->tx_capacity = cap;
+	return 0;
+}
+
+static int bbdd_bpf_tx_resize(struct bbdd_bpf *bpf, bool add, char **error)
+{
+	/* Take the --debug=tx-cap provided capacity if any, and fall back to
+	 * the scaling dynamically by session count. */
+	uint32_t cap = bbdd_env.tx_capacity ?:
+				bbdd_bpf_tx_dyn_capacity(bpf, add);
+
+	if (bpf->tx_capacity == cap)
+		return 0;
+
+	return bbdd_bpf_tx_apply_capacity(bpf, cap, error);
+}
+
 struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 				 struct bbdd_poll_ctx *pctx,
 				 struct bbdd_nl *nl,
@@ -2524,17 +2593,24 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	bpf->pctx = pctx;
 	bpf->veth_rx_ifindex = veth_rx_ifindex;
 	bpf->veth_tx_ifindex = veth_tx_ifindex;
-	bpf->tx_capacity = bbdd_env.tx_capacity;
 
 	bpf->tx = bbdd_tx_create(error);
 	if (bpf->tx == NULL)
 		goto free_bpf;
 
+	bpf->tx_sock_fd = bbdd_bpf_tx_sock_open(veth_tx_ifindex, error);
+	if (bpf->tx_sock_fd < 0)
+		goto destroy_tx;
+
+	err = bbdd_bpf_tx_resize(bpf, false, error);
+	if (err != 0)
+		goto close_tx_sock_fd;
+
 	bpf->tx_drain_timer_fd = timerfd_create(CLOCK_MONOTONIC,
 						TFD_NONBLOCK | TFD_CLOEXEC);
 	if (bpf->tx_drain_timer_fd < 0) {
 		bbdd_err_fmt(error, "timerfd_create(tx_drain): %m");
-		goto destroy_tx;
+		goto close_tx_sock_fd;
 	}
 
 	err = bbdd_poll_set_fd(pctx, bpf->tx_drain_timer_fd, POLLIN,
@@ -2625,6 +2701,8 @@ unset_poll_fd:
 	bbdd_poll_unset_fd(pctx, bpf->tx_drain_timer_fd);
 close_tx_drain_timer_fd:
 	close(bpf->tx_drain_timer_fd);
+close_tx_sock_fd:
+	close(bpf->tx_sock_fd);
 destroy_tx:
 	bbdd_tx_destroy(bpf->tx);
 free_bpf:
@@ -2637,6 +2715,9 @@ err:
 static void __bbdd_bpf_session_del(struct bbdd_bpf *bpf,
 				   struct bbdd_bpf_session *bsess)
 {
+	char *error;
+	int rc;
+
 	if (bsess->hold != NULL)
 		bbdd_bpf_hold_stop(bsess);
 	if (bsess->shwait != NULL)
@@ -2651,8 +2732,11 @@ static void __bbdd_bpf_session_del(struct bbdd_bpf *bpf,
 	 * found. */
 	bbdd_bpf_session_conf_delete(bpf, bsess->discr);
 
-	close(bsess->sock_fd);
 	free(bsess);
+
+	rc = bbdd_bpf_tx_resize(bpf, false, &error);
+	if (rc != 0)
+		bbdd_mon_senderr(bpf->rb_ctx->mon, &error, "session del tx resize");
 }
 
 void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
@@ -2681,6 +2765,7 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 
 	bbdd_poll_unset_fd(bpf->pctx, bpf->tx_drain_timer_fd);
 	close(bpf->tx_drain_timer_fd);
+	close(bpf->tx_sock_fd);
 	bbdd_tx_destroy(bpf->tx);
 	free(bpf);
 }
@@ -2958,7 +3043,6 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 			 char **error)
 {
 	struct bbdd_bpf_session *bsess;
-	int sock_fd;
 	int err;
 
 	bsess = malloc(sizeof(*bsess));
@@ -2967,16 +3051,9 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 		return -1;
 	}
 
-	sock_fd = bbdd_d_session_open_sock(bpf->veth_tx_ifindex, error);
-	if (sock_fd < 0) {
-		err = sock_fd;
-		goto free_bsess;
-	}
-
 	*bsess = (struct bbdd_bpf_session) {
 		.discr = dsess->local.discr,
 		.gen_id = 0,
-		.sock_fd = sock_fd,
 
 		.bstate = BBDD_BPF_SESSION_STATE_ON_HOLD,
 		.qd_change = false,
@@ -2984,19 +3061,23 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 
 	err = bbdd_bpf_hold_start(bpf, dsess, bsess, error);
 	if (err != 0)
-		goto close_sock;
+		goto free_bsess;
 
-	err = bbdd_bpf_session_conf_add(bpf, dsess, bsess, error);
+	err = bbdd_bpf_tx_resize(bpf, true, error);
 	if (err != 0)
 		goto hold_stop;
 
+	err = bbdd_bpf_session_conf_add(bpf, dsess, bsess, error);
+	if (err != 0)
+		/* Don't bother undoing the resize. */
+		goto hold_stop;
+
 	HASH_ADD_INT(bpf->sdir, discr, bsess);
+
 	return 0;
 
 hold_stop:
 	bbdd_bpf_hold_stop(bsess);
-close_sock:
-	close(sock_fd);
 free_bsess:
 	free(bsess);
 	return -1;
