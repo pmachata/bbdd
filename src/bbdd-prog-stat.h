@@ -17,6 +17,8 @@
 	FIELD(sk_released_count)		\
 	FIELD(sk_enq_count)			\
 	FIELD(sk_deq_count)			\
+	FIELD(sk_qlen_final)			\
+	FIELD(sk_qlen_periodic)			\
 	FIELD(ra_not_bfd) /* ra=re-arm*/	\
 	FIELD(ra_no_session)			\
 	/**/

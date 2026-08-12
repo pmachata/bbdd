@@ -46,3 +46,7 @@ struct bbdd_tx_slot *bbdd_tx_peek(const struct bbdd_tx *tx);
 void bbdd_tx_unlink(struct bbdd_tx *tx, struct bbdd_tx_slot *slot);
 
 bool bbdd_tx_pending(const struct bbdd_tx *tx);
+
+/* Live queue depths, updated on enqueue/unlink. */
+uint32_t bbdd_tx_nfinals(const struct bbdd_tx *tx);
+uint32_t bbdd_tx_nperiodics(const struct bbdd_tx *tx);

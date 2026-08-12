@@ -8,6 +8,8 @@
 struct bbdd_tx {
 	struct bbdd_tx_slot *finals;
 	struct bbdd_tx_slot *periodics;
+	uint32_t nfinals;
+	uint32_t nperiodics;
 };
 
 struct bbdd_tx *bbdd_tx_create(char **error)
@@ -44,10 +46,13 @@ bool bbdd_tx_enqueue(struct bbdd_tx *tx, struct bbdd_tx_slot *slot,
 	slot->is_final   = is_final;
 	slot->linked      = true;
 
-	if (is_final)
+	if (is_final) {
 		DL_APPEND(tx->finals, slot);
-	else
+		tx->nfinals++;
+	} else {
 		DL_APPEND(tx->periodics, slot);
+		tx->nperiodics++;
+	}
 	return true;
 }
 
@@ -63,12 +68,25 @@ void bbdd_tx_unlink(struct bbdd_tx *tx, struct bbdd_tx_slot *slot)
 	if (!slot->linked)
 		return;
 
-	if (slot->is_final)
+	if (slot->is_final) {
 		DL_DELETE(tx->finals, slot);
-	else
+		tx->nfinals--;
+	} else {
 		DL_DELETE(tx->periodics, slot);
+		tx->nperiodics--;
+	}
 
 	slot->linked = false;
+}
+
+uint32_t bbdd_tx_nfinals(const struct bbdd_tx *tx)
+{
+	return tx->nfinals;
+}
+
+uint32_t bbdd_tx_nperiodics(const struct bbdd_tx *tx)
+{
+	return tx->nperiodics;
 }
 
 bool bbdd_tx_pending(const struct bbdd_tx *tx)
