@@ -74,3 +74,37 @@ Bbdd_log_test "tx queue drain exercised"
 # Session should still be up — the queue absorbed the burst rather
 # than dropping intent.
 with_socket SD1 session_state_test up 1
+
+# Check the queue length: with tx-cap of 2, we have one periodic, then the new
+# session will inject its own periodic, which exhausts the queue, and the third
+# session has to go to queue.
+qlen=$(with_socket SD1 Bbdd --json global diag stats |
+	       jq '.sk_qlen_periodic')
+((qlen == 0))
+check_err $? "sk_qlen_periodic $qlen, 0 expected"
+
+with_socket SD1 Bbdd session add \
+	   discr 102 dst $(Bbdd_IP 4) \
+	   min-tx 500ms min-rx 500ms detect-mult 3
+
+with_socket SD1 Bbdd session add \
+	   discr 103 dst $(Bbdd_IP 6) \
+	   min-tx 500ms min-rx 500ms detect-mult 3
+
+sleep 1
+
+qlen=$(with_socket SD1 Bbdd --json global diag stats |
+	       jq '.sk_qlen_periodic')
+((qlen == 1))
+check_err $? "sk_qlen_periodic $qlen, 1 expected"
+
+with_socket SD1 Bbdd session discr 102 del
+
+sleep 1
+
+qlen=$(with_socket SD1 Bbdd --json global diag stats |
+	       jq '.sk_qlen_periodic')
+((qlen == 0))
+check_err $? "sk_qlen_periodic $qlen, 0 expected again"
+
+Bbdd_log_test "tx qlen"
