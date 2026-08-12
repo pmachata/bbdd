@@ -1,8 +1,20 @@
 # SPDX-License-Identifier: GPL-2.0
 
+# Whether a ping test should be done after connection is set up.
+: "${CONNECT_PING_TEST:=yes}"
+
 tmpdir=$(mktemp -d /tmp/XXXXXX)
 defer rm -Rf "$tmpdir"
 chmod a+rwx "${tmpdir}"
+
+connect_should_ping_test()
+{
+	if [[ "$CONNECT_PING_TEST" == yes ]]; then
+		echo 1
+	else
+		echo 0
+	fi
+}
 
 with_show_commands()
 {
@@ -595,7 +607,7 @@ Bbdd_connect_ns()
 		local ns2_link=$1; shift
 		local ns2_addr=$1; shift
 
-		local do_ping=1
+		local do_ping=$(connect_should_ping_test)
 
 		ip link add name "$ns1_link" netns "${!ns1_name}" type veth \
 		   peer name "$ns2_link" netns "${!ns2_name}"
@@ -625,6 +637,8 @@ Bbdd_connect_ns()
 
 Bbdd_connect_vrf()
 {
+	local do_ping=$(connect_should_ping_test)
+
 	while (($# > 0)); do
 		local vrf1_name=$1; shift
 		local vrf1_link=$1; shift
@@ -644,9 +658,11 @@ Bbdd_connect_vrf()
 		adf_ip_addr_add "$vrf1_link" "$vrf1_addr"
 		adf_ip_addr_add "$vrf2_link" "$vrf2_addr"
 
-		sleep 2
-		in_vrf "$vrf1_name" ping_test "${vrf2_addr%/*}"
-		in_vrf "$vrf2_name" ping_test "${vrf1_addr%/*}"
+		if ((do_ping)); then
+			sleep 2
+			in_vrf "$vrf1_name" ping_test "${vrf2_addr%/*}"
+			in_vrf "$vrf2_name" ping_test "${vrf1_addr%/*}"
+		fi
 	done
 }
 
