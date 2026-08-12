@@ -1686,11 +1686,11 @@ static int bbdd_d_handle_session_check_bulk(struct bbdd_ssk_peer *peer,
 					    size_t ndiscrs)
 {
 	if (ndiscrs == 0) {
-		bbdd_util_jrpc_respond_inv_params(peer, id, "The set request matches no session");
+		bbdd_util_jrpc_respond_inv_params(peer, id, "The request matches no session");
 		return -1;
 	}
 	if (ndiscrs > 1 && !bulk) {
-		bbdd_util_jrpc_respond_inv_params(peer, id, "Non-bulk set request matches more than one session");
+		bbdd_util_jrpc_respond_inv_params(peer, id, "Non-bulk request matches more than one session");
 		return -1;
 	}
 	return 0;
