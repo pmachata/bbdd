@@ -2765,6 +2765,13 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 		return NULL;
 	}
 
+	/* Snapshot the live queue depths from the tx module. These are
+	 * gauges rather than cumulative counters, so they are not summed
+	 * across BPF-side + userspace-side halves; only the userspace
+	 * side has meaningful data. */
+	bpf->diag_stats.sk_qlen_final    = bbdd_tx_nfinals(bpf->tx);
+	bpf->diag_stats.sk_qlen_periodic = bbdd_tx_nperiodics(bpf->tx);
+
 #define FIELD(NAME) {							\
 		uint64_t value = stats->NAME + bpf->diag_stats.NAME;	\
 		if (bbdd_bpf_add_stat(obj, #NAME, value, error))	\
