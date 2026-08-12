@@ -78,33 +78,69 @@ with_socket SD1 session_state_test up 1
 # Check the queue length: with tx-cap of 2, we have one periodic, then the new
 # session will inject its own periodic, which exhausts the queue, and the third
 # session has to go to queue.
-qlen=$(with_socket SD1 Bbdd --json global diag stats |
-	       jq '.sk_qlen_periodic')
-((qlen == 0))
-check_err $? "sk_qlen_periodic $qlen, 0 expected"
+qlen_periodic=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_periodic')
+qlen_final=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_final')
+((qlen_periodic == 0))
+check_err $? "1: sk_qlen_periodic $qlen_periodic, 0 expected"
+((qlen_final == 0))
+check_err $? "1: sk_qlen_final $qlen_final 0 expected"
 
 with_socket SD1 Bbdd session add \
-	   discr 102 dst $(Bbdd_IP 4) \
+	   discr 102 dst $(Bbdd_IP 11) \
 	   min-tx 500ms min-rx 500ms detect-mult 3
 
 with_socket SD1 Bbdd session add \
-	   discr 103 dst $(Bbdd_IP 6) \
+	   discr 103 dst $(Bbdd_IP 13) \
 	   min-tx 500ms min-rx 500ms detect-mult 3
 
 sleep 1
 
-qlen=$(with_socket SD1 Bbdd --json global diag stats |
-	       jq '.sk_qlen_periodic')
-((qlen == 1))
-check_err $? "sk_qlen_periodic $qlen, 1 expected"
+qlen_periodic=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_periodic')
+qlen_final=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_final')
+((qlen_periodic == 1))
+check_err $? "2: sk_qlen_periodic $qlen_periodic, 1 expected"
+((qlen_final == 0))
+check_err $? "2: sk_qlen_final $qlen_final 0 expected"
 
 with_socket SD1 Bbdd session discr 102 del
 
 sleep 1
 
-qlen=$(with_socket SD1 Bbdd --json global diag stats |
-	       jq '.sk_qlen_periodic')
-((qlen == 0))
-check_err $? "sk_qlen_periodic $qlen, 0 expected again"
+qlen_periodic=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_periodic')
+qlen_final=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_final')
+((qlen_periodic == 0))
+check_err $? "3: sk_qlen_periodic $qlen_periodic, 0 expected"
+((qlen_final == 0))
+check_err $? "3: sk_qlen_final $qlen_final 0 expected"
+
+# Since SD1 can't inject new packets, the main session might not be up anymore.
+# Check it.
+with_socket SD1 session_state_test up 1 discr 101
+with_socket SD2 session_state_test up 1 discr 202
+
+# Make a change in SD2 that prompts SD1 to respond with a final packet.
+with_socket SD2 Bbdd session set min-tx 499ms
+
+sleep 1
+
+qlen_final=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_final')
+((qlen_final == 1))
+check_err $? "4: sk_qlen_final $qlen_final 1 expected"
+
+with_socket SD1 Bbdd session discr 103 del
+
+sleep 1
+
+qlen_final=$(with_socket SD1 Bbdd --json global diag stats |
+			jq '.sk_qlen_final')
+((qlen_final == 0))
+check_err $? "5: sk_qlen_final $qlen_final 0 expected"
 
 Bbdd_log_test "tx qlen"
