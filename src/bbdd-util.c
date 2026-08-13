@@ -173,7 +173,8 @@ void bbdd_util_jrpc_respond_method_nf(struct bbdd_ssk_peer *peer,
 
 void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 				 struct json_object *id,
-				 uint64_t ts, uint64_t reply_ts)
+				 uint64_t ts, uint64_t reply_ts,
+				 struct bbdd_mon *mon)
 {
 	struct json_object *result;
 	struct json_object *resp;
@@ -198,8 +199,7 @@ void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 
 	rc = bbdd_util_jrpc_send_done(peer, resp, &error);
 	if (rc != 0)
-		// xxx monitor
-		bbdd_err_print(&error, "Failed to send echo response");
+		bbdd_mon_senderr(mon, &error, "Failed to send echo response");
 
 	json_object_put(resp);
 	return;

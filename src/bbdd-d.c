@@ -93,7 +93,8 @@ struct bbdd_d {
 	struct bbdd_d_global_diag_stats diag_stats;
 };
 
-void bbdd_d_handle_echo(struct bbdd_ssk_peer *peer,
+void bbdd_d_handle_echo(struct bbdd_mon *mon,
+			struct bbdd_ssk_peer *peer,
 			struct json_object *params_obj,
 			struct json_object *id)
 {
@@ -118,7 +119,7 @@ void bbdd_d_handle_echo(struct bbdd_ssk_peer *peer,
 	ts = json_object_get_uint64(values[pol_ts]);
 	reply_ts = bbdd_util_now();
 
-	bbdd_util_jrpc_respond_echo(peer, id, ts, reply_ts);
+	bbdd_util_jrpc_respond_echo(peer, id, ts, reply_ts, mon);
 }
 
 void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
@@ -2514,7 +2515,7 @@ static void bbdd_d_handle_method(struct bbdd_ssk_peer *peer,
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(d->pctx, peer, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
-		bbdd_d_handle_echo(peer, params_obj, id);
+		bbdd_d_handle_echo(d->mon, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
 		bbdd_bfdd_c_echo_handle_start(d->bfdd, peer, id);
 	else if (strcmp(method, "global-stats-diag") == 0)

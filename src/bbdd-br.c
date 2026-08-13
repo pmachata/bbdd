@@ -371,7 +371,7 @@ static void bbdd_br_handle_method(struct bbdd_ssk_peer *peer,
 	if (strcmp(method, "stop") == 0)
 		bbdd_d_handle_stop(br->pctx, peer, params_obj, id);
 	else if (strcmp(method, "echo") == 0)
-		bbdd_d_handle_echo(peer, params_obj, id);
+		bbdd_d_handle_echo(br->mon, peer, params_obj, id);
 	else if (strcmp(method, "bfdd-echo") == 0)
 		bbdd_bfdd_d_echo_handle_start(br->bfdd, peer, id);
 	else if (strcmp(method, "session-add") == 0)

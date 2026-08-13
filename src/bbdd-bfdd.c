@@ -422,10 +422,12 @@ static void bbdd_bfdd_echo_handle_reply(struct bbdd_bfdd_b *bfdd_b,
 	DL_FOREACH(bfdd_b->echo_peers, epeer) {
 		if (epeer->is_dp)
 			bbdd_util_jrpc_respond_echo(epeer->peer, epeer->id,
-						    dp_time, bfdd_time);
+						    dp_time, bfdd_time,
+						    bfdd_b->mon);
 		else
 			bbdd_util_jrpc_respond_echo(epeer->peer, epeer->id,
-						    bfdd_time, dp_time);
+						    bfdd_time, dp_time,
+						    bfdd_b->mon);
 	}
 
 	bbdd_bfdd_echo_peers_free(bfdd_b);
