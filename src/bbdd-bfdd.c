@@ -771,21 +771,19 @@ static int bbdd_bfdd_session_to_c(const struct bfddp_session_cumulus *cmsess,
 	csess->min_rx_us = bbdd_ntoh32(fsess->min_rx);
 	csess->min_rx_us_seen = 1;
 
-	/* Wire hold_time is in milliseconds; we store microseconds. The
-	 * conversion can overflow uint32_t for values above ~4M ms (~71
-	 * minutes). Such values make no operational sense for BFD, so saturate
-	 * at UINT32_MAX rather than wrapping silently. */
 	{
 		uint32_t hold_time_ms = bbdd_ntoh32(fsess->hold_time);
 
+		/* 4G us is ~71 minutes. It's unlikely anybody would need such
+		 * long periods in practice, but let's be explicit and bounce
+		 * instead of wrapping around or saturating silently. */
 		if (hold_time_ms > UINT32_MAX / 1000) {
-			fprintf(stderr,
-				"bfdd: hold_time %u ms overflows uint32_t, saturating\n",
-				hold_time_ms);
-			csess->hold_time_us = UINT32_MAX;
-		} else {
-			csess->hold_time_us = hold_time_ms * 1000;
+			bbdd_err_fmt(error, "hold_time %u ms->us overflows uint32_t",
+				     hold_time_ms);
+			return -1;
 		}
+
+		csess->hold_time_us = hold_time_ms * 1000;
 	}
 	csess->hold_time_us_seen = 1;
 
