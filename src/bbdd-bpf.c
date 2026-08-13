@@ -1566,9 +1566,6 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 		if (dsess->local.state.state != BBDD_BFD_PKT_STATE_DOWN) {
 			dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 			dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
-			// xxx should we at some point reset the remote
-			// discriminator? Otherwise we'll keep referring to
-			// a your_disc that may be long gone.
 		}
 	} else {
 		switch (dsess->local.state.state) {
