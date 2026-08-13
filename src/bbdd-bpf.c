@@ -166,7 +166,7 @@ struct bbdd_bpf_session {
 	struct bbdd_bpf_shwait *shwait;
 	struct bbdd_bpf_hold *hold;
 
-	bool timer_armed;
+	uint32_t timer_period_us;
 
 	struct bbdd_prog_session_data_stats stats;
 	struct bbdd_prog_session_data_diag_stats diag_stats;
@@ -996,12 +996,15 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 			return rc;
 	}
 
-	if (rearm_timer > bsess->timer_armed) {
+	if (rearm_timer && (bsess->timer_period_us != detect_time_us)) {
 		rc = bbdd_bpf_inject_rearm_packet(bpf, dsess, bsess, error);
 		if (rc != 0)
 			return rc;
+
+		bsess->timer_period_us = detect_time_us;
+	} else {
+		bsess->timer_period_us = 0;
 	}
-	bsess->timer_armed = rearm_timer;
 
 	return 0;
 }
