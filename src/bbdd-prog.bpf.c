@@ -545,11 +545,6 @@ static void bbdd_recv_rearm_timer(__u32 discr,
 		BUMP(data->diag_stats.ra_fail_timer);
 		return;
 	}
-
-	// xxx when decreasing time, we will probably need to signal to datapath
-	// that the timer should be rearmed. Imagine going from 4s timeout to
-	// say 1ms timeout. We would miss thousands of timeout events before the
-	// timer fires and gives us an opportunity to rearm.
 }
 
 SEC("tc")
