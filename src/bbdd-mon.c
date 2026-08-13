@@ -289,19 +289,17 @@ void bbdd_mon_senderr(struct bbdd_mon *mon, char **error, const char *fmt, ...)
 {
 	enum bbdd_mon_topic topic = BBDD_MON_TOPIC_error;
 	const char *method = "error";
-	const char *errmsg;
 	char *str = NULL;
 	va_list ap;
 	int rc;
-
-	errmsg = *error ?: "(unknown error)";
 
 	va_start(ap, fmt);
 	rc = bbdd_err_vfmt(&str, fmt, ap);
 	va_end(ap);
 
 	if (rc < 0) {
-		bbdd_mon_send_str(mon, topic, method, errmsg);
+		bbdd_mon_send_str(mon, topic, method,
+				  *error ?: "(unknown error)");
 		goto out;
 	}
 
