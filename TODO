@@ -10,3 +10,12 @@
 
 - No-fudge scale test. We might need a no-fudge scale test as well, to test the
   lookup speed for unexpected packets.
+
+- bbdd_d_ctl_recv_obj() only gets called for valid parses. It would be nice if
+  there were also a callback for invalid parses, so that we can send those to
+  monitor as errors.
+
+- The necessity to have bbdd_d_session_data mutable is a bit annoying. Pretty
+  much everything there should be actually in struct bbdd_bpf_session_data for
+  remote end. Maybe local state as well, since it's mutable, and changed by
+  bbdd_bpf_handle_session_update(). Then bbdd_d_session_data can be immutable.
