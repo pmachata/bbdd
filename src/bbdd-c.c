@@ -250,7 +250,7 @@ bbdd_c_interact(struct json_object *request,
 		goto poll_fini;
 	}
 
-	c.ctl = bbdd_ssk_open_c(c.pctx, &bsa, &error);
+	c.ctl = bbdd_ssk_open_c(c.pctx, &bsa, c.mon, &error);
 	if (c.ctl == NULL) {
 		rc = -1;
 		goto tkn_destroy;
@@ -3165,7 +3165,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 		goto poll_fini;
 	}
 
-	mctx.ctl = bbdd_ssk_open_c(mctx.pctx, &bsa, &error);
+	mctx.ctl = bbdd_ssk_open_c(mctx.pctx, &bsa, mctx.mon, &error);
 	if (mctx.ctl == NULL) {
 		rc = -1;
 		goto tkn_destroy;

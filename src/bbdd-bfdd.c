@@ -107,7 +107,7 @@ struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
 		return NULL;
 	}
 
-	ssc = bbdd_ssk_open_c(pctx, &sa, error);
+	ssc = bbdd_ssk_open_c(pctx, &sa, mon, error);
 	if (ssc == NULL)
 		goto free_bfdd_c;
 	peer = bbdd_ssk_c_peer(ssc);

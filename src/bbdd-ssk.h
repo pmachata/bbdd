@@ -3,6 +3,7 @@
 
 #include <json-c/json_object.h>
 #include "bbdd-sock.h"
+#include "bbdd-mon.i"
 #include "bbdd-poll.i"
 #include "bbdd-ssk.i"
 
@@ -20,6 +21,7 @@ struct bbdd_ssk_cbs {
 
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
+				   struct bbdd_mon *mon,
 				   char **error);
 void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd);
 int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_ssk_cbs cbs,
@@ -29,6 +31,7 @@ int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd);
 
 struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
+				   struct bbdd_mon *mon,
 				   char **error);
 void bbdd_ssk_close_c(struct bbdd_ssk_c *ssc);
 int bbdd_ssk_c_nq(struct bbdd_ssk_c *ssc, const char *buf, size_t len,

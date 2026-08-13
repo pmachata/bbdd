@@ -11,12 +11,14 @@
 #include <utlist.h>
 
 #include "bbdd-err.h"
+#include "bbdd-mon.h"
 #include "bbdd-poll.h"
 #include "bbdd-sb.h"
 
 struct bbdd_ssk_b {
 	struct bbdd_ssk_peer *peers;	/* DList. */
 	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
 };
 
 struct bbdd_ssk_d {
@@ -76,6 +78,8 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			break;
 
 		len = (size_t) rc;
+		bbdd_mon_send_debug(peer->ssb->mon, "fd %d: received %zd bytes",
+				    peer->fd, len);
 
 		DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
 			if (cbs->rx_cb != NULL) {
@@ -107,9 +111,9 @@ again:
 		return -1;
 	}
 
-	// xxx debug message
-	// fprintf(stderr, "sent %zd bytes `%*s'\n", rc, (int)rc, str);
 	len = (size_t) rc;
+	bbdd_mon_send_debug(peer->ssb->mon, "fd %d: sent %zd bytes",
+			    peer->fd, len);
 	bbdd_sb_pull(&peer->tx_sb, len);
 	return 0;
 }
@@ -262,11 +266,10 @@ void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer)
 
 	rc = bbdd_poll_unset_fd(pctx, peer->fd);
 	if (rc != 0) {
-		char *error;
+		char *no_error = NULL;
 
-		bbdd_err_fmt(&error, "client_destroy: FD not found");
-		bbdd_err_print(&error, NULL);
-		// xxx monitor
+		bbdd_mon_senderr(peer->ssb->mon, &no_error,
+				 "client_destroy: FD %d not found", peer->fd);
 	}
 
 	bbdd_sb_fini(&peer->tx_sb);
@@ -333,6 +336,7 @@ close_fd:
 
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
+				   struct bbdd_mon *mon,
 				   char **error)
 {
 	struct bbdd_ssk_d *ssd;
@@ -359,6 +363,7 @@ struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 	*ssd = (struct bbdd_ssk_d) {
 		.base = {
 			.pctx = pctx,
+			.mon = mon,
 		},
 		.sock = sock,
 	};
@@ -388,6 +393,7 @@ void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd)
 
 struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
+				   struct bbdd_mon *mon,
 				   char **error)
 {
 	struct bbdd_ssk_peer *peer;
@@ -421,6 +427,7 @@ struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
 	*ssc = (struct bbdd_ssk_c) {
 		.base = {
 			.pctx = pctx,
+			.mon = mon,
 		},
 	};
 
