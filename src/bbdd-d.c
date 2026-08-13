@@ -498,8 +498,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 #define DISSECT(POLNAME, NAME, CB) do {					\
 		if (seen[pol_ ## POLNAME]) {				\
 			if (CB(values[pol_ ## POLNAME], &sess->NAME,	\
-			       error) < 0)				\
+			       error) < 0) {				\
+				bbdd_err_app(error, "%s", #NAME);	\
 				goto fail;				\
+			}						\
 			sess->NAME ## _seen = 1;			\
 		}							\
 	} while (0)
