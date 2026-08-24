@@ -41,7 +41,8 @@ static int bbdd_nl_extack_attr(const struct nlattr *attr, void *data)
 {
 	struct bbdd_nl_cb *cb = data;
 
-	if (mnl_attr_get_type(attr) == NLMSGERR_ATTR_MSG)
+	if (mnl_attr_get_type(attr) == NLMSGERR_ATTR_MSG &&
+	    mnl_attr_validate(attr, MNL_TYPE_NUL_STRING) >= 0)
 		bbdd_err_fmt(&cb->extack, "%s", mnl_attr_get_str(attr));
 	return MNL_CB_OK;
 }

@@ -31,6 +31,7 @@ source ${tests_dir}/lib.sh
 	jrpc-client-mangled.sh
 	jrpc-monitor-mangled.sh
 	bfddp-mangled.sh
+	nl-extack-mangled.sh
 }"
 
 printf -v divider '%*s' 74 ''
