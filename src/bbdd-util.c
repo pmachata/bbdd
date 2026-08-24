@@ -534,6 +534,12 @@ int bbdd_util_ssk_bfddp_tkn_rx_cb(struct bbdd_ssk_peer *,
 
 		msg = bbdd_sb_buf(&tkn->sb);
 		msg_len = bbdd_ntoh16(msg->header.length);
+
+		if (msg_len < sizeof(msg->header)) {
+			bbdd_err_fmt(error, "BFDDP message length %zu too short", msg_len);
+			return -1;
+		}
+
 		if (sb_len < msg_len)
 			/* We don't have the full message yet. */
 			return 0;
