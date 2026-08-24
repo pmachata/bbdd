@@ -153,7 +153,7 @@ Bbdd_wait()
 
 adf_Bbdd_start()
 {
-	Bbdd_bground --debug=mon-eager start
+	Bbdd_bground --debug=mon-eager "$@" start
 	defer with_socket "$BBDD_SOCKET" Bbdd_stop $!
 
 	Bbdd_wait
