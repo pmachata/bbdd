@@ -2603,31 +2603,6 @@ static int bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short,
 	return bbdd_d_ctl_accept(d->ctl, bbdd_d_ctl_recv_obj, d, error);
 }
 
-static int bbdd_d_raise_nofile(char **error)
-{
-	struct rlimit rlim;
-
-	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		bbdd_err_fmt(error, "Failed to get RLIMIT_NOFILE: %m");
-		return -1;
-	}
-
-	rlim.rlim_cur = rlim.rlim_max;
-	if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
-		bbdd_err_fmt(error, "Failed to set RLIMIT_NOFILE: %m");
-		return -1;
-	}
-
-	/* We support bbdd_d_sport_cap sessions due to the way the source port
-	 * allocator operates. To support this many sessions, we will also need
-	 * to have that many extra file discriminators. */
-	if (rlim.rlim_max < bbdd_d_sport_cap + 16)
-		fprintf(stderr, "Warning: RLIMIT_NOFILE of %ld is too low to support the design limit of %d sessions.\n",
-			rlim.rlim_max, bbdd_d_sport_cap);
-
-	return 0;
-}
-
 static const char bbdd_d_veth_rx_name[] = "bfd_rx";
 static const char bbdd_d_veth_tx_name[] = "bfd_tx";
 static const uint16_t bbdd_d_veth_tx_mq_handle = 0xa000;
@@ -2840,9 +2815,6 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	int rc = -ENOMEM;
 
 	openlog("bbdd", LOG_PID | LOG_CONS, LOG_USER);
-
-	if (bbdd_d_raise_nofile(&error) < 0)
-		goto closelog;
 
 	d.nl = bbdd_nl_create(&error);
 	if (d.nl == NULL)
