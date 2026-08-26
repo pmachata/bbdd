@@ -32,8 +32,8 @@ struct bbdd_mon_topics {
 struct bbdd_mon *bbdd_mon_create(bool eager, char **error);
 void bbdd_mon_destroy(struct bbdd_mon *mon);
 
-int bbdd_mon_subscribe(struct bbdd_mon *mon, struct bbdd_ssk_peer *peer,
-		       struct bbdd_mon_topics topics, char **error);
+int bbdd_mon_subscribe_sock(struct bbdd_mon *mon, struct bbdd_ssk_peer *peer,
+			    struct bbdd_mon_topics topics, char **error);
 
 int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 			  void (*cb)(struct json_object *, void *),

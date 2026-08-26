@@ -105,9 +105,9 @@ static void bbdd_mon_ssk_cli_done(struct bbdd_ssk_peer *, void *data)
 	bbdd_mon_unsubscribe(cli->mon, cli);
 }
 
-int bbdd_mon_subscribe(struct bbdd_mon *mon,
-		       struct bbdd_ssk_peer *peer,
-		       struct bbdd_mon_topics topics, char **error)
+int bbdd_mon_subscribe_sock(struct bbdd_mon *mon,
+			    struct bbdd_ssk_peer *peer,
+			    struct bbdd_mon_topics topics, char **error)
 {
 	struct bbdd_ssk_cbs *ssk_cbs;
 	struct bbdd_mon_cli *cli;

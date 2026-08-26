@@ -2490,7 +2490,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 		return bbdd_util_jrpc_respond_inv_params_err(peer, id, &error);
 	}
 
-	rc = bbdd_mon_subscribe(mon, peer, topics, &error);
+	rc = bbdd_mon_subscribe_sock(mon, peer, topics, &error);
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
