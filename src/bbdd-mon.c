@@ -28,6 +28,7 @@ struct bbdd_mon_cli {
 	union {
 		struct {
 			struct bbdd_ssk_peer *peer;
+			struct bbdd_ssk_cbs *ssk_cbs;
 		} sock;
 		struct {
 			void (*cb)(struct json_object *, void *);
@@ -136,6 +137,7 @@ int bbdd_mon_subscribe_sock(struct bbdd_mon *mon,
 
 	cli->kind = BBDD_MON_CLI_KIND_SOCK;
 	cli->sock.peer = peer;
+	cli->sock.ssk_cbs = ssk_cbs;
 	return 0;
 
 free_cli:
@@ -146,6 +148,7 @@ free_cli:
 static void bbdd_mon_unsubscribe_sock(struct bbdd_mon *mon,
 				      struct bbdd_mon_cli *cli)
 {
+	bbdd_ssk_peer_del_cbs(cli->sock.peer, cli->sock.ssk_cbs);
 	bbdd_mon_dealloc_client(mon, cli);
 }
 
@@ -175,6 +178,7 @@ static void bbdd_mon_unsubscribe_cb(struct bbdd_mon *mon,
 
 static void bbdd_mon_unsubscribe(struct bbdd_mon *mon, struct bbdd_mon_cli *cli)
 {
+	fprintf(stderr, "unsubscribe\n");
 	switch (cli->kind) {
 	case BBDD_MON_CLI_KIND_SOCK:
 		return bbdd_mon_unsubscribe_sock(mon, cli);
