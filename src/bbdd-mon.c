@@ -26,11 +26,13 @@ struct bbdd_mon_cli {
 
 	enum bbdd_mon_cli_kind kind;
 	union {
-		struct bbdd_ssk_peer *peer;
+		struct {
+			struct bbdd_ssk_peer *peer;
+		} sock;
 		struct {
 			void (*cb)(struct json_object *, void *);
 			void *data;
-		};
+		} cb;
 	};
 };
 
@@ -122,7 +124,7 @@ int bbdd_mon_subscribe(struct bbdd_mon *mon,
 		goto free_cli;
 
 	cli->kind = BBDD_MON_CLI_KIND_SOCK;
-	cli->peer = peer;
+	cli->sock.peer = peer;
 	return 0;
 
 free_cli:
@@ -143,8 +145,8 @@ int bbdd_mon_subscribe_cb(struct bbdd_mon *mon,
 	}
 
 	cli->kind = BBDD_MON_CLI_KIND_CB;
-	cli->cb = cb;
-	cli->data = data;
+	cli->cb.cb = cb;
+	cli->cb.data = data;
 	return 0;
 }
 
@@ -175,12 +177,13 @@ static void __bbdd_mon_send(struct bbdd_mon *mon, struct json_object *msg,
 
 		switch (cli->kind) {
 		case BBDD_MON_CLI_KIND_SOCK:
-			if (bbdd_util_jrpc_send_keep(cli->peer, msg, NULL) != 0)
+			if (bbdd_util_jrpc_send_keep(cli->sock.peer, msg,
+						     NULL) != 0)
 				bbdd_mon_unsubscribe(mon, cli);
 			break;
 
 		case BBDD_MON_CLI_KIND_CB:
-			cli->cb(msg, cli->data);
+			cli->cb.cb(msg, cli->cb.data);
 			break;
 		}
 	}
