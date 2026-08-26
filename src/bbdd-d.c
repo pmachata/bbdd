@@ -727,7 +727,7 @@ static const char *bbdd_d_strtab_val_to_str(int value, const char **tab,
 					    size_t sz)
 {
 	if (value < 0 || (size_t)value >= sz)
-		return NULL;
+		return "unknown";
 	return tab[value];
 }
 
