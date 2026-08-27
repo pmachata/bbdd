@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <linux/if_ether.h>
@@ -534,6 +535,7 @@ static int bbdd_sock_reuseaddr(struct bbdd_sock *sock, char **error)
 int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 		      struct bbdd_sock *sock, char **error)
 {
+	mode_t old_mask;
 	int rc;
 
 	rc = bbdd_sock_open_sa_nobind(bsa, type, sock, error);
@@ -544,7 +546,9 @@ int bbdd_sock_open_sa(const struct bbdd_sockaddr *bsa, int type,
 	if (rc != 0)
 		goto close_sock;
 
+	old_mask = umask(~0600); /* u=rw,go= */
 	rc = bind(sock->fd, &bsa->sa, bsa->len);
+	umask(old_mask);
 	if (rc < 0) {
 		bbdd_err_fmt(error, "Failed to bind socket `%s': %m",
 			     bbdd_sockaddr_ntop(bsa).buf);
