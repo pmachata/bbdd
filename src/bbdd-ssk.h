@@ -43,6 +43,7 @@ int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error);
 int bbdd_ssk_peer_fd(struct bbdd_ssk_peer *peer);
 void bbdd_ssk_peer_mark_done(struct bbdd_ssk_peer *peer);
+void bbdd_ssk_peer_disable_debug(struct bbdd_ssk_peer *peer);
 
 /* Synchronously destroy a peer: drain TX best-effort, fire done_cbs in
  * registration order, free cbs, close fd, free the peer. Safe to call

@@ -2494,6 +2494,7 @@ void bbdd_d_handle_monitor_subscribe(struct bbdd_mon *mon,
 	if (rc != 0)
 		return bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 
+	bbdd_ssk_peer_disable_debug(peer);
 	bbdd_util_jrpc_respond_empty_keep(peer, id);
 }
 

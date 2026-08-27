@@ -45,6 +45,7 @@ struct bbdd_ssk_peer {
 	struct bbdd_ssk_cbs *cbs;	/* DList. */
 
 	bool done;
+	bool debug;
 };
 
 int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd)
@@ -82,8 +83,9 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			break;
 
 		len = (size_t) rc;
-		bbdd_mon_send_debug(peer->ssb->mon, "fd %d: received %zd bytes",
-				    peer->fd, len);
+		if (peer->debug)
+			bbdd_mon_send_debug(peer->ssb->mon, "fd %d: received %zd bytes",
+					    peer->fd, len);
 
 		DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
 			if (cbs->rx_cb != NULL) {
@@ -116,8 +118,9 @@ again:
 	}
 
 	len = (size_t) rc;
-	bbdd_mon_send_debug(peer->ssb->mon, "fd %d: sent %zd bytes",
-			    peer->fd, len);
+	if (peer->debug)
+		bbdd_mon_send_debug(peer->ssb->mon, "fd %d: sent %zd bytes",
+				    peer->fd, len);
 	bbdd_sb_pull(&peer->tx_sb, len);
 	return 0;
 }
@@ -225,6 +228,7 @@ bbdd_ssk_peer_create_no_cb(struct bbdd_ssk_b *ssb, int fd, char **error)
 		.fd = fd,
 		.tok = tok,
 		.cbs = NULL,
+		.debug = true,
 	};
 
 	rc = bbdd_poll_set_fd(ssb->pctx, fd, POLLIN | POLLHUP,
@@ -501,4 +505,9 @@ int bbdd_ssk_peer_fd(struct bbdd_ssk_peer *peer)
 void bbdd_ssk_peer_mark_done(struct bbdd_ssk_peer *peer)
 {
 	peer->done = true;
+}
+
+void bbdd_ssk_peer_disable_debug(struct bbdd_ssk_peer *peer)
+{
+	peer->debug = false;
 }
