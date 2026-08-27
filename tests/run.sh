@@ -35,6 +35,7 @@ source ${tests_dir}/lib.sh
 	bpf-diag-mangled.sh
 	mon-tx-cap.sh
 	ctl-client-vanish.sh
+	mon-debug-feedback.sh
 }"
 
 printf -v divider '%*s' 74 ''
