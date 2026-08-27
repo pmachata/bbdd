@@ -658,7 +658,7 @@ out:
 static void bbdd_br_start_help(void)
 {
 	fprintf(stderr, "%s",
-		"Usage: bbdd bfdd bridge start [TYPE:ADDRESS[:PORT]] [monitor [topics...]]\n"
+		"Usage: bbdd bfdd bridge start [TYPE:ADDRESS[:PORT]]\n"
 		"TYPE ::= {ipv4 | ipv6 | unix}\n"
 		"Default address is `" BBDD_BFDD_DEFAULT_ADDR "'.\n"
 		"\n"
