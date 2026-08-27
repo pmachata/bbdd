@@ -33,6 +33,7 @@ source ${tests_dir}/lib.sh
 	bfddp-mangled.sh
 	nl-extack-mangled.sh
 	bpf-diag-mangled.sh
+	mon-tx-cap.sh
 }"
 
 printf -v divider '%*s' 74 ''
