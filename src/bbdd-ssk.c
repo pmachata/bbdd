@@ -72,6 +72,7 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			if (errno == EINTR)
 				continue;
 
+			bbdd_err_fmt(error, "recv: %m");
 			return rc;
 		}
 		if (rc == 0)
