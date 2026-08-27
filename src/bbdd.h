@@ -27,9 +27,6 @@ extern struct bbdd_env {
 				 * enabled. This exercises message formatting
 				 * paths without actually sending the
 				 * messages. */
-	bool cli_imm_done;	/* Client should mark peer as done after it
-				 * sends the request. This exercises the daemon
-				 * paths that deal with a disappeared peer. */
 	uint32_t bfdd_delay_ms;	/* The amount of sleep in us between reception
 				 * of a BFDD message and the response. */
 	uint32_t tx_capacity;	/* Tx-queue capacity override: max pinned
