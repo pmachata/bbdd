@@ -3,6 +3,7 @@
 #include "bbdd-ssk.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -19,6 +20,8 @@ struct bbdd_ssk_b {
 	struct bbdd_ssk_peer *peers;	/* DList. */
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
+	uint32_t tx_cap;	/* Cap, in bytes, on a peer's outstanding tx
+				 * queue. 0 means unbounded. */
 };
 
 struct bbdd_ssk_d {
@@ -338,6 +341,7 @@ close_fd:
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
 				   struct bbdd_mon *mon,
+				   uint32_t tx_cap,
 				   char **error)
 {
 	struct bbdd_ssk_d *ssd;
@@ -365,6 +369,7 @@ struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 		.base = {
 			.pctx = pctx,
 			.mon = mon,
+			.tx_cap = tx_cap,
 		},
 		.sock = sock,
 	};
@@ -469,7 +474,14 @@ int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error)
 {
 	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
+	uint32_t tx_cap = peer->ssb->tx_cap;
 	int rc;
+
+	if (tx_cap != 0 && bbdd_sb_len(&peer->tx_sb) + len > tx_cap) {
+		bbdd_err_fmt(error, "peer tx queue cap of %" PRIu32 " bytes exceeded",
+			     tx_cap);
+		return -1;
+	}
 
 	/* Do this first so that we don't have to later unpush the buffer.
 	 * A useless POLLOUT is just a nop. */

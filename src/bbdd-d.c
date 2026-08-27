@@ -2855,7 +2855,8 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (rc != 0)
 		goto bpf_destroy;
 
-	d.ctl = bbdd_ssk_open_d(d.pctx, &bsa, d.mon, &error);
+	d.ctl = bbdd_ssk_open_d(d.pctx, &bsa, d.mon, bbdd_env.peer_tx_cap,
+				&error);
 	if (d.ctl == NULL) {
 		rc = -1;
 		goto bpf_destroy;

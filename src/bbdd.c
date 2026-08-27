@@ -17,9 +17,14 @@
 #include "bbdd-util.h"
 #include "config.h"
 
+#define BBDD_DO_STR(X) #X
+#define BBDD_STR(X) BBDD_DO_STR(X)
+#define BBDD_ENV_DEFAULT_PEER_TX_CAP_MB 8 /*MiB*/
+
 struct bbdd_env bbdd_env = {
 	.verbosity = 0,
 	.tx_capacity = 0, /* = dynamic */
+	.peer_tx_cap = BBDD_ENV_DEFAULT_PEER_TX_CAP_MB * 1024 * 1024,
 };
 const char *program_version = "bbdd 0.0";
 const char *program_bug_address = "<mlxsw@nvidia.com>";
@@ -43,7 +48,7 @@ static struct bbdd_ec bbdd_help(void)
 	     "Usage: bbdd [OPTIONS] { COMMAND | help }\n"
 	     "where  OPTIONS := [ -h | --help | -q | --quiet | -v | --verbose |\n"
 	     "                    -V | --version | --socket <PATH> | --json |\n"
-	     "                    -N | -t | --timestamp ]\n"
+	     "                    -N | -t | --timestamp | --peer-tx-cap <BYTES> ]\n"
 	     "	     COMMAND := { start | stop | echo | session | global | bfdd | monitor }\n"
 	     "\n"
 	     "  --json         show JSON result object instead of formatting it\n"
@@ -51,6 +56,10 @@ static struct bbdd_ec bbdd_help(void)
 	     "  --socket       path to the UNIX socket used to talk to the daemon\n"
 	     "                 defaults to " BBDD_DEFAULT_SOCKET "\n"
 	     "  -t/--timestamp prefix monitor notifications with a timestamp\n"
+	     "  --peer-tx-cap  cap, in bytes, on a control-socket peer's queued but\n"
+	     "                 unsent output. 0 means unbounded. Only meaningful for\n"
+	     "                 `start' and `bfdd bridge start'.\n"
+	     "                 Defaults to " BBDD_STR(BBDD_ENV_DEFAULT_PEER_TX_CAP_MB) " MiB\n\n"
 	     );
 	return bbdd_ec_success;
 }
@@ -93,6 +102,7 @@ int main(int argc, char **argv)
 		opt_socket = 257,
 		opt_json,
 		opt_debug,
+		opt_peer_tx_cap,
 	};
 	static const struct option long_options[] = {
 		{ "help",	no_argument,	   NULL, 'h' },
@@ -103,6 +113,7 @@ int main(int argc, char **argv)
 		{ "version",	no_argument,	   NULL, 'V' },
 		{ "socket",	required_argument, NULL, opt_socket },
 		{ "debug",	required_argument, NULL, opt_debug },
+		{ "peer-tx-cap", required_argument, NULL, opt_peer_tx_cap },
 		{ NULL, 0, NULL, 0 }
 	};
 	struct bbdd_mon_topics topics = {};
@@ -133,6 +144,15 @@ int main(int argc, char **argv)
 			break;
 		case opt_socket:
 			bbdd_env.socket = optarg;
+			break;
+		case opt_peer_tx_cap:
+			rc = bbdd_sock_parse_u32(optarg, &bbdd_env.peer_tx_cap,
+						 "peer-tx-cap", &error);
+			if (rc != 0) {
+				bbdd_err_print(&error, "peer-tx-cap `%s'",
+					       optarg);
+				return EXIT_FAILURE;
+			}
 			break;
 		case opt_json:
 			bbdd_env.show_json = true;

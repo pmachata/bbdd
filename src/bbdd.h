@@ -17,6 +17,9 @@ extern struct bbdd_env {
 	bool show_json;
 	bool numeric;
 	bool timestamp;
+	uint32_t peer_tx_cap;	/* Cap, in bytes, on a control-socket peer's
+				 * outstanding (unsent) tx queue. 0 means
+				 * unbounded. */
 
 	/* Debug options. */
 	bool mon_eager;		/* For purposes of formatting monitoring
