@@ -57,11 +57,73 @@ struct bbdd_bfdd_d {
 	struct bbdd_ssk_cbs *peer_cbs;
 };
 
+static int bbdd_bfdd_msg_len_ck(const struct bfddp_message *msg,
+				size_t min_payload_len, char **error)
+{
+	size_t msg_len;
+	size_t min_len;
+
+	msg_len = bbdd_ntoh16(msg->header.length);
+	min_len = min_payload_len + sizeof msg->header;
+
+	if (msg_len < min_len) {
+		enum bfddp_message_type bmt;
+
+		bmt = bbdd_ntoh16(msg->header.type);
+		bbdd_err_fmt(error, "Message type %d has length %zd, but has to be at least %zd",
+			     bmt, msg_len, min_len);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int bbdd_bfdd_msg_len_validate(const struct bfddp_message *msg,
+				      char **error)
+{
+	enum bfddp_message_type bmt;
+
+	bmt = bbdd_ntoh16(msg->header.type);
+	switch (bmt) {
+	case ECHO_REQUEST:
+	case ECHO_REPLY:
+		return bbdd_bfdd_msg_len_ck(msg, sizeof msg->data.echo, error);
+
+	case DP_ADD_SESSION:
+	case DP_DELETE_SESSION:
+		/* This comes in two variants: session, or session_cumulus.
+		 * Client has to dispatch on length to find out which it is. We
+		 * only check if the length is at least the basic session. */
+		return bbdd_bfdd_msg_len_ck(msg, sizeof msg->data.session,
+					    error);
+
+	case BFD_STATE_CHANGE:
+		return bbdd_bfdd_msg_len_ck(msg, sizeof msg->data.state, error);
+
+	case DP_REQUEST_SESSION_COUNTERS:
+		return bbdd_bfdd_msg_len_ck(msg, sizeof msg->data.counters_req,
+					    error);
+
+	case BFD_SESSION_COUNTERS:
+		return bbdd_bfdd_msg_len_ck(msg,
+					    sizeof msg->data.session_counters,
+					    error);
+	}
+
+	bbdd_err_fmt(error, "Cannot validate message of unknown type %d", bmt);
+	return -1;
+}
+
 static int bbdd_bfdd_dispatch_message(struct bbdd_util_ssk_bfddp_tkn *,
 				      const struct bfddp_message *msg,
 				      void *data, char **error)
 {
 	struct bbdd_bfdd_b *bfdd_b = data;
+	int rc;
+
+	rc = bbdd_bfdd_msg_len_validate(msg, error);
+	if (rc != 0)
+		return rc;
 
 	bbdd_bfdd_mon_send_i(bfdd_b->mon, msg);
 	return bfdd_b->cbs.message_cb(msg, bfdd_b->cbs.data, error);
