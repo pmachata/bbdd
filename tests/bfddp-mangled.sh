@@ -17,10 +17,11 @@ socat_pid=
 # length=0 to the peer.
 fake_dplane()
 {
+	local pl=$1; shift
 	local n=0
 
 	rm -f "$sock"
-	echo -n 10000000 | tr 01 '\000\001' |
+	echo -ne "$pl" |
 		socat -T 1 UNIX-LISTEN:"$sock" - > /dev/null 2>&1 &
 	socat_pid=$!
 
@@ -38,25 +39,38 @@ reap_fake_dplane()
 	wait "$socat_pid" 2>/dev/null
 }
 
-fake_dplane
-defer reap_fake_dplane
+adf_setup_fake_dplane()
+{
+	local pl=$1; shift
 
-Bbdd_bfdd_connect FD1
-check_err $? "Failed to connect to fake dataplane"
+	fake_dplane "$pl"
+	defer reap_fake_dplane
 
-# Give bbdd a moment to read and (if the bug is present) choke on the
-# length=0 message.
-sleep 0.2
+	Bbdd_bfdd_connect FD1
+	check_err $? "Failed to connect to fake dataplane"
 
-# The control socket is served by the same poll loop as the dataplane peer, so
-# if the peer's parser is stuck spinning, this query never gets a reply. So if
-# the bug is back, the daemon is stuck looping. We can't sigterm it, because
-# signals are handled by poll, where the daemon never returns if it's stuck
-# looping on zero-length message. We can sigkill it, but then it's not going to
-# clean up after itself and needs admin intervention anyway. So don't bother
-# trying to be graceful here, the test is just a canary that the issue doesn't
-# come back. If it does, there'll be mess one way or another.
+	# Give bbdd a moment to read and (if the bug is present) choke on the
+	# length=0 message.
+	sleep 0.2
+}
 
-timeout -k 1 2 "${bin_dir}/bbdd" --socket "$ctl" -q echo
-check_err $? "daemon unresponsive after BFDDP message with length=0"
-Bbdd_log_test "daemon survives BFDDP message with length=0"
+test_length_0()
+{
+	adf_setup_fake_dplane '\x01\x00\x00\x00\x00\x00\x00\x00'
+
+	# The control socket is served by the same poll loop as the dataplane
+	# peer, so if the peer's parser is stuck spinning, this query never gets
+	# a reply. So if the bug is back, the daemon is stuck looping. We can't
+	# sigterm it, because signals are handled by poll, where the daemon
+	# never returns if it's stuck looping on zero-length message. We can
+	# sigkill it, but then it's not going to clean up after itself and needs
+	# admin intervention anyway. So don't bother trying to be graceful here,
+	# the test is just a canary that the issue doesn't come back. If it
+	# does, there'll be mess one way or another.
+
+	timeout -k 1 2 "${bin_dir}/bbdd" --socket "$ctl" -q echo
+	check_err $? "daemon unresponsive after BFDDP message with length=0"
+	Bbdd_log_test "daemon survives BFDDP message with length=0"
+}
+
+in_defer_scope test_length_0
