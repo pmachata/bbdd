@@ -1602,6 +1602,10 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	 * created). */
 	dsess->local.state.state = BBDD_BFD_PKT_STATE_DOWN;
 	dsess->local.state.diag = BBDD_BFD_PKT_DIAG_DOWN;
+	/* RFC 9: TTL or Hop Count MUST be set to the maximum on transmit, and
+	 * checked to be equal to the maximum value on reception (and the packet
+	 * dropped if this is not the case). */
+	dsess->ttl = 255;
 	/* Arbitrary defaults. */
 	dsess->local.timing.detect_mult = 1;
 	dsess->local.timing.min_rx_us = bbdd_prog_slow_interval_us;
