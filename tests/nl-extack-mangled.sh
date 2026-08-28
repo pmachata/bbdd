@@ -25,6 +25,9 @@ require_command python3
 # deterministic witness: present in bbdd's own error output if the bug
 # is back, absent if the length is validated as it should be.
 
+Bbdd_setup_ns NS1 NS2
+in_ns NS1
+
 Bbdd_setup_socket SD1
 with_socket SD1
 
@@ -37,7 +40,7 @@ Bbdd_wait
 
 marker=BBDD_TEST_NL_EXTACK_MARKER
 
-BBDD_NL_DST_PID="$bbdd_pid" python3 - <<PYEOF
+BBDD_NL_DST_PID="$bbdd_pid" Python3 - <<PYEOF
 import os
 import socket
 import struct

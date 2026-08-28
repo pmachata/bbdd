@@ -4,6 +4,9 @@ root_require
 # Feed bbdd a malformed BFDDP frame over a fake dataplane socket and
 # check the daemon stays responsive afterwards.
 
+Bbdd_setup_ns NS1
+in_ns NS1
+
 Bbdd_setup_socket SD1 FD1
 with_socket SD1
 adf_Bbdd_start -q

@@ -6,6 +6,9 @@ root_require
 # an RPC, and check whether an inordinate number of debug lines was generated as
 # a response.
 
+Bbdd_setup_ns NS1
+in_ns NS1
+
 Bbdd_setup_socket SD1
 with_socket SD1
 adf_Bbdd_start

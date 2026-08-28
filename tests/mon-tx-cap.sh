@@ -7,6 +7,9 @@ require_command python3
 # socket buffer. This forces the daemon to unsubscribe the fake monitor client.
 # Verify that the mechanism works as intended and does not crash.
 
+Bbdd_setup_ns NS1
+in_ns NS1
+
 Bbdd_setup_socket SD1
 with_socket SD1
 adf_Bbdd_start --peer-tx-cap=256
@@ -15,7 +18,7 @@ ctl="${!BBDD_SOCKET}/bbdd.ctl"
 
 # Fake monitor, subscribe to jrpc topic to get a message for each handled JRPC.
 
-python3 - "$ctl" <<'PYEOF' &
+Python3 - "$ctl" <<'PYEOF' &
 import socket
 import sys
 import time

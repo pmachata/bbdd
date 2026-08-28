@@ -18,6 +18,9 @@ require_command python3
 # more reliably, since there's no event loop indirection on the
 # client's side to add latency before the close()).
 
+Bbdd_setup_ns NS1
+in_ns NS1
+
 Bbdd_setup_socket SD1
 with_socket SD1
 adf_Bbdd_start
@@ -26,7 +29,7 @@ ctl="${!BBDD_SOCKET}/bbdd.ctl"
 
 send_and_vanish()
 {
-	python3 - "$ctl" <<'PYEOF'
+	Python3 - "$ctl" <<'PYEOF'
 import socket
 import sys
 

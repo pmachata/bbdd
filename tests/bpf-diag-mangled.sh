@@ -9,11 +9,14 @@ require_command python3
 # of the ring buffer message, and prompts a crash, unless the out of bounds
 # value is handled.
 
+Bbdd_setup_ns NS1
+in_ns NS1
+
 Bbdd_setup_socket SD1
 with_socket SD1
 adf_Bbdd_start
 
-python3 - <<'PYEOF'
+Python3 - <<'PYEOF'
 import socket
 import struct
 

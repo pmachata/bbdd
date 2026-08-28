@@ -948,6 +948,11 @@ Ping6()
 	$(nspfx) $(vrfpfx) "$PING6" "$@"
 }
 
+Python3()
+{
+	$(nspfx) $(vrfpfx) python3 "$@"
+}
+
 ping_test()
 {
 	local dip=$1; shift
