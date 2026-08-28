@@ -523,42 +523,50 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 				   bool state_only, char **error)
 {
 	enum {
-		/* State-only policy. */
 		pol_state,
 		pol_diag,
-		polsize_state_only,
-
-		/* Rest of the complete policy. */
-		pol_discr = polsize_state_only,
+		pol_discr,
 		pol_detect_mult,
 		pol_min_tx_us,
 		pol_min_rx_us,
 		pol_cpi,
-		polsize_full,
 	};
 	struct bbdd_jrpc_policy policy[] = {
+		/* State-only policy. */
 		[pol_state] = { .key = "state", .type = json_type_string,
 				.required = true },
 		[pol_diag] = { .key = "diag", .type = json_type_string,
 			       .required = true },
+
+		/* Rest of the complete policy. */
 		[pol_discr] = { .key = "discr",
-				.type = json_type_int, .required = true },
+				.type = json_type_int,
+				.required = true,
+				.ignored = state_only },
 		[pol_detect_mult] = { .key = "detect_mult",
-				      .type = json_type_int, .required = true },
+				      .type = json_type_int,
+				      .required = true,
+				      .ignored = state_only },
 		[pol_min_tx_us] = { .key = "min_tx_us",
-				    .type = json_type_int, .required = true },
+				    .type = json_type_int,
+				    .required = true,
+				    .ignored = state_only },
 		[pol_min_rx_us] = { .key = "min_rx_us",
-				    .type = json_type_int, .required = true },
-		[pol_cpi] = { .key = "cpi", .type = json_type_boolean },
+				    .type = json_type_int,
+				    .required = true,
+				    .ignored = state_only },
+		[pol_cpi] = { .key = "cpi",
+			      .type = json_type_boolean,
+			      .ignored = state_only },
 	};
-	const size_t polsize = state_only ? polsize_state_only : polsize_full;
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
 	bool seen[ARRAY_SIZE(policy)] = {};
 	const char *state_str;
 	const char *diag_str;
 	int rc;
 
-	rc = bbdd_jrpc_dissect(obj, policy, seen, values, polsize, error);
+	rc = bbdd_jrpc_dissect(obj, policy, seen, values, ARRAY_SIZE(policy),
+			       error);
 	if (rc != 0)
 		return rc;
 
