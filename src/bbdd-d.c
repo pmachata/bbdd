@@ -716,12 +716,12 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 	ASSIGN(discr, local.discr);
 	ASSIGN_NON0(remote_discr, user_remote_discr);
 	ASSIGN_NON0(hold_time_us, hold_time_us);
-	ASSIGN_NON0(ttl, ttl);
+	ASSIGN(ttl, ttl);
 	ASSIGN_NON0(netif.ifindex, ifindex);
 
-	ASSIGN_NON0(min_tx_us, local.timing.min_tx_us);
-	ASSIGN_NON0(min_rx_us, local.timing.min_rx_us);
-	ASSIGN_NON0(detect_mult, local.timing.detect_mult);
+	ASSIGN(min_tx_us, local.timing.min_tx_us);
+	ASSIGN(min_rx_us, local.timing.min_rx_us);
+	ASSIGN(detect_mult, local.timing.detect_mult);
 
 #undef ASSIGN_NON0
 #undef ASSIGN
