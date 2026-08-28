@@ -557,6 +557,7 @@ __bbdd_c_jrpc_dissect_session_data(struct json_object *obj,
 				    .ignored = state_only },
 		[pol_cpi] = { .key = "cpi",
 			      .type = json_type_boolean,
+			      .required = true,
 			      .ignored = state_only },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
