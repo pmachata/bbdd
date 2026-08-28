@@ -23,6 +23,7 @@ struct bbdd_jrpc_policy {
 	bool any_type;
 	bool nullable;	/* Either the given type, or nil. */
 	bool required;
+	bool ignored;	/* This policy entry should be ignored. */
 };
 
 struct json_object *bbdd_jrpc_new_object(struct json_object *id);

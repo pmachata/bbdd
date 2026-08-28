@@ -228,6 +228,9 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 		for (size_t i = 0; i < policy_size; i++) {
 			struct bbdd_jrpc_policy *pol = &policy[i];
 
+			if (pol->ignored)
+				continue;
+
 			if (strcmp(key, pol->key) == 0) {
 				enum json_type type = json_object_get_type(val);
 
@@ -269,7 +272,7 @@ int bbdd_jrpc_dissect(struct json_object *obj,
 	for (size_t i = 0; i < policy_size; i++) {
 		struct bbdd_jrpc_policy *pol = &policy[i];
 
-		if (!seen[i] && pol->required) {
+		if (!seen[i] && !pol->ignored && pol->required) {
 			bbdd_err_fmt(error, "Required member %s not present",
 				     pol->key);
 			return -1;
