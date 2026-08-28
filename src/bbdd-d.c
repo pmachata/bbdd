@@ -576,8 +576,12 @@ static int bbdd_d_jrpc_dissect_params_session(struct json_object *obj,
 		pol_bulk,
 	};
 	struct bbdd_jrpc_policy policy[] = {
-		[pol_select] = { .key = "select", .type = json_type_object },
-		[pol_change] = { .key = "change", .type = json_type_object },
+		[pol_select] = { .key = "select", .type = json_type_object,
+				 .required = select != NULL,
+				 .ignored = select == NULL },
+		[pol_change] = { .key = "change", .type = json_type_object,
+				 .required = change != NULL,
+				 .ignored = change == NULL  },
 		[pol_bulk] =   { .key = "bulk",   .type = json_type_boolean },
 	};
 	struct json_object *values[ARRAY_SIZE(policy)] = {};
