@@ -24,6 +24,8 @@ with_socket SD1 nsessions_test 1 min-rx 200ms
 with_socket SD1 nsessions_test 1 detect-mult 3
 with_socket SD1 nsessions_test 1 \
 	   dst $(Bbdd_IP 2) min-tx 200ms min-rx 200ms detect-mult 3
+with_socket SD2 nsessions_test 0 ttl 0
+with_socket SD1 nsessions_test 1 ttl 255
 
 with_socket SD1 nsessions_test 0 dst $(Bbdd_IP 3)
 with_socket SD1 nsessions_test 0 min-tx 300ms
@@ -52,8 +54,13 @@ passive_zero_test()
 
 with_socket SD2 Bbdd session add \
 	   discr 202 dst $(Bbdd_IP 1) \
-	   min-tx 200ms min-rx 200ms detect-mult 3 passive
+	   min-tx 200ms min-rx 200ms detect-mult 3 ttl 0 passive
 with_socket SD2 nsessions_test 1
+with_socket SD2 nsessions_test 1 ttl 0
+
+OUT=$(with_socket SD2 Bbdd -v session show)
+find_match "$OUT" "\bttl 0\b"
+Bbdd_log_test "ttl reported at session with ttl=0"
 
 # passive-passive: Neither should reach up yet, since they are both passive.
 with_socket SD1 session_state_test up 0
