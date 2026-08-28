@@ -74,3 +74,31 @@ test_length_0()
 }
 
 in_defer_scope test_length_0
+
+test_length_short()
+{
+	monout="${tmpdir}/monout"
+	with_socket SD1 Bbdd_bground monitor > "$monout"
+	monitor_pid=$!
+
+	adf_setup_fake_dplane '\x01\x00\x00\x03\x00\x00\x00\x08'
+
+	kill_process "$monitor_pid"
+	OUT=$(cat "$monout")
+
+	find_no_match "$OUT" "bfddi:sess-del"
+	Bbdd_log_test "no sess-del notification for a too-short DP_DELETE_SESSION"
+
+	find_match "$OUT" "Message type 3 has length 8.*at least"
+	Bbdd_log_test "daemon rejects a too-short DP_DELETE_SESSION message"
+
+	with_socket SD1 Bbdd bfdd connected
+	check_fail $? "still connected to fake dataplane after a malformed message"
+	Bbdd_log_test "bfdd connection torn down after a malformed message"
+
+	with_socket SD1 Bbdd -q echo
+	check_err $? "daemon unresponsive after a too-short DP_DELETE_SESSION message"
+	Bbdd_log_test "daemon survives a too-short DP_DELETE_SESSION message"
+}
+
+in_defer_scope test_length_short
