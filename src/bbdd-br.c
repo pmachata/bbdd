@@ -457,8 +457,7 @@ static void __bbdd_br_bfdd_message_cb(struct bbdd_br *br,
 	case BFD_STATE_CHANGE:
 		return bbdd_br_bfdd_handle_state_change(br, msg);
 	case ECHO_REQUEST:
-		rc = bbdd_d_bfdd_d_handle_echo_request(br->bfdd, &br->diag_stats,
-						       msg, &error);
+		rc = bbdd_d_bfdd_d_handle_echo_request(br->bfdd, msg, &error);
 		if (rc != 0)
 			goto senderr;
 		return;

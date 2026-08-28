@@ -20,7 +20,7 @@
 
 #define BBDD_D_GLOBAL_DIAG_STATS(FIELD)		\
 	FIELD(dp_wrong_version_number)		\
-	FIELD(dp_invalid_message_length)	\
+	FIELD(dp_sess_add_invalid_length)	\
 	FIELD(dp_invalid_message_type)		\
 	FIELD(dp_invalid_message)		\
 	FIELD(dp_internal_error)		\
@@ -115,7 +115,6 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 		      void *recv_obj_data, char **error);
 
 int bbdd_d_bfdd_d_handle_echo_request(struct bbdd_bfdd_d *d,
-				      struct bbdd_d_global_diag_stats *diag_stats,
 				      const struct bfddp_message *msg,
 				      char **error);
 

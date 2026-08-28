@@ -2073,41 +2073,12 @@ static int bbdd_d_bfdd_handle_add_session(struct bbdd_d *d,
 
 	rc = bbdd_bfdd_session_msg_to_c(msg, &csess, error);
 	if (rc == -EMSGSIZE)
-		++d->diag_stats.dp_invalid_message_length;
+		++d->diag_stats.dp_sess_add_invalid_length;
 	if (rc != 0)
 		return -1;
 
 	return bbdd_d_bfdd_handle_add_session_vrf(d, &csess, error);
 }
-
-static int
-__bbdd_d_bfdd_check_length(struct bbdd_d_global_diag_stats *diag_stats,
-			   unsigned int length,
-			   unsigned int exp_len,
-			   const char *where,
-			   char **error)
-{
-	if (length == exp_len)
-		return 0;
-
-	++diag_stats->dp_invalid_message_length;
-	bbdd_err_fmt(error, "%s: Invalid length: got %u, expected %u",
-		     where, length, exp_len);
-	return -EINVAL;
-}
-
-#define bbdd_d_bfdd_check_length(DIAG, MSG, PAYLOAD, WHERE, ERROR)	\
-	({								\
-		const struct bfddp_message *_M = (MSG);			\
-		enum bfddp_message_type _BMT = bbdd_ntoh16(_M->header.type); \
-		uint16_t _AL = bbdd_ntoh16(_M->header.length);		\
-		uint16_t _EL = sizeof(_M->header) +			\
-			       sizeof(_M->data PAYLOAD);		\
-									\
-		assert(_BMT == WHERE);					\
-		__bbdd_d_bfdd_check_length((DIAG), _AL, _EL, #WHERE,	\
-					   (ERROR));			\
-	})
 
 static int
 bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
@@ -2116,11 +2087,6 @@ bbdd_d_bfdd_handle_delete_session(struct bbdd_d *d,
 {
 	uint32_t discr;
 	int rc;
-
-	rc = bbdd_d_bfdd_check_length(&d->diag_stats, msg, .session,
-				      DP_DELETE_SESSION, error);
-	if (rc != 0)
-		return rc;
 
 	discr = bbdd_ntoh32(msg->data.session.lid);
 	rc = bbdd_d_handle_session_del_one(d, discr, error);
@@ -2141,11 +2107,6 @@ bbdd_d_bfdd_handle_session_counters(struct bbdd_d *d,
 	struct bbdd_d_session *dsess;
 	char *error2;
 	int rc1, rc2;
-
-	rc1 = bbdd_d_bfdd_check_length(&d->diag_stats, msg, .counters_req,
-				       DP_REQUEST_SESSION_COUNTERS, error1);
-	if (rc1 != 0)
-		return rc1;
 
 	discr = bbdd_ntoh32(msg->data.counters_req.lid);
 
@@ -2185,40 +2146,27 @@ reply:
 	return bbdd_err_pick(rc1, error1, rc2, &error2);
 }
 
-static int bbdd_d_bfdd_handle_echo_request(struct bbdd_d_global_diag_stats *diag_stats,
-					   const struct bfddp_message *msg,
-					   char **error)
+static void bbdd_d_bfdd_usleep(void)
 {
 	if (bbdd_env.bfdd_delay_ms > 0)
 		usleep(bbdd_env.bfdd_delay_ms);
-
-	return bbdd_d_bfdd_check_length(diag_stats, msg, .echo, ECHO_REQUEST,
-					error);
 }
 
 static int
 bbdd_d_bfdd_c_handle_echo_request(struct bbdd_bfdd_c *c,
-				  struct bbdd_d_global_diag_stats *diag_stats,
 				  const struct bfddp_message *msg,
 				  char **error)
 {
-	int rc = bbdd_d_bfdd_handle_echo_request(diag_stats, msg, error);
-
-	if (rc != 0)
-		return rc;
+	bbdd_d_bfdd_usleep();
 	return bbdd_bfdd_c_reply_echo(c, bbdd_ntoh16(msg->header.id),
 				      &msg->data.echo, error);
 }
 
 int bbdd_d_bfdd_d_handle_echo_request(struct bbdd_bfdd_d *d,
-				      struct bbdd_d_global_diag_stats *diag_stats,
 				      const struct bfddp_message *msg,
 				      char **error)
 {
-	int rc = bbdd_d_bfdd_handle_echo_request(diag_stats, msg, error);
-
-	if (rc != 0)
-		return rc;
+	bbdd_d_bfdd_usleep();
 	return bbdd_bfdd_d_reply_echo(d, bbdd_ntoh16(msg->header.id),
 				      &msg->data.echo, error);
 }
@@ -2258,8 +2206,7 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 		break;
 
 	case ECHO_REQUEST:
-		rc = bbdd_d_bfdd_c_handle_echo_request(d->bfdd, &d->diag_stats,
-						       msg, &error);
+		rc = bbdd_d_bfdd_c_handle_echo_request(d->bfdd, msg, &error);
 		break;
 
 	case ECHO_REPLY:
@@ -2269,7 +2216,6 @@ static void __bbdd_d_bfdd_message_cb(struct bbdd_d *d,
 	/* Outgoing messages that BFDD shouldn't be sending to us. */
 	case BFD_SESSION_COUNTERS:
 	case BFD_STATE_CHANGE:
-	/* Whatever this is. */
 	default:
 		++d->diag_stats.dp_invalid_message_type;
 		bbdd_err_fmt(&error, "bfdd: Invalid message type %d", bmt);
