@@ -20,8 +20,7 @@ struct bbdd_ssk_b {
 	struct bbdd_ssk_peer *peers;	/* DList. */
 	struct bbdd_poll_ctx *pctx;
 	struct bbdd_mon *mon;
-	uint32_t tx_cap;	/* Cap, in bytes, on a peer's outstanding tx
-				 * queue. 0 means unbounded. */
+	uint32_t stream_maxbuf;
 };
 
 struct bbdd_ssk_d {
@@ -345,7 +344,7 @@ close_fd:
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
 				   struct bbdd_mon *mon,
-				   uint32_t tx_cap,
+				   uint32_t stream_maxbuf,
 				   char **error)
 {
 	struct bbdd_ssk_d *ssd;
@@ -373,7 +372,7 @@ struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 		.base = {
 			.pctx = pctx,
 			.mon = mon,
-			.tx_cap = tx_cap,
+			.stream_maxbuf = stream_maxbuf,
 		},
 		.sock = sock,
 	};
@@ -478,7 +477,7 @@ int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error)
 {
 	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
-	uint32_t tx_cap = peer->ssb->tx_cap;
+	uint32_t tx_cap = peer->ssb->stream_maxbuf;
 	int rc;
 
 	if (tx_cap != 0 && bbdd_sb_len(&peer->tx_sb) + len > tx_cap) {

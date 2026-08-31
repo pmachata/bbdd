@@ -585,7 +585,7 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 	}
 
 	br.bfdd_server = bbdd_ssk_open_d(br.pctx, &bfdd_bsa, br.mon,
-					 bbdd_env.peer_tx_cap, &error);
+					 bbdd_env.stream_maxbuf, &error);
 	if (br.bfdd_server == NULL) {
 		bbdd_err_print(&error, "Failed to open BFDD server socket");
 		goto mon_fini;
@@ -607,7 +607,7 @@ static struct bbdd_ec bbdd_br_do_start(const char *addr,
 			goto bfdd_poll_unset_server;
 
 		br.ctl = bbdd_ssk_open_d(br.pctx, &ctl_bsa, br.mon,
-					 bbdd_env.peer_tx_cap, &error);
+					 bbdd_env.stream_maxbuf, &error);
 		if (br.ctl == NULL) {
 			err = -1;
 			goto bfdd_poll_unset_server;

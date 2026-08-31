@@ -12,7 +12,7 @@ in_ns NS1
 
 Bbdd_setup_socket SD1
 with_socket SD1
-adf_Bbdd_start --peer-tx-cap=256
+adf_Bbdd_start -q --stream-maxbuf=256
 
 ctl="${!BBDD_SOCKET}/bbdd.ctl"
 
