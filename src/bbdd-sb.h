@@ -8,6 +8,7 @@ struct bbdd_sb {
 	size_t off;   /* Message start. */
 	size_t len;   /* Message length. */
 	size_t size;  /* The allocated size.  */
+	size_t maxsize; /* Maximum allowed size. 0 for no limit. */
 };
 
 void bbdd_sb_fini(struct bbdd_sb *sb);

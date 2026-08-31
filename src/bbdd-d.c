@@ -2527,7 +2527,8 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 	struct bbdd_ssk_cbs cbs;
 	int rc;
 
-	tkn = bbdd_util_ssk_json_tkn_create(recv_obj_cb, recv_obj_data, error);
+	tkn = bbdd_util_ssk_json_tkn_create(bbdd_env.stream_maxbuf,
+					    recv_obj_cb, recv_obj_data, error);
 	if (tkn == NULL)
 		return -1;
 
@@ -2810,7 +2811,7 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	if (rc != 0)
 		goto bpf_destroy;
 
-	d.ctl = bbdd_ssk_open_d(d.pctx, &bsa, d.mon, bbdd_env.peer_tx_cap,
+	d.ctl = bbdd_ssk_open_d(d.pctx, &bsa, d.mon, bbdd_env.stream_maxbuf,
 				&error);
 	if (d.ctl == NULL) {
 		rc = -1;

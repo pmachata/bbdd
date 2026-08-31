@@ -74,10 +74,20 @@ realloc:
 	for (nsize = sb->size; nsize < needed_size;
 	     nsize = nsize > 0 ? nsize * 2 : BBDD_SB_MIN_SIZE)
 		;
+	if (sb->maxsize != 0 && nsize > sb->maxsize) {
+		nsize = sb->maxsize;
+
+		if (nsize < needed_size) {
+			bbdd_err_fmt(error, "Buffer overflow: bytes needed %zu, allowed %zu",
+				     needed_size, sb->maxsize);
+			return NULL;
+		}
+	}
 
 	nbuf = realloc(sb->buf, nsize);
 	if (nbuf == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_fmt(error, "Cannot allocate buffer of %zu bytes: %m",
+			     nsize);
 		return NULL;
 	}
 

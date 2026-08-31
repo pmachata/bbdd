@@ -355,6 +355,8 @@ bool bbdd_util_startswith(const char *haystack, const char *needle,
 struct bbdd_util_ssk_json_tkn {
 	struct bbdd_ssk_peer *peer;
 	struct json_tokener *tok;
+	size_t buffered;
+	size_t stream_maxbuf;
 
 	int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 		      struct json_object *obj, void *data, char **error);
@@ -368,7 +370,13 @@ struct bbdd_util_ssk_json_tkn {
 	void *data;
 };
 
-static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
+static void bbdd_util_ssk_json_tkn_reset(struct bbdd_util_ssk_json_tkn *tkn)
+{
+	tkn->buffered = 0;
+	json_tokener_reset(tkn->tok);
+}
+
+static int bbdd_util_jrpc_tokenize(struct bbdd_util_ssk_json_tkn *tkn,
 				   const char **str, size_t *left,
 				   struct json_object **ret_obj, char **error)
 {
@@ -376,14 +384,14 @@ static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 	size_t consumed;
 	int rc;
 
-	obj = json_tokener_parse_ex(tok, *str, *left);
-	consumed = json_tokener_get_parse_end(tok);
+	obj = json_tokener_parse_ex(tkn->tok, *str, *left);
+	consumed = json_tokener_get_parse_end(tkn->tok);
 	assert(consumed <= *left);
 	*left -= consumed;
 	*str += consumed;
 	*ret_obj = obj;
 	if (obj == NULL) {
-		rc = json_tokener_get_error(tok);
+		rc = json_tokener_get_error(tkn->tok);
 		if (rc == json_tokener_success) {
 			/* A `null' JSON object. */
 			return 0;
@@ -398,12 +406,13 @@ static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 		return -1;
 	}
 
-	json_tokener_reset(tok);
+	bbdd_util_ssk_json_tkn_reset(tkn);
 	return 0;
 }
 
 struct bbdd_util_ssk_json_tkn *
-bbdd_util_ssk_json_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+bbdd_util_ssk_json_tkn_create(size_t stream_maxbuf,
+			      int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 					    struct json_object *obj,
 					    void *data, char **error),
 			      void *data, char **error)
@@ -425,6 +434,7 @@ bbdd_util_ssk_json_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 
 	*tkn = (struct bbdd_util_ssk_json_tkn) {
 		.tok = tok,
+		.stream_maxbuf = stream_maxbuf,
 	};
 
 	bbdd_util_ssk_json_tkn_set_cbs(tkn, obj_cb, NULL, data);
@@ -475,8 +485,25 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 
 	while (len > 0) {
 		struct json_object *obj;
+		size_t old_len = len;
+		size_t consumed;
 
-		rc = bbdd_util_jrpc_tokenize(tkn->tok, &buf, &len, &obj, error);
+		/* This is not accurate, because it could bounce a number of
+		 * small messages packed in one buffer. But for expected values
+		 * of stream_maxbuf and recv buffer sizes it is not going to
+		 * matter unless the client is doing something weird. */
+		if (tkn->buffered != 0 &&
+		    tkn->buffered + len > tkn->stream_maxbuf) {
+			bbdd_err_fmt(error, "JSON buffer overflow: bytes needed %zu, allowed %zu",
+				     tkn->buffered + len,  tkn->stream_maxbuf);
+			return -1;
+		}
+
+		rc = bbdd_util_jrpc_tokenize(tkn, &buf, &len, &obj, error);
+
+		consumed = len - old_len;
+		tkn->buffered += consumed;
+
 		if (rc < 0) {
 			if (tkn->err_cb == NULL)
 				return rc;
@@ -486,7 +513,7 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 			/* Resync: the tokenizer stopped at the offending byte
 			 * without consuming it. Skip past it and start a
 			 * fresh parse. */
-			json_tokener_reset(tkn->tok);
+			bbdd_util_ssk_json_tkn_reset(tkn);
 			if (len > 0) {
 				buf++;
 				len--;
@@ -510,7 +537,6 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 }
 
 struct bbdd_util_ssk_bfddp_tkn {
-	//uint8_t buf[sizeof(struct bfddp_message)];
 	struct bbdd_sb sb;
 	size_t len;
 
@@ -521,7 +547,8 @@ struct bbdd_util_ssk_bfddp_tkn {
 };
 
 struct bbdd_util_ssk_bfddp_tkn *
-bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+bbdd_util_ssk_bfddp_tkn_create(size_t stream_maxbuf,
+			       int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
 					     const struct bfddp_message *msg,
 					     void *data, char **error),
 			       void *data, char **error)
@@ -537,6 +564,7 @@ bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn
 	*tkn = (struct bbdd_util_ssk_bfddp_tkn) {
 		.obj_cb = obj_cb,
 		.data = data,
+		.sb.maxsize = stream_maxbuf,
 	};
 
 	return tkn;

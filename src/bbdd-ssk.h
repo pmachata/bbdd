@@ -22,7 +22,7 @@ struct bbdd_ssk_cbs {
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   const struct bbdd_sockaddr *bsa,
 				   struct bbdd_mon *mon,
-				   uint32_t tx_cap,
+				   uint32_t stream_maxbuf,
 				   char **error);
 void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd);
 int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_ssk_cbs cbs,

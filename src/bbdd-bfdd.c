@@ -174,7 +174,8 @@ struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
 		goto free_bfdd_c;
 	peer = bbdd_ssk_c_peer(ssc);
 
-	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_bfdd_dispatch_message,
+	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_env.stream_maxbuf,
+					     bbdd_bfdd_dispatch_message,
 					     &bfdd_c->base, error);
 	if (tkn == NULL)
 		goto close_ssc;
@@ -241,7 +242,8 @@ struct bbdd_bfdd_d *bbdd_bfdd_attach_d(struct bbdd_ssk_peer *peer,
 		return NULL;
 	}
 
-	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_bfdd_dispatch_message,
+	tkn = bbdd_util_ssk_bfddp_tkn_create(bbdd_env.stream_maxbuf,
+					     bbdd_bfdd_dispatch_message,
 					     &bfdd_d->base, error);
 	if (tkn == NULL)
 		goto free_bfdd_d;
