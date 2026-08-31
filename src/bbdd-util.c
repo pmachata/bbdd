@@ -510,7 +510,6 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 }
 
 struct bbdd_util_ssk_bfddp_tkn {
-	//uint8_t buf[sizeof(struct bfddp_message)];
 	struct bbdd_sb sb;
 	size_t len;
 
