@@ -520,7 +520,8 @@ struct bbdd_util_ssk_bfddp_tkn {
 };
 
 struct bbdd_util_ssk_bfddp_tkn *
-bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+bbdd_util_ssk_bfddp_tkn_create(size_t stream_maxbuf,
+			       int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
 					     const struct bfddp_message *msg,
 					     void *data, char **error),
 			       void *data, char **error)
@@ -536,6 +537,7 @@ bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn
 	*tkn = (struct bbdd_util_ssk_bfddp_tkn) {
 		.obj_cb = obj_cb,
 		.data = data,
+		.sb.maxsize = stream_maxbuf,
 	};
 
 	return tkn;

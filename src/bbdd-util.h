@@ -107,7 +107,8 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 struct bfddp_message;
 
 struct bbdd_util_ssk_bfddp_tkn *
-bbdd_util_ssk_bfddp_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
+bbdd_util_ssk_bfddp_tkn_create(size_t stream_maxbuf,
+			       int (*obj_cb)(struct bbdd_util_ssk_bfddp_tkn *tkn,
 					     const struct bfddp_message *msg,
 					     void *data, char **error),
 			       void *data, char **error);

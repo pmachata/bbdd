@@ -226,6 +226,9 @@ bbdd_ssk_peer_create_no_cb(struct bbdd_ssk_b *ssb, int fd, char **error)
 		.ssb = ssb,
 		.fd = fd,
 		.tok = tok,
+		.tx_sb = {
+			.maxsize = ssb->stream_maxbuf,
+		},
 		.cbs = NULL,
 		.debug = true,
 	};
@@ -477,14 +480,7 @@ int bbdd_ssk_peer_nq(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     char **error)
 {
 	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
-	uint32_t tx_cap = peer->ssb->stream_maxbuf;
 	int rc;
-
-	if (tx_cap != 0 && bbdd_sb_len(&peer->tx_sb) + len > tx_cap) {
-		bbdd_err_fmt(error, "peer tx queue cap of %" PRIu32 " bytes exceeded",
-			     tx_cap);
-		return -1;
-	}
 
 	/* Do this first so that we don't have to later unpush the buffer.
 	 * A useless POLLOUT is just a nop. */
