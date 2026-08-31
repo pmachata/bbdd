@@ -96,3 +96,41 @@ Frr_session_test_up()
 
 	Bbdd_log_test "FRR bfdd session with $peer up"
 }
+
+Frr_fake_dplane()
+{
+	local dst_socket=$1; shift
+	local pl=$1; shift
+	local n=0
+	local sock="${!dst_socket}/bfdd_dplane.sock"
+
+	echo -ne "$pl" |
+		socat -T 1 UNIX-LISTEN:"$sock" - > /dev/null 2>&1 &
+	FRR_SOCAT_PID=$!
+
+	slowwait 2 [ -S "$sock" ]
+}
+
+Frr_reap_fake_dplane()
+{
+	local pid=$1; shift
+
+	wait "$pid" 2>/dev/null
+}
+
+adf_Frr_fake_dplane()
+{
+	local dst_socket=$1; shift
+	local pl=$1; shift
+	local FRR_SOCAT_PID
+
+	Frr_fake_dplane "$dst_socket" "$pl"
+	defer Frr_reap_fake_dplane "$FRR_SOCAT_PID"
+
+	Bbdd_bfdd_connect "$dst_socket"
+	check_err $? "Failed to connect to fake dataplane"
+
+	# Give bbdd a moment to read and (if the bug is present) choke on the
+	# length=0 message.
+	sleep 0.2
+}

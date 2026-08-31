@@ -13,53 +13,11 @@ adf_Bbdd_start -q
 
 ctl="${!BBDD_SOCKET}/bbdd.ctl"
 sock="${FD1}/bfdd_dplane.sock"
-socat_pid=
-
-# Spin up a socat listener that, on the next connect, writes a BFDDP
-# message header with version=1, zero=0, type=ECHO_REQUEST (0), id=0,
-# length=0 to the peer.
-fake_dplane()
-{
-	local pl=$1; shift
-	local n=0
-
-	rm -f "$sock"
-	echo -ne "$pl" |
-		socat -T 1 UNIX-LISTEN:"$sock" - > /dev/null 2>&1 &
-	socat_pid=$!
-
-	while [[ ! -S "$sock" ]]; do
-		sleep 0.02
-		((++n < 100)) || {
-			echo "socat failed to bind $sock"
-			return 1
-		}
-	done
-}
-
-reap_fake_dplane()
-{
-	wait "$socat_pid" 2>/dev/null
-}
-
-adf_setup_fake_dplane()
-{
-	local pl=$1; shift
-
-	fake_dplane "$pl"
-	defer reap_fake_dplane
-
-	Bbdd_bfdd_connect FD1
-	check_err $? "Failed to connect to fake dataplane"
-
-	# Give bbdd a moment to read and (if the bug is present) choke on the
-	# length=0 message.
-	sleep 0.2
-}
 
 test_length_0()
 {
-	adf_setup_fake_dplane '\x01\x00\x00\x00\x00\x00\x00\x00'
+	# version=1, type=ECHO_REQUEST (0), id=0, length=0
+	adf_Frr_fake_dplane FD1 '\x01\x00\x00\x00\x00\x00\x00\x00'
 
 	# The control socket is served by the same poll loop as the dataplane
 	# peer, so if the peer's parser is stuck spinning, this query never gets
@@ -84,7 +42,7 @@ test_length_short()
 	with_socket SD1 Bbdd_bground monitor > "$monout"
 	monitor_pid=$!
 
-	adf_setup_fake_dplane '\x01\x00\x00\x03\x00\x00\x00\x08'
+	adf_Frr_fake_dplane FD1 '\x01\x00\x00\x03\x00\x00\x00\x08'
 
 	kill_process "$monitor_pid"
 	OUT=$(cat "$monout")
