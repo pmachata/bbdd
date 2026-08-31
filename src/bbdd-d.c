@@ -2527,7 +2527,8 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 	struct bbdd_ssk_cbs cbs;
 	int rc;
 
-	tkn = bbdd_util_ssk_json_tkn_create(recv_obj_cb, recv_obj_data, error);
+	tkn = bbdd_util_ssk_json_tkn_create(bbdd_env.stream_maxbuf,
+					    recv_obj_cb, recv_obj_data, error);
 	if (tkn == NULL)
 		return -1;
 

@@ -87,3 +87,45 @@ test_bfdd_rx()
 }
 
 in_defer_scope test_bfdd_rx
+
+test_json_rx()
+{
+	# A normal JSON-RPC request/response closes the connection after one
+	# message. monitor-subscribe keeps the connection open. Use it to get
+	# two small, well-formed top-level JSON values parsed back-to-back on
+	# one persistent connection -- nowhere near --stream-maxbuf on their own
+	# -- and check both get a reply.
+	OUT=$(Python3 - "$ctl" <<'PYEOF'
+import socket
+import sys
+
+sub = (b'{"jsonrpc":"2.0","id":1,"method":"monitor-subscribe",'
+       b'"params":{"topics":["session"]}}')
+echo = b'{"jsonrpc":"2.0","id":2,"method":"echo","params":{"ts":0}}'
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(2)
+s.connect(sys.argv[1])
+
+for i, req in enumerate((sub, echo)):
+	s.sendall(req)
+	try:
+		data = s.recv(4096)
+	except socket.timeout:
+		data = b''
+	print(f"round {i + 1}: {len(data)} bytes")
+PYEOF
+	)
+
+	find_match "$OUT" "round 1: [1-9][0-9]* bytes"
+	Bbdd_log_test "1st request on a connection gets reply"
+
+	find_match "$OUT" "round 2: [1-9][0-9]* bytes"
+	Bbdd_log_test "2nd request on the same connection gets a reply"
+
+	Bbdd -q echo
+	check_err $? "daemon unresponsive after a persistent JSON-RPC connection"
+	Bbdd_log_test "daemon survives a persistent JSON-RPC connection"
+}
+
+in_defer_scope test_json_rx

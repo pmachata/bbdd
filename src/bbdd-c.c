@@ -244,7 +244,7 @@ bbdd_c_interact(struct json_object *request,
 	if (rc != 0)
 		goto poll_fini;
 
-	tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_ctl_recv_obj, &c, &error);
+	tkn = bbdd_util_ssk_json_tkn_create(0, bbdd_c_ctl_recv_obj, &c, &error);
 	if (tkn == NULL) {
 		rc = -1;
 		goto poll_fini;
@@ -3163,7 +3163,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	if (rc != 0)
 		goto poll_fini;
 
-	mctx.tkn = bbdd_util_ssk_json_tkn_create(bbdd_c_monitor_handshake_cb,
+	mctx.tkn = bbdd_util_ssk_json_tkn_create(0, bbdd_c_monitor_handshake_cb,
 						 &mctx, &error);
 	if (mctx.tkn == NULL) {
 		rc = -1;
