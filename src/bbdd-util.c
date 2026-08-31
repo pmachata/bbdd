@@ -352,6 +352,22 @@ bool bbdd_util_startswith(const char *haystack, const char *needle,
 	return true;
 }
 
+struct bbdd_util_ssk_json_tkn {
+	struct bbdd_ssk_peer *peer;
+	struct json_tokener *tok;
+
+	int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+		      struct json_object *obj, void *data, char **error);
+
+	/* Optional. Invoked when the tokenizer hits a parse error. Return 0 to
+	 * skip the offending byte and keep parsing; non-zero to propagate the
+	 * error and tear the peer down. err_cb of NULL is treated as if a
+	 * callback returned a non-zero rc. */
+	int (*err_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+		      void *data, char **error);
+	void *data;
+};
+
 static int bbdd_util_jrpc_tokenize(struct json_tokener *tok,
 				   const char **str, size_t *left,
 				   struct json_object **ret_obj, char **error)
@@ -409,9 +425,9 @@ bbdd_util_ssk_json_tkn_create(int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
 
 	*tkn = (struct bbdd_util_ssk_json_tkn) {
 		.tok = tok,
-		.obj_cb = obj_cb,
-		.data = data,
 	};
+
+	bbdd_util_ssk_json_tkn_set_cbs(tkn, obj_cb, NULL, data);
 
 	return tkn;
 
@@ -420,10 +436,30 @@ free_tkn:
 	return NULL;
 }
 
+void
+bbdd_util_ssk_json_tkn_set_cbs(struct bbdd_util_ssk_json_tkn *tkn,
+			       int (*obj_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+					     struct json_object *obj,
+					     void *data, char **error),
+			       int (*err_cb)(struct bbdd_util_ssk_json_tkn *tkn,
+					     void *data, char **error),
+			       void *data)
+{
+	tkn->obj_cb = obj_cb;
+	tkn->err_cb = err_cb;
+	tkn->data = data;
+}
+
 void bbdd_util_ssk_json_tkn_destroy(struct bbdd_util_ssk_json_tkn *tkn)
 {
 	json_tokener_free(tkn->tok);
 	free(tkn);
+}
+
+struct bbdd_ssk_peer *
+bbdd_util_ssk_json_tkn_peer(struct bbdd_util_ssk_json_tkn *tkn)
+{
+	return tkn->peer;
 }
 
 int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,

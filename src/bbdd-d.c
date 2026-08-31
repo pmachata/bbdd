@@ -2505,8 +2505,8 @@ static int bbdd_d_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
 {
 	struct bbdd_d *d = data;
 
-	bbdd_util_ssk_recv_obj(request_obj, tkn->peer, d->mon,
-			       bbdd_d_handle_method, d);
+	bbdd_util_ssk_recv_obj(request_obj, bbdd_util_ssk_json_tkn_peer(tkn),
+			       d->mon, bbdd_d_handle_method, d);
 	return 0;
 }
 
