@@ -70,4 +70,4 @@ check_err $? "Failed to ask daemon to stop"
 wait "$bbdd_pid"
 
 find_no_match "$(cat "$errlog")" "$marker"
-Bbdd_log_test "forged netlink extack does not leak into daemon output"
+Bbdd_log_test "forged netlink extack"

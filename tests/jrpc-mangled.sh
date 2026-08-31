@@ -112,7 +112,7 @@ Bbdd_log_test "superfluous session-del 'change': Invalid Params"
 
 out=$(send_raw '{"jsonrpc":"2.0","id":3,"method":"session-set","params":{}}')
 expect_error_msg "Required member" "$err_inv_params" "$out"
-Bbdd_log_test "missing session-set 'change'&'select': Invalid Params"
+Bbdd_log_test "missing session-set both args: Invalid Params"
 
 out=$(send_raw '{"jsonrpc":"2.0","id":3,"method":"session-set","params":{"select":{}}}')
 expect_error_msg "Required member change" "$err_inv_params" "$out"

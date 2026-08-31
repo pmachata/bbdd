@@ -46,4 +46,4 @@ wait "$client_pid" # Let the client's connection close.
 
 Bbdd -q echo
 check_err $? "daemon unresponsive after monitor client exceeded its tx-queue cap"
-Bbdd_log_test "daemon survives a monitor client exceeding its tx-queue cap"
+Bbdd_log_test "monitor client exceeding stream-maxbuf"

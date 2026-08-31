@@ -28,4 +28,4 @@ kill_process "$monitor_pid"
 n=$(wc -l < "$monout")
 ((n < 50))
 check_err $? "$n debug notifications for one request, < 50 expected"
-Bbdd_log_test "debug monitor doesn't feed back on its own notifications"
+Bbdd_log_test "debug monitor does not loop endlessly"

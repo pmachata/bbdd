@@ -50,4 +50,4 @@ done
 
 with_socket SD1 Bbdd -q echo
 check_err $? "daemon unresponsive after send failures to vanished clients"
-Bbdd_log_test "daemon survives clients vanishing right after their request"
+Bbdd_log_test "client vanishes right after their request"
