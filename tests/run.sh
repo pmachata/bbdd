@@ -40,6 +40,13 @@ source ${tests_dir}/lib.sh
 
 printf -v divider '%*s' 74 ''
 
+# Per-test log_test output, captured as it's produced so it can be replayed
+# as a summary at the end. Reused across iterations (each log_test call
+# truncates it); accumulated into $summary as we go.
+line=$(mktemp)
+summary=$(mktemp)
+trap 'rm -f "$line" "$summary"' EXIT
+
 for t in $TESTS; do
 	echo
 	echo "$t"
@@ -49,11 +56,22 @@ for t in $TESTS; do
 	check_err $? "$t"
 
 	echo "${divider// /-}"
-	log_test "$t"
+
+	# log_test is not piped into tee here: piping would run it in a
+	# subshell, and its EXIT_STATUS update would be lost to the parent
+	# shell. Redirect to a file instead, then replay it both to stdout
+	# and into the cumulative summary.
+	log_test "$t" > "$line"
+	cat "$line"
+	cat "$line" >> "$summary"
 done
 
 echo
+echo "Summary"
 echo "${divider// /=}"
+cat "$summary"
+echo "${divider// /=}"
+
 RET=$EXIT_STATUS
 log_test "bbdd tests"
 exit "$EXIT_STATUS"
