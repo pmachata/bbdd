@@ -1748,12 +1748,13 @@ bbdd_bpf_rb_handle_timeout(struct bbdd_bpf *bpf,
 	struct bbdd_d_session *dsess;
 
 	dsess = cbs->find_session(local_discr, cbs->data);
-	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
-	if (dsess == NULL || bsess == NULL) {
-		/* As when processing unexpected packets, this can probably
-		 * come up due to a race. */
+	if (dsess == NULL)
+		/* As when processing unexpected packets, this can probably come
+		 * up due to a race. */
 		return;
-	}
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, local_discr);
+	assert(bsess != NULL);
 
 	switch (bsess->bstate) {
 	case BBDD_BPF_SESSION_STATE_ON_HOLD:
