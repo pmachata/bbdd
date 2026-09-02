@@ -1502,13 +1502,14 @@ bbdd_bpf_handle_packet(struct bbdd_bpf *bpf,
 	/* Errors here are problematic, but not worth killing the daemon
 	 * over. Just eat them. */
 
-	bsess = bbdd_bpf_sdir_get_session(bpf, dsess->local.discr);
-	if (dsess == NULL || bsess == NULL) {
+	if (dsess == NULL)
 		/* I think this can come up when BPF found a session and emit an
 		 * event, but before we got to process it, the session gets
 		 * deleted. So don't even print anything. */
 		return;
-	}
+
+	bsess = bbdd_bpf_sdir_get_session(bpf, dsess->local.discr);
+	assert(bsess != NULL);
 
 	switch (bsess->bstate) {
 	case BBDD_BPF_SESSION_STATE_ON_HOLD:
