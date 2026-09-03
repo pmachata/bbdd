@@ -45,6 +45,7 @@ struct bbdd_ssk_peer {
 
 	bool done;
 	bool debug;
+	bool eof;
 };
 
 int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd)
@@ -78,8 +79,10 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 			bbdd_err_fmt(error, "recv: %m");
 			return rc;
 		}
-		if (rc == 0)
+		if (rc == 0) {
+			peer->eof = true;
 			break;
+		}
 
 		len = (size_t) rc;
 		if (peer->debug)
@@ -128,7 +131,7 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 			       void *arg, char **)
 {
 	struct bbdd_ssk_peer *peer = arg;
-	short events = POLLIN | POLLHUP;
+	short events = POLLHUP;
 	char *error;
 	int rc;
 
@@ -139,6 +142,8 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 			goto destroy;
 		}
 	}
+	if (!peer->eof)
+		events |= POLLIN;
 
 	if (revents & POLLHUP)
 		goto destroy;
