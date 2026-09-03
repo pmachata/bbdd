@@ -42,12 +42,19 @@ s.close()
 PYEOF
 }
 
-# A single shot could in principle race the daemon's own scheduling;
-# repeat a few times so the test isn't sensitive to that.
-for i in $(seq 1 10); do
-	send_and_vanish
-done
+test_vanish()
+{
+	local i
 
-with_socket SD1 Bbdd -q echo
-check_err $? "daemon unresponsive after send failures to vanished clients"
-Bbdd_log_test "client vanishes right after their request"
+	# A single shot could in principle race the daemon's own scheduling;
+	# repeat a few times so the test isn't sensitive to that.
+	for i in $(seq 1 10); do
+		send_and_vanish
+	done
+
+	with_socket SD1 Bbdd -q echo
+	check_err $? "daemon unresponsive after send failures to vanished clients"
+	Bbdd_log_test "client vanishes right after their request"
+}
+
+in_defer_scope test_vanish
