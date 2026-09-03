@@ -81,6 +81,10 @@ static int bbdd_ssk_peer_rx(struct bbdd_ssk_peer *peer,
 		}
 		if (rc == 0) {
 			peer->eof = true;
+			DL_FOREACH_SAFE(peer->cbs, cbs, tmp) {
+				if (cbs->eof_cb != NULL)
+					cbs->eof_cb(peer, cbs->data);
+			}
 			break;
 		}
 
@@ -182,6 +186,7 @@ bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
 		      int (*rx_cb)(struct bbdd_ssk_peer *peer, const char *buf,
 				   size_t len, void *data, char **error),
 		      void (*done_cb)(struct bbdd_ssk_peer *peer, void *data),
+		      void (*eof_cb)(struct bbdd_ssk_peer *peer, void *data),
 		      void *data, char **error)
 {
 	struct bbdd_ssk_cbs *cbs;
@@ -195,6 +200,7 @@ bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
 	*cbs = (struct bbdd_ssk_cbs) {
 		.rx_cb = rx_cb,
 		.done_cb = done_cb,
+		.eof_cb = eof_cb,
 		.data = data,
 	};
 	DL_APPEND(peer->cbs, cbs);
@@ -305,8 +311,8 @@ bbdd_ssk_peer_create(struct bbdd_ssk_b *ssb, int fd,
 		return NULL;
 
 	cbs = bbdd_ssk_peer_add_cbs(peer, cbs_template.rx_cb,
-				    cbs_template.done_cb, cbs_template.data,
-				    error);
+				    cbs_template.done_cb, cbs_template.eof_cb,
+				    cbs_template.data, error);
 	if (cbs == NULL)
 		goto destroy_peer;
 

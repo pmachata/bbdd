@@ -130,8 +130,8 @@ int bbdd_mon_subscribe_sock(struct bbdd_mon *mon,
 		return -1;
 	}
 
-	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL, bbdd_mon_ssk_cli_done, cli,
-					error);
+	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL, bbdd_mon_ssk_cli_done, NULL,
+					cli, error);
 	if (ssk_cbs == NULL)
 		goto free_cli;
 

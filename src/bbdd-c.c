@@ -259,7 +259,7 @@ bbdd_c_interact(struct json_object *request,
 	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(c.ctl),
 				    bbdd_util_ssk_json_tkn_rx_cb,
 				    NULL,
-				    tkn, &error);
+				    NULL, tkn, &error);
 	if (cbs == NULL) {
 		rc = -1;
 		goto ssk_close_ctl;
@@ -268,7 +268,7 @@ bbdd_c_interact(struct json_object *request,
 	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(c.ctl),
 				    NULL,
 				    bbdd_c_ssk_json_tkn_done_cb,
-				    &c, &error);
+				    NULL, &c, &error);
 	if (cbs == NULL) {
 		rc = -1;
 		goto ssk_close_ctl;
@@ -3179,7 +3179,7 @@ bbdd_c_monitor_jrpc(const struct bbdd_mon_topics *int_topics,
 	cbs = bbdd_ssk_peer_add_cbs(bbdd_ssk_c_peer(mctx.ctl),
 				    bbdd_c_ssk_monitor_jrpc_rx_cb,
 				    bbdd_c_ssk_monitor_jrpc_done_cb,
-				    &mctx, &error);
+				    NULL, &mctx, &error);
 	if (cbs == NULL) {
 		rc = -1;
 		goto ssk_close_ctl;

@@ -2535,6 +2535,7 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 	cbs = (struct bbdd_ssk_cbs) {
 		.rx_cb = bbdd_util_ssk_json_tkn_rx_cb,
 		.done_cb = bbdd_d_ctl_accept_peer_done_cb,
+		.eof_cb = bbdd_util_ssk_json_tkn_eof_cb,
 		.data = tkn,
 	};
 

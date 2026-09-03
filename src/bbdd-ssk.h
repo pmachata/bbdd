@@ -13,6 +13,8 @@ struct bbdd_ssk_cbs {
 	int (*rx_cb)(struct bbdd_ssk_peer *peer, const char *buf, size_t len,
 		     void *data, char **error);
 	void (*done_cb)(struct bbdd_ssk_peer *peer, void *data);
+	/* Optional. Called when peer hits EOF. */
+	void (*eof_cb)(struct bbdd_ssk_peer *peer, void *data);
 	void *data;
 
 	struct bbdd_ssk_cbs *next;
@@ -55,6 +57,7 @@ bbdd_ssk_peer_add_cbs(struct bbdd_ssk_peer *peer,
 		      int (*rx_cb)(struct bbdd_ssk_peer *peer, const char *buf,
 				   size_t len, void *data, char **error),
 		      void (*done_cb)(struct bbdd_ssk_peer *peer, void *data),
+		      void (*eof_cb)(struct bbdd_ssk_peer *peer, void *data),
 		      void *data, char **error);
 
 void bbdd_ssk_peer_del_cbs(struct bbdd_ssk_peer *peer,

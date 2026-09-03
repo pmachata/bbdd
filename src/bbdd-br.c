@@ -88,7 +88,7 @@ static struct bbdd_br_stats *bbdd_br_stats_alloc(struct bbdd_br *br,
 
 	stats->ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
 					       bbdd_br_stats_peer_done_cb,
-					       stats, error);
+					       NULL, stats, error);
 	if (stats->ssk_cbs == NULL) {
 		json_object_put(stats->id);
 		free(stats);

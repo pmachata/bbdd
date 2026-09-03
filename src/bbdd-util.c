@@ -542,6 +542,23 @@ int bbdd_util_ssk_json_tkn_rx_cb(struct bbdd_ssk_peer *peer,
 	return 0;
 }
 
+void bbdd_util_ssk_json_tkn_eof_cb(struct bbdd_ssk_peer *peer, void *data)
+{
+	struct bbdd_util_ssk_json_tkn *tkn = data;
+	struct json_object *obj;
+
+	/* Either we're cleanly between messages, or nothing was ever sent.
+	 * Nothing to report. */
+	if (tkn->buffered == 0)
+		return;
+
+	/* The peer's write side is closed for good, so whatever is buffered
+	 * here will never complete. Respond as if it never will, rather than
+	 * silently dropping it. */
+	obj = bbdd_jrpc_new_error_inv_request("Unexpected end of stream");
+	bbdd_util_jrpc_respond(peer, &obj);
+}
+
 struct bbdd_util_ssk_bfddp_tkn {
 	struct bbdd_sb sb;
 	size_t len;

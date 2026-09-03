@@ -183,14 +183,14 @@ struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
 	ssk_cbs = bbdd_ssk_peer_add_cbs(peer,
 					bbdd_util_ssk_bfddp_tkn_rx_cb,
 					bbdd_bfdd_bfddp_tkn_destroy,
-					tkn, error);
+					NULL, tkn, error);
 	if (ssk_cbs == NULL)
 		goto close_ssc;
 
 	peer_cbs = bbdd_ssk_peer_add_cbs(peer,
 					 NULL,
 					 bbdd_bfdd_peer_done_cb,
-					 &bfdd_c->base, error);
+					 NULL, &bfdd_c->base, error);
 	if (peer_cbs == NULL)
 		goto destroy_tkn;
 
@@ -251,14 +251,14 @@ struct bbdd_bfdd_d *bbdd_bfdd_attach_d(struct bbdd_ssk_peer *peer,
 	ssk_cbs = bbdd_ssk_peer_add_cbs(peer,
 					bbdd_util_ssk_bfddp_tkn_rx_cb,
 					bbdd_bfdd_bfddp_tkn_destroy,
-					tkn, error);
+					NULL, tkn, error);
 	if (ssk_cbs == NULL)
 		goto destroy_tkn;
 
 	peer_cbs = bbdd_ssk_peer_add_cbs(peer,
 					 NULL,
 					 bbdd_bfdd_d_peer_done_cb,
-					 &bfdd_d->base, error);
+					 NULL, &bfdd_d->base, error);
 	if (peer_cbs == NULL)
 		goto destroy_tkn;
 
@@ -346,7 +346,7 @@ bbdd_bfdd_echo_peer_init(struct bbdd_bfdd_b *bfdd_b, struct bbdd_ssk_peer *peer,
 
 	ssk_cbs = bbdd_ssk_peer_add_cbs(peer, NULL,
 					bbdd_bfdd_echo_peer_done,
-					epeer, error);
+					NULL, epeer, error);
 	if (ssk_cbs == NULL)
 		goto epeer_free;
 
