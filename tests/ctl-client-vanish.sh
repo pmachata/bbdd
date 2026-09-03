@@ -58,3 +58,28 @@ test_vanish()
 }
 
 in_defer_scope test_vanish
+
+test_shut_wr()
+{
+	Python3 - "$ctl" <<'EOF'
+import socket
+import sys
+import time
+import select
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.setblocking(0)
+s.sendall(b'{"jsonrpc":"2.0","id":1,')
+s.shutdown(socket.SHUT_WR)
+ready = select.select([s], [], [], 2)
+if ready[0]:
+    sys.exit(0)
+else:
+    sys.exit(1)
+EOF
+	check_err $? "mock client timed out"
+	Bbdd_log_test "socket.shutdown(SHUT_WR)"
+}
+
+in_defer_scope test_shut_wr
