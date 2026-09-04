@@ -263,15 +263,19 @@ void bbdd_ssk_peer_destroy(struct bbdd_ssk_peer *peer)
 {
 	struct bbdd_poll_ctx *pctx = bbdd_ssk_peer_pctx(peer);
 	struct bbdd_ssk_cbs *cbs, *tmp;
+	unsigned attempts = 0;
 	int rc;
 
-	// xxx I suspect the flushing can't work properly on a non-blocking
-	// socket.
 	/* Flush what we can. */
 	while (bbdd_sb_len(&peer->tx_sb) > 0) {
 		rc = bbdd_ssk_peer_tx(peer, NULL);
 		if (rc != 0)
 			break;
+		if (++attempts > 100) {
+			bbdd_mon_send_debug(peer->ssb->mon, "fd %d: giving up attempting to flush",
+					    peer->fd);
+			break;
+		}
 	}
 
 	DL_DELETE(peer->ssb->peers, peer);

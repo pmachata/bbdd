@@ -7,7 +7,7 @@ in_ns NS1
 
 Bbdd_setup_socket SD1
 with_socket SD1
-adf_Bbdd_start
+adf_Bbdd_start -q
 
 ctl="${!BBDD_SOCKET}/bbdd.ctl"
 
@@ -51,7 +51,6 @@ test_shut_wr()
 	Python3 - "$ctl" <<-'EOF'
 		import socket
 		import sys
-		import time
 		import select
 
 		s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -70,3 +69,38 @@ test_shut_wr()
 }
 
 in_defer_scope test_shut_wr
+
+test_fail_flush()
+{
+	local pid
+	local out
+
+	Python3 - "$ctl" <<-'PYEOF' &
+		import socket
+		import sys
+		import time
+
+		id = b'a' * 300_000
+		req = b'{"jsonrpc":"2.0","id":"' + id + \
+		      b'","method":"monitor-subscribe", ' + \
+		      b'"params":{"topics":["error"]}}x'
+
+		s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		s.connect(sys.argv[1])
+		s.sendall(req)
+		time.sleep(3)
+	PYEOF
+
+	pid=$!
+
+	sleep 1
+
+	out=$(with_socket SD1 Bbdd --json echo | jq -e '.reply_ts - .ts')
+	((out < 100000)) # 0.1s
+	check_err $? "fail_flush: daemon unresponsive"
+	wait "$pid"
+
+	Bbdd_log_test "client forces flush and never reads"
+}
+
+in_defer_scope test_fail_flush
