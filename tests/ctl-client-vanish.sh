@@ -2,22 +2,6 @@
 root_require
 require_command python3
 
-# A control-socket client that sends a request and then vanishes before
-# reading the reply: bbdd_ssk_peer_nq() only buffers the response, the
-# actual send() happens on the daemon's *next* poll() iteration, and by
-# then the client is long gone. That makes POLLHUP show up alongside
-# POLLOUT, and bbdd_ssk_peer_event() checks POLLHUP first, routing
-# straight to bbdd_ssk_peer_destroy() instead of ever reaching the
-# POLLOUT branch. bbdd_ssk_peer_destroy() then does its own best-effort
-# flush with the error pointer set to NULL, so the resulting send()
-# failure is deliberately silent -- there is nothing to observe beyond
-# the daemon not crashing.
-#
-# No debug hook needed: a raw client that connects, sends a well-formed
-# request and closes immediately reproduces the same race (if anything
-# more reliably, since there's no event loop indirection on the
-# client's side to add latency before the close()).
-
 Bbdd_setup_ns NS1
 in_ns NS1
 
@@ -29,17 +13,20 @@ ctl="${!BBDD_SOCKET}/bbdd.ctl"
 
 send_and_vanish()
 {
-	Python3 - "$ctl" <<'PYEOF'
-import socket
-import sys
+	# A control-socket client that sends a request and then vanishes before
+	# reading the reply.
 
-req = b'{"jsonrpc":"2.0","id":1,"method":"echo","params":{"ts":0}}'
+	Python3 - "$ctl" <<-'PYEOF'
+		import socket
+		import sys
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(sys.argv[1])
-s.sendall(req)
-s.close()
-PYEOF
+		req = b'{"jsonrpc":"2.0","id":1,"method":"echo","params":{"ts":0}}'
+
+		s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		s.connect(sys.argv[1])
+		s.sendall(req)
+		s.close()
+	PYEOF
 }
 
 test_vanish()
@@ -61,23 +48,23 @@ in_defer_scope test_vanish
 
 test_shut_wr()
 {
-	Python3 - "$ctl" <<'EOF'
-import socket
-import sys
-import time
-import select
+	Python3 - "$ctl" <<-'EOF'
+		import socket
+		import sys
+		import time
+		import select
 
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(sys.argv[1])
-s.setblocking(0)
-s.sendall(b'{"jsonrpc":"2.0","id":1,')
-s.shutdown(socket.SHUT_WR)
-ready = select.select([s], [], [], 2)
-if ready[0]:
-    sys.exit(0)
-else:
-    sys.exit(1)
-EOF
+		s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		s.connect(sys.argv[1])
+		s.setblocking(0)
+		s.sendall(b'{"jsonrpc":"2.0","id":1,')
+		s.shutdown(socket.SHUT_WR)
+		ready = select.select([s], [], [], 2)
+		if ready[0]:
+		    sys.exit(0)
+		else:
+		    sys.exit(1)
+	EOF
 	check_err $? "mock client timed out"
 	Bbdd_log_test "socket.shutdown(SHUT_WR)"
 }
