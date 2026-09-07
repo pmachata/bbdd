@@ -35,8 +35,14 @@ high-frequency path.
 
 ### Dependencies
 
-Before building, make sure the following dependencies are installed on the
-system:
+Before building, make sure all dependencies are installed on the system:
+
+```
+make check-deps
+```
+
+The list of the dependencies follows. For building, the following tools are
+necessary:
 
 - A C compiler, such as `gcc`
 - `clang`, `llvm-strip`
@@ -49,8 +55,13 @@ For building man pages further:
 
 For testing:
 
-- `frr`
+- `iproute2`
 - `socat`
+- `python3`
+
+For testing specifically FRR integration:
+
+- `frr`
 
 For test code coverage reports:
 
@@ -59,6 +70,7 @@ For test code coverage reports:
 ### Build
 
 ```
+make check-deps
 make
 ```
 

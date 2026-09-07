@@ -26,6 +26,14 @@ PANDOC    := pandoc
 GCOVR     := gcovr
 INSTALL   := install
 
+# Dependencies.
+DEPS_BUILD_TOOLS := $(CC) $(CLANG) $(LLVM_STRIP) $(BPFTOOL) $(PANDOC) \
+		     $(INSTALL) sed pkg-config
+DEPS_BUILD_LIBS  := libbpf json-c libmnl
+DEPS_TEST_TOOLS  := socat python3 jq ip tc sysctl ping ping6 valgrind
+DEPS_COV_TOOLS   := $(GCOVR)
+DEPS_TEST_FRR   := /usr/libexec/frr/bfdd /usr/bin/vtysh
+
 # ── Flags ─────────────────────────────────────────────────────────────────────
 
 PKG_CFLAGS := $(shell pkg-config --cflags libbpf json-c libmnl)
@@ -83,7 +91,7 @@ BINARY := $(O)/bbdd
 
 # ── Top-level targets ─────────────────────────────────────────────────────────
 
-.PHONY: all clean install coverage
+.PHONY: all clean install coverage check-deps
 
 all: $(BINARY) $(MAN_PAGES) $(SYSTEMD_SVCS)
 
@@ -142,6 +150,16 @@ $(O)/man/%: $(O)/man/%.md
 
 $(O)/systemd/%.service: $(SYSTEMD_DIR)/%.service.in | $(O)/systemd
 	sed $(SED_SUBST) $< > $@
+
+# ── Dependency check ──────────────────────────────────────────────────────────
+
+check-deps:
+	@env DEPS_BUILD_TOOLS="$(DEPS_BUILD_TOOLS)" \
+	     DEPS_BUILD_LIBS="$(DEPS_BUILD_LIBS)" \
+	     DEPS_TEST_TOOLS="$(DEPS_TEST_TOOLS)" \
+	     DEPS_TEST_FRR="$(DEPS_TEST_FRR)" \
+	     DEPS_COV_TOOLS="$(DEPS_COV_TOOLS)" \
+		tests/run1.sh check-deps.sh
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
