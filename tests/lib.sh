@@ -981,3 +981,11 @@ root_require()
 		exit "$EXIT_STATUS"
 	fi
 }
+
+print_divider()
+{
+	local divider
+
+	printf -v divider '%*s' 74 ''
+	echo "${divider// /$1}"
+}

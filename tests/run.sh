@@ -38,8 +38,6 @@ source ${tests_dir}/lib.sh
 	mon-debug-feedback.sh
 }"
 
-printf -v divider '%*s' 74 ''
-
 # Per-test log_test output, captured as it's produced so it can be replayed
 # as a summary at the end. Reused across iterations (each log_test call
 # truncates it); accumulated into $summary as we go.
@@ -50,12 +48,12 @@ trap 'rm -f "$line" "$summary"' EXIT
 for t in $TESTS; do
 	echo
 	echo "$t"
-	echo "${divider// /-}"
+	print_divider -
 
 	${tests_dir}/run1.sh "${tests_dir}/$t"
 	check_err $? "$t"
 
-	echo "${divider// /-}"
+	print_divider -
 
 	# log_test is not piped into tee here: piping would run it in a
 	# subshell, and its EXIT_STATUS update would be lost to the parent
@@ -68,9 +66,9 @@ done
 
 echo
 echo "Summary"
-echo "${divider// /=}"
+print_divider =
 cat "$summary"
-echo "${divider// /=}"
+print_divider =
 
 RET=$EXIT_STATUS
 log_test "bbdd tests"
