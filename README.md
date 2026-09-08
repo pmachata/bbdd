@@ -47,7 +47,7 @@ necessary:
 - A C compiler, such as `gcc`
 - `clang`, `llvm-strip`
 - `libbpf`, `bpftool`
-- `json-c`, `libmnl`, `uthash`
+- `json-c`, `libmnl`, `uthash`, `libsystemd`
 
 For building man pages further:
 

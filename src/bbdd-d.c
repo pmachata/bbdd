@@ -22,6 +22,7 @@
 #include <json-c/json_object.h>
 #include <json-c/json_util.h>
 #include <linux/if_ether.h>
+#include <systemd/sd-daemon.h>
 
 #include "bbdd.h"
 #include "bbdd-bfdd.h"
@@ -2827,6 +2828,10 @@ static struct bbdd_ec bbdd_d_do_start(const struct bbdd_mon_topics topics)
 	rc = bbdd_poll_set_signals(d.pctx, &error);
 	if (rc != 0)
 		goto sock_close_d;
+
+	rc = sd_notify(0, "READY=1");
+	if (rc < 0)
+		bbdd_mon_send_debug(d.mon, "sd_notify READY=1: %m");
 
 	rc = bbdd_poll_loop(d.pctx, &error);
 

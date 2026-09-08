@@ -26,18 +26,21 @@ PANDOC    := pandoc
 GCOVR     := gcovr
 INSTALL   := install
 
+# pkg-config modules linked into the binary.
+PKG_MODULES := libbpf json-c libmnl libsystemd
+
 # Dependencies.
 DEPS_BUILD_TOOLS := $(CC) $(CLANG) $(LLVM_STRIP) $(BPFTOOL) $(PANDOC) \
 		     $(INSTALL) sed pkg-config
-DEPS_BUILD_LIBS  := libbpf json-c libmnl
+DEPS_BUILD_LIBS  := $(PKG_MODULES)
 DEPS_TEST_TOOLS  := socat python3 jq ip tc sysctl ping ping6 valgrind
 DEPS_COV_TOOLS   := $(GCOVR)
 DEPS_TEST_FRR   := /usr/libexec/frr/bfdd /usr/bin/vtysh
 
 # ── Flags ─────────────────────────────────────────────────────────────────────
 
-PKG_CFLAGS := $(shell pkg-config --cflags libbpf json-c libmnl)
-PKG_LIBS   := $(shell pkg-config --libs   libbpf json-c libmnl)
+PKG_CFLAGS := $(shell pkg-config --cflags $(PKG_MODULES))
+PKG_LIBS   := $(shell pkg-config --libs   $(PKG_MODULES))
 
 WARN_CFLAGS := -Wall -Wextra -Wmissing-declarations
 CFLAGS       = -g -O2 $(WARN_CFLAGS)
