@@ -887,7 +887,7 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	uint32_t detect_time_us;
 	uint32_t interval_us;
 	uint32_t tbid = dsess->vrf_table;
-	uint32_t fib_flags = BPF_FIB_LOOKUP_SRC;
+	uint32_t fib_flags = 0;
 	uint32_t fwd_ifindex;
 	bool should_inject = true;
 	bool admdown;
@@ -971,6 +971,9 @@ static int __bbdd_bpf_session_update(struct bbdd_bpf *bpf,
 	} else {
 		fwd_ifindex = bpf->veth_tx_ifindex;
 	}
+
+	if (dsess->src.sa.sa_family == 0)
+		fib_flags |= BPF_FIB_LOOKUP_SRC;
 
 	bool rearm_timer = !(down || admdown);
 	rc = bbdd_bpf_session_conf_update(bpf, dsess, bsess, fwd_ifindex,
