@@ -25,6 +25,7 @@ source ${tests_dir}/lib.sh
 	ns-delay.sh
 	ns-poll-timing.sh
 	ns-tx-cap.sh
+	ns-tx-src-mismatch.sh
 	err.sh
 	cli.sh
 	jrpc-mangled.sh
