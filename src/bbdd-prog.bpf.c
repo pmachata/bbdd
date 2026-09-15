@@ -485,7 +485,8 @@ out:
 	interval_us = config->max_interval_us - config->min_interval_us;
 	interval_us = ((u64) bpf_get_prandom_u32()) * interval_us / uint32_max;
 	interval_us += config->min_interval_us;
-	skb->tstamp = bpf_ktime_get_ns() + interval_us * NS_PER_US;
+	bpf_skb_set_tstamp(skb, bpf_ktime_get_ns() + interval_us * NS_PER_US,
+			   BPF_SKB_CLOCK_MONOTONIC);
 	return TC_ACT_OK;
 
 tx_not_bfd:
