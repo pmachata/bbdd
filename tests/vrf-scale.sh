@@ -22,11 +22,12 @@ Bbdd_connect_vrf V1 v1 $(Bbdd_IP_mask 1) \
 # session N+i, and each side's remote-discr filter steers incoming packets to
 # the right local session.
 
+echo
 Bbdd_log_info "Adding $N_SESSIONS \"near-end\" sessions"
 
 for ((i = 1; i <= N_SESSIONS; i++)); do
 	Bbdd session add discr $i remote-discr $((N_SESSIONS + i)) vrf V1 \
-			 src $(Bbdd_IP 1) dst $(Bbdd_IP 2) \
+			 src $(Bbdd_IP 1) dst $(Bbdd_IP 2) name "pair$i" \
 			 min-tx 200ms min-rx 200ms detect-mult 3
 done
 
@@ -34,8 +35,38 @@ Bbdd_log_info "Adding $N_SESSIONS \"far-end\" sessions"
 
 for ((i = 1; i <= N_SESSIONS; i++)); do
 	Bbdd session add discr $((N_SESSIONS + i)) remote-discr $i vrf V2 \
-			 src $(Bbdd_IP 2) dst $(Bbdd_IP 1) \
+			 src $(Bbdd_IP 2) dst $(Bbdd_IP 1) name "pair$i" \
 			 min-tx 200ms min-rx 200ms detect-mult 3
 done
 
+echo
 BBDD_SESSION_WAIT_TIME=30 nsessions_state_test up $((2 * N_SESSIONS))
+
+echo
+Bbdd_log_info "Checking name queries"
+echo
+
+nnames=$(Bbdd --json session show | jq '[.sessions[].data.name] | unique | length')
+((nnames == N_SESSIONS))
+check_err $? "$nnames distinct session names reported, $N_SESSIONS expected"
+
+nbad=$(Bbdd --json session show |
+	jq '[.sessions[].data.name] | group_by(.) | map(select(length != 2)) | length')
+((nbad == 0))
+check_err $? "$nbad session name group(s) did not have exactly 2 members"
+
+Bbdd_log_test "Querying by name"
+
+nsessions_test 0 no name
+
+Bbdd session discr 1 set no name
+Bbdd session discr $((N_SESSIONS + 1)) set no name
+
+nsessions_test 2 no name
+
+discrs=$(Bbdd --json session no name show | jq -c '[.sessions[].data.discr] | sort')
+expected=$(jq -nc --argjson b $((N_SESSIONS + 1)) '[1, $b] | sort')
+[ "$discrs" = "$expected" ]
+check_err $? "no-name session discrs were $discrs, expected $expected"
+
+Bbdd_log_test "Unsetting a name"

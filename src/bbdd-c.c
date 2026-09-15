@@ -1017,6 +1017,14 @@ static void bbdd_c_session_show_one(struct bbdd_c_session *csess,
 		printf("remote-discr %u ", csess->remote_discr);
 		seen = true;
 	}
+	if (csess->name.val_seen) {
+		printf("name %s ", csess->name.val);
+		seen = true;
+	} else if (bbdd_env.verbosity > 0) {
+		printf("no name ");
+		seen = true;
+	}
+
 	if (csess->src.unset) {
 		if (bbdd_env.verbosity > 0) {
 			printf("no src ");
@@ -1260,10 +1268,10 @@ static void bbdd_c_session_help(void)
 		"	SET-PARAMS := PARAMS	-- adjusted / new session parameters\n"
 		"	PARAMS ::= PARAM [ PARAMS ]\n"
 		"	PARAM ::= { KEY VALUE | no UNSET-KEY | [ no ] FLAG }\n"
-		"	KEY ::= { discr | remote-discr | src | dst | min-tx | min-rx |\n"
+		"	KEY ::= { discr | remote-discr | name | src | dst | min-tx | min-rx |\n"
 		"	          hold-time | ttl | detect-mult | netif | netif-index |\n"
 		"	          vrf | vrf-index | vrf-table }\n"
-		"	UNSET-KEY ::= { remote-discr | src | netif | vrf }\n"
+		"	UNSET-KEY ::= { remote-discr | name | src | netif | vrf }\n"
 		"	FLAG ::= { multihop | cpi | passive | shutdown }\n"
 		"	no FLAG		-- set the flag to negative value\n"
 		"	no NETIF-KEY	-- unset a given key\n"
@@ -1271,6 +1279,7 @@ static void bbdd_c_session_help(void)
 		"Parameter KEY and VALUE details:\n"
 		"	discr U32 	-- session discriminator\n"
 		"	remote-discr U32 -- default remote discriminator\n"
+		"	name STR	-- a free-form session name\n"
 		"	src ADDR	-- source address\n"
 		"	dst ADDR	-- destination address\n"
 		"	min-tx TIME	-- minimum tx interval (e.g. 100us, 10ms, 1s)\n"
@@ -1506,7 +1515,7 @@ static int bbdd_c_parse_kw_u32(int *up_argc, char ***up_argv, const char *kw,
 			       bbdd_c_parse_u32);
 }
 
-/* Like bbdd_c_parse_kw_u32, but also accepts `no KW' as a synonym for the
+/* Like bbdd_c_parse_kw_u32(), but also accepts `no KW' as a synonym for the
  * value 0. */
 static int bbdd_c_parse_kw_u32_no(int *up_argc, char ***up_argv, const char *kw,
 				  uint32_t *ret, int *ret_seen)
@@ -1554,6 +1563,36 @@ static int bbdd_c_parse_kw_ifname(int *up_argc, char ***up_argv, const char *kw,
 {
 	return bbdd_c_parse_kw(up_argc, up_argv, kw, ret, ret_seen,
 			       bbdd_c_parse_ifname);
+}
+
+static int bbdd_c_session_parse_str(int *up_argc, char ***up_argv,
+				    const char *kw,
+				    struct bbdd_c_session_str *ret_str)
+{
+	struct bbdd_flag flag = {
+		.seen = ret_str->val_seen,
+		.value = false,
+	};
+	int rc;
+
+	rc = bbdd_c_parse_kw_ifname(up_argc, up_argv, kw,
+				    ret_str->val, &ret_str->val_seen);
+	if (rc != 0) {
+		if (rc > 0 && ret_str->unset) {
+			fprintf(stderr, "Duplicate keyword `%s', `no %s' already given.\n",
+				kw, kw);
+			return -1;
+		}
+		return rc;
+	}
+
+	rc = bbdd_c_parse_kw_flag(up_argc, up_argv, kw, &flag);
+	if (rc <= 0)
+		return rc;
+
+	assert(flag.value == false);
+	ret_str->unset = true;
+	return 1;
 }
 
 static int bbdd_c_parse_kw_addr(int *up_argc, char ***up_argv, const char *kw,
@@ -1765,6 +1804,18 @@ obj_put:
 	return -1;
 }
 
+static int bbdd_c_jrpc_append_name(struct json_object *params_obj,
+				   const char *key,
+				   const struct bbdd_c_session_str *str)
+{
+	if ((str->unset &&
+	     json_object_object_add(params_obj, key, NULL)) ||
+	    (str->val_seen &&
+	     bbdd_jrpc_append_str(params_obj, key, str->val)))
+		return -1;
+	return 0;
+}
+
 struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 {
 	struct json_object *params_obj;
@@ -1789,6 +1840,7 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 	    (csess->remote_discr_seen &&
 	     bbdd_jrpc_append_int(params_obj, "remote_discr",
 				  csess->remote_discr)) ||
+	    bbdd_c_jrpc_append_name(params_obj, "name", &csess->name) ||
 	    (csess->min_tx_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "min_tx_us", csess->min_tx_us)) ||
 	    (csess->min_rx_us_seen &&
@@ -1989,6 +2041,8 @@ struct bbdd_ec bbdd_c_session(int argc, char **argv,
 		    (rc = bbdd_c_parse_kw_u32_no(&argc, &argv, "remote-discr",
 						 &csess->remote_discr,
 						 &csess->remote_discr_seen)) ||
+		    (rc = bbdd_c_session_parse_str(&argc, &argv, "name",
+						   &csess->name)) ||
 		    (rc = bbdd_c_parse_kw_time_us(&argc, &argv, "min-tx",
 						  &csess->min_tx_us,
 						  &csess->min_tx_us_seen)) ||

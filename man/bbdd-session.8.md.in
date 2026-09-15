@@ -67,6 +67,14 @@ noted otherwise.
   session within `bbdd`. When not given for a new session, is chosen
   randomly and uniquely.
 
+`name STR`, `no name`
+
+: An optional free-form session name, up to `IFNAMSIZ` (16) characters
+  including the terminating NUL. Sessions have no name by default. `no name`
+  clears the name on an existing session, and as a `QUERY-PARAM` selects
+  sessions that have no name set. Session names do not have to be unique,
+  the session name can e.g. be used for arbitrary grouping of sessions.
+
 `src ADDR`, `no src`
 
 : Source address of BFD control packets. When not configured, the source
@@ -163,6 +171,11 @@ PARAMETER TYPES
 `IFNAME`
 
 : An interface name given as a string, e.g. `eth0`.
+
+`STR`
+
+: A free-form string value, up to `IFNAMSIZ` (16) characters including the
+  terminating NUL.
 
 `ADDR`
 

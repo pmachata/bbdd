@@ -10,6 +10,11 @@
 
 #include "bbdd-mon.i"
 
+struct bbdd_c_session_str {
+	bool unset;
+	char val[IFNAMSIZ];		int val_seen;
+};
+
 struct bbdd_c_session_netif {
 	/* Request to unset interface, or explicit request to match
 	 * non-interfaced sessions. When set, name_seen and ifindex_seen are
@@ -44,6 +49,7 @@ struct bbdd_c_session {
 	struct bbdd_c_session_addr dst;
 	struct bbdd_c_session_netif netif;
 	struct bbdd_c_session_vrf vrf;
+	struct bbdd_c_session_str name;
 };
 
 struct bbdd_ec bbdd_c_stop(int argc, char **argv,

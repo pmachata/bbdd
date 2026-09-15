@@ -309,22 +309,39 @@ static int bbdd_d_session_validate_vrf(struct bbdd_c_session_vrf *sess_vrf,
 	return 0;
 }
 
-static int bbdd_d_jrpc_dissect_netif_name(struct bbdd_c_session_netif *netif,
-					  struct json_object *name,
-					  char **error)
+static int bbdd_d_jrpc_dissect_str(struct bbdd_c_session_str *str,
+				   struct json_object *obj,
+				   char **error)
 {
-	if (name == NULL) {
-		netif->unset = true;
+	if (obj == NULL) {
+		str->unset = true;
 	} else {
 		int rc;
 
-		rc = bbdd_jrpc_strcpy(name, netif->name, sizeof(netif->name),
+		rc = bbdd_jrpc_strcpy(obj, str->val, sizeof(str->val),
 				      error);
 		if (rc < 0)
 			return rc;
 
-		netif->name_seen = 1;
+		str->val_seen = 1;
 	}
+	return 0;
+}
+
+static int bbdd_d_jrpc_dissect_netif_name(struct bbdd_c_session_netif *netif,
+					  struct json_object *name,
+					  char **error)
+{
+	struct bbdd_c_session_str str = {};
+	int rc;
+
+	rc = bbdd_d_jrpc_dissect_str(&str, name, error);
+	if (rc != 0)
+		return rc;
+
+	netif->unset = str.unset;
+	netif->name_seen = str.val_seen;
+	strcpy(netif->name, str.val);
 	return 0;
 }
 
@@ -394,6 +411,7 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 
 		pol_discr,
 		pol_remote_discr,
+		pol_name,
 
 		pol_src,
 		pol_dst,
@@ -417,6 +435,8 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 		[pol_discr] = { .key = "discr", .type = json_type_int },
 		[pol_remote_discr] = { .key = "remote_discr",
 				       .type = json_type_int },
+		[pol_name] = { .key = "name", .type = json_type_string,
+			      .nullable = true },
 
 		[pol_dst] = { .key = "dst", .type = json_type_object },
 		[pol_src] = { .key = "src", .type = json_type_object,
@@ -469,6 +489,10 @@ int bbdd_d_jrpc_dissect_session_one(struct json_object *obj,
 	BBDD_SESS_FLAGS(BBDD_D_SESSION_EXPAND_DISSECT);
 
 #undef BBDD_D_SESSION_EXPAND_DISSECT
+
+	if (seen[pol_name] &&
+	    bbdd_d_jrpc_dissect_str(&sess->name, values[pol_name], error) < 0)
+		goto fail;
 
 	/* Note: Caller needs to validate / recognize protocol change, here we
 	 * just parse things out. */
@@ -694,6 +718,13 @@ static void bbdd_d_session_to_c(struct bbdd_d_session *dsess,
 
 	bbdd_d_session_to_c_addr(&csess->src, &dsess->src);
 	bbdd_d_session_to_c_addr(&csess->dst, &dsess->dst);
+
+	if (dsess->name[0] != '\0') {
+		memcpy(csess->name.val, dsess->name, sizeof(csess->name.val));
+		csess->name.val_seen = 1;
+	} else {
+		csess->name.unset = true;
+	}
 
 	if (dsess->ifindex != 0) {
 		if_indextoname(dsess->ifindex, csess->netif.name);
@@ -1267,6 +1298,11 @@ static void __bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 			dsess->local.flags.flags[i] = cflag.value;
 	}
 
+	if (csess->name.unset)
+		dsess->name[0] = '\0';
+	else if (csess->name.val_seen)
+		memcpy(dsess->name, csess->name.val, sizeof(dsess->name));
+
 	sport = bbdd_ntoh16(dsess->src.sin46.port);
 
 	if (set_src)
@@ -1532,6 +1568,10 @@ static int bbdd_d_session_matches(const struct bbdd_c_session *query,
 
 	if (query->remote_discr_seen &&
 	    dsess->remote.discr != query->remote_discr)
+		return 0;
+
+	if ((query->name.unset && dsess->name[0] != '\0') ||
+	    (query->name.val_seen && strcmp(query->name.val, dsess->name) != 0))
 		return 0;
 
 	return 1;

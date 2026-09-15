@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #pragma once
 
+#include <net/if.h>
+
 #include <json-c/json_object.h>
 
 #include "bbdd.h"
@@ -69,6 +71,9 @@ struct bbdd_d_session {
 	/* Local session configuration. */
 	struct bbdd_sockaddr src;
 	struct bbdd_sockaddr dst;
+
+	/* Empty when not given. */
+	char name[IFNAMSIZ];
 
 	uint32_t hold_time_us;
 	uint8_t ttl;
