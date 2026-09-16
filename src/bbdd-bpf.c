@@ -1816,18 +1816,18 @@ bbdd_bpf_jrpc_addr_obj(uint16_t ethtype, const struct bbdd_bpf_addr *bpf_addr,
 		return NULL;
 
 	return bbdd_util_jrpc_addr_obj(bbdd_sockaddr_ntop(&addr).buf,
-				       addr.sa.sa_family);
+				       addr.sa.sa_family, error);
 }
 
 static struct json_object *
-bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet)
+bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet,
+				 char **error)
 {
 	struct json_object *obj;
 	struct json_object *f;
 	uint8_t bits;
-	int err;
 
-	obj = json_object_new_array();
+	obj = bbdd_jrpc_json_new_array(error);
 	if (obj == NULL)
 		return obj;
 
@@ -1837,14 +1837,12 @@ bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet)
 		if (!(bits & BBDD_BFD_PKT_BIT_ ## NAME))	\
 			break;					\
 								\
-		f = json_object_new_string(#name);		\
+		f = bbdd_jrpc_json_new_string(#name, error);	\
 		if (f == NULL)					\
 			goto err;				\
 								\
-		err = json_object_array_add(obj, f);		\
-		if (err != 0)					\
+		if (bbdd_jrpc_array_append_obj(obj, &f, error))	\
 			goto err;				\
-		f = NULL;					\
 		bits &= ~BBDD_BFD_PKT_BIT_ ## NAME;		\
 	} while (0);
 
@@ -1870,15 +1868,15 @@ bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
 	struct json_object *bitarr;
 	int rc;
 
-	obj = json_object_new_object();
+	obj = bbdd_jrpc_json_new_object(error);
 	if (obj == NULL)
-		goto oom;
+		return NULL;
 
-	bitarr = bbdd_bpf_rb_format_packet_bitarr(packet);
+	bitarr = bbdd_bpf_rb_format_packet_bitarr(packet, error);
 	if (bitarr == NULL)
 		goto put_obj;
 
-	rc = bbdd_jrpc_append_obj(obj, "bits", &bitarr);
+	rc = bbdd_jrpc_append_obj(obj, "bits", &bitarr, error);
 	if (rc != 0)
 		goto put_bitarr;
 
@@ -1886,21 +1884,21 @@ bbdd_bpf_rb_format_bfd_pkt(const struct bbdd_bfd_pkt *packet, char **error)
 	diag = bbdd_bfd_pkt_diag(packet);
 
 	if (bbdd_jrpc_append_int(obj, "version",
-				 bbdd_bfd_pkt_version(packet)) ||
+				 bbdd_bfd_pkt_version(packet), error) ||
 	    bbdd_jrpc_append_str(obj, "state",
-				 bbdd_d_bfd_state_to_str(state)) ||
+				 bbdd_d_bfd_state_to_str(state), error) ||
 	    bbdd_jrpc_append_str(obj, "diag",
-				 bbdd_d_bfd_diag_to_str(diag)) ||
+				 bbdd_d_bfd_diag_to_str(diag), error) ||
 	    bbdd_jrpc_append_int(obj, "detect_mult",
-				 packet->detection_multiplier) ||
+				 packet->detection_multiplier, error) ||
 	    bbdd_jrpc_append_int(obj, "my-disc",
-				 bbdd_ntoh32(packet->my_disc)) ||
+				 bbdd_ntoh32(packet->my_disc), error) ||
 	    bbdd_jrpc_append_int(obj, "your-disc",
-				 bbdd_ntoh32(packet->your_disc)) ||
+				 bbdd_ntoh32(packet->your_disc), error) ||
 	    bbdd_jrpc_append_int(obj, "desired-tx",
-				 bbdd_ntoh32(packet->desired_tx)) ||
+				 bbdd_ntoh32(packet->desired_tx), error) ||
 	    bbdd_jrpc_append_int(obj, "required-rx",
-				 bbdd_ntoh32(packet->required_rx)))
+				 bbdd_ntoh32(packet->required_rx), error))
 		goto put_obj;
 
 	return obj;
@@ -1909,8 +1907,6 @@ put_bitarr:
 	json_object_put(bitarr);
 put_obj:
 	json_object_put(obj);
-oom:
-	bbdd_err_from_errno(error);
 	return NULL;
 }
 
@@ -1925,12 +1921,12 @@ bbdd_bpf_rb_format_tx_no_neigh(const struct bbdd_bpf_rb_elem_tx_no_neigh *elem,
 	if (addr_obj == NULL)
 		return -1;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto put_addr_obj;
 
-	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
-	    bbdd_jrpc_append_obj(params, "addr", &addr_obj))
+	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex, error) ||
+	    bbdd_jrpc_append_obj(params, "addr", &addr_obj, error))
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1943,7 +1939,6 @@ put_params:
 	json_object_put(params);
 put_addr_obj:
 	json_object_put(addr_obj);
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1968,17 +1963,17 @@ bbdd_bpf_rb_format_rx_discr_0(const struct bbdd_bpf_rb_elem_rx_discr_0 *elem,
 	if (pkt_obj == NULL)
 		goto put_dst_obj;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto put_pkt_obj;
 
-	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex) ||
-	    bbdd_jrpc_append_int(params, "wire-len", elem->wire_len) ||
-	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
-	    bbdd_jrpc_append_bool(params, "multihop", elem->multihop) ||
-	    bbdd_jrpc_append_obj(params, "src", &src_obj) ||
-	    bbdd_jrpc_append_obj(params, "dst", &dst_obj) ||
-	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj))
+	if (bbdd_jrpc_append_int(params, "ifindex", elem->ifindex, error) ||
+	    bbdd_jrpc_append_int(params, "wire-len", elem->wire_len, error) ||
+	    bbdd_jrpc_append_int(params, "ttl", elem->ttl, error) ||
+	    bbdd_jrpc_append_bool(params, "multihop", elem->multihop, error) ||
+	    bbdd_jrpc_append_obj(params, "src", &src_obj, error) ||
+	    bbdd_jrpc_append_obj(params, "dst", &dst_obj, error) ||
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj, error))
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1995,7 +1990,6 @@ put_dst_obj:
 	json_object_put(dst_obj);
 put_src_obj:
 	json_object_put(src_obj);
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2010,13 +2004,13 @@ bbdd_bpf_rb_format_rx_unx_pkt(const struct bbdd_bpf_rb_elem_rx_unx_pkt *elem,
 	if (pkt_obj == NULL)
 		return -1;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto put_pkt_obj;
 
-	if (bbdd_jrpc_append_int(params, "wire-len", elem->wire_len) ||
-	    bbdd_jrpc_append_int(params, "ttl", elem->ttl) ||
-	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj))
+	if (bbdd_jrpc_append_int(params, "wire-len", elem->wire_len, error) ||
+	    bbdd_jrpc_append_int(params, "ttl", elem->ttl, error) ||
+	    bbdd_jrpc_append_obj(params, "bfd", &pkt_obj, error))
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -2029,7 +2023,6 @@ put_params:
 	json_object_put(params);
 put_pkt_obj:
 	json_object_put(pkt_obj);
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2039,11 +2032,11 @@ bbdd_bpf_rb_format_rx_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 {
 	struct json_object *params;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	if (bbdd_jrpc_append_int(params, "discr", elem->discr) != 0)
+	if (bbdd_jrpc_append_int(params, "discr", elem->discr, error) != 0)
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -2055,7 +2048,6 @@ bbdd_bpf_rb_format_rx_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2065,11 +2057,11 @@ bbdd_bpf_rb_format_unknown(enum bbdd_bpf_rb_elem_type type,
 {
 	struct json_object *params;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	if (bbdd_jrpc_append_int(params, "type", type) != 0)
+	if (bbdd_jrpc_append_int(params, "type", type, error) != 0)
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -2081,7 +2073,6 @@ bbdd_bpf_rb_format_unknown(enum bbdd_bpf_rb_elem_type type,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2741,20 +2732,11 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 	free(bpf);
 }
 
-static void bbdd_bpf_stat_fmterr(char **error)
-{
-	bbdd_err_fmt(error, "Failed to format stats to JSON: %m");
-}
-
 static int bbdd_bpf_add_stat(struct json_object *obj,
 			     const char *name, uint64_t value,
 			     char **error)
 {
-	int rc;
-	rc = bbdd_jrpc_append_uint64(obj, name, value);
-	if (rc)
-		bbdd_bpf_stat_fmterr(error);
-	return rc;
+	return bbdd_jrpc_append_uint64(obj, name, value, error);
 }
 
 struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
@@ -2765,11 +2747,9 @@ struct json_object *bbdd_bpf_global_diag_stats_json(struct bbdd_bpf *bpf,
 
 	stats = &bpf->skel->bss->bbdd_prog_global_diag_stats;
 
-	obj = json_object_new_object();
-	if (!obj) {
-		bbdd_bpf_stat_fmterr(error);
+	obj = bbdd_jrpc_json_new_object(error);
+	if (!obj)
 		return NULL;
-	}
 
 	/* Snapshot the live queue depths from the tx module. These are
 	 * gauges rather than cumulative counters, so they are not summed
@@ -2831,11 +2811,9 @@ struct json_object *bbdd_bpf_session_diag_stats_json(struct bbdd_bpf *bpf,
 	if (err)
 		return NULL;
 
-	obj = json_object_new_object();
-	if (!obj) {
-		bbdd_bpf_stat_fmterr(error);
+	obj = bbdd_jrpc_json_new_object(error);
+	if (!obj)
 		return NULL;
-	}
 
 #define FIELD(NAME) {							\
 		uint64_t value = data.diag_stats.NAME +			\
@@ -2874,11 +2852,9 @@ struct json_object *bbdd_bpf_session_stats_json(struct bbdd_bpf *bpf,
 	if (err)
 		return NULL;
 
-	obj = json_object_new_object();
-	if (!obj) {
-		bbdd_bpf_stat_fmterr(error);
+	obj = bbdd_jrpc_json_new_object(error);
+	if (!obj)
 		return NULL;
-	}
 
 #define FIELD(NAME) {							\
 		uint64_t value = data.stats.NAME + bsess->stats.NAME;	\
@@ -2909,15 +2885,19 @@ static const char *bbdd_bpf_session_state_str(enum bbdd_bpf_session_state bstate
 }
 
 static struct json_object *
-bbdd_bpf_timing_json(const struct bbdd_d_session_data_timing *timing)
+bbdd_bpf_timing_json(const struct bbdd_d_session_data_timing *timing,
+		     char **error)
 {
-	struct json_object *obj = json_object_new_object();
+	struct json_object *obj = bbdd_jrpc_json_new_object(error);
 
 	if (obj == NULL)
 		return NULL;
-	if (bbdd_jrpc_append_int(obj, "detect_mult", timing->detect_mult) != 0 ||
-	    bbdd_jrpc_append_int(obj, "min_tx_us", timing->min_tx_us) != 0 ||
-	    bbdd_jrpc_append_int(obj, "min_rx_us", timing->min_rx_us) != 0) {
+	if (bbdd_jrpc_append_int(obj, "detect_mult", timing->detect_mult,
+				 error) != 0 ||
+	    bbdd_jrpc_append_int(obj, "min_tx_us", timing->min_tx_us,
+				 error) != 0 ||
+	    bbdd_jrpc_append_int(obj, "min_rx_us", timing->min_rx_us,
+				 error) != 0) {
 		json_object_put(obj);
 		return NULL;
 	}
@@ -2938,12 +2918,13 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 		return -1;
 	}
 
-	bpf_obj = json_object_new_object();
+	bpf_obj = bbdd_jrpc_json_new_object(error);
 	if (bpf_obj == NULL)
 		goto put_bpf_obj;
 
 	if (bbdd_jrpc_append_str(bpf_obj, "bstate",
-				 bbdd_bpf_session_state_str(bsess->bstate)) != 0)
+				 bbdd_bpf_session_state_str(bsess->bstate),
+				 error) != 0)
 		goto put_bpf_obj;
 
 	switch (bsess->bstate) {
@@ -2951,12 +2932,13 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 		break;
 
 	case BBDD_BPF_SESSION_STATE_STABLE:
-		timing_obj = bbdd_bpf_timing_json(&bsess->eff_data.timing);
+		timing_obj = bbdd_bpf_timing_json(&bsess->eff_data.timing,
+						  error);
 		if (timing_obj == NULL)
 			goto put_bpf_obj;
 
 		if (bbdd_jrpc_append_obj(bpf_obj, "eff_timing",
-					 &timing_obj) != 0)
+					 &timing_obj, error) != 0)
 			goto put_timing_obj;
 
 		/* Fall through. */
@@ -2964,19 +2946,21 @@ int bbdd_bpf_session_state_json(struct bbdd_bpf *bpf, uint32_t discr,
 	case BBDD_BPF_SESSION_STATE_AWAIT_FINAL:
 	case BBDD_BPF_SESSION_STATE_AWAIT_NON_FINAL:
 	case BBDD_BPF_SESSION_STATE_SHUTTING_DOWN:
-		timing_obj = bbdd_bpf_timing_json(&bsess->dfr_data.timing);
+		timing_obj = bbdd_bpf_timing_json(&bsess->dfr_data.timing,
+						  error);
 		if (timing_obj == NULL)
 			goto put_bpf_obj;
 		if (bbdd_jrpc_append_obj(bpf_obj, "poll_timing",
-					 &timing_obj) != 0)
+					 &timing_obj, error) != 0)
 			goto put_timing_obj;
 		if (bsess->qd_change &&
-		    bbdd_jrpc_append_bool(bpf_obj, "qd_timing", true) != 0)
+		    bbdd_jrpc_append_bool(bpf_obj, "qd_timing", true,
+					  error) != 0)
 			goto put_bpf_obj;
 		break;
 	}
 
-	if (bbdd_jrpc_append_obj(state_obj, "bpf", &bpf_obj) != 0)
+	if (bbdd_jrpc_append_obj(state_obj, "bpf", &bpf_obj, error) != 0)
 		goto put_bpf_obj;
 
 	return 0;
@@ -2985,7 +2969,6 @@ put_timing_obj:
 	json_object_put(timing_obj);
 put_bpf_obj:
 	json_object_put(bpf_obj);
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
