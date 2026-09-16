@@ -1613,7 +1613,7 @@ static int bbdd_d_select_sessions(struct bbdd_sess_dir *sdir,
 
 oom:
 	errno = -ENOMEM;
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	free(discrs);
 	return -1;
 }
@@ -1633,7 +1633,7 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 
 	dsess = bbdd_sess_dir_add_session(d->sdir, csess->discr);
 	if (dsess == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		goto put_port;
 	}
 
@@ -2630,7 +2630,7 @@ static char *bbdd_d_cpu_mask(unsigned int i, unsigned int n, char **error)
 
 	buf = malloc(len);
 	if (!buf) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 

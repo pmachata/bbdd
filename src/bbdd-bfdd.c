@@ -165,7 +165,7 @@ struct bbdd_bfdd_c *bbdd_bfdd_open_c(const char *path,
 
 	bfdd_c = malloc(sizeof(*bfdd_c));
 	if (bfdd_c == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 
@@ -238,7 +238,7 @@ struct bbdd_bfdd_d *bbdd_bfdd_attach_d(struct bbdd_ssk_peer *peer,
 
 	bfdd_d = malloc(sizeof(*bfdd_d));
 	if (bfdd_d == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 
@@ -340,7 +340,7 @@ bbdd_bfdd_echo_peer_init(struct bbdd_bfdd_b *bfdd_b, struct bbdd_ssk_peer *peer,
 
 	epeer = malloc(sizeof(*epeer));
 	if (epeer == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 
@@ -967,7 +967,7 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1045,7 +1045,7 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1071,7 +1071,7 @@ static int bbdd_bfdd_format_lid_msg(uint32_t lid, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1100,7 +1100,7 @@ bbdd_bfdd_format_echo(const struct bfddp_echo *echo, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1135,7 +1135,7 @@ bbdd_bfdd_format_unknown(enum bfddp_message_type bmt,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 

@@ -371,7 +371,7 @@ struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 
 	ssd = malloc(sizeof(*ssd));
 	if (ssd == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 
@@ -430,7 +430,7 @@ struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
 
 	ssc = malloc(sizeof(*ssc));
 	if (ssc == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 

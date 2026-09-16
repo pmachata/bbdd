@@ -12,6 +12,8 @@ int bbdd_err_vfmt(char **strp, const char *fmt, va_list ap);
 __attribute__((format(printf, 2, 3)))
 int bbdd_err_fmt(char **strp, const char *fmt, ...);
 
+#define bbdd_err_from_errno(STRP) bbdd_err_fmt((STRP), "%m")
+
 /* Given a valid string in *strp, form a new string, free *strp, and put
  * the new string there. fmt can therefore reference *strp itself. Leaves
  * *strp intact on out of memory conditions. */

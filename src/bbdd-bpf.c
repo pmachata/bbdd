@@ -1216,7 +1216,7 @@ free_shwait:
 	free(shwait);
 err:
 	if (*error == NULL)
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 	return NULL;
 }
 
@@ -1332,7 +1332,7 @@ free_hold:
 	free(hold);
 err:
 	if (*error == NULL)
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 	return NULL;
 }
 
@@ -1909,7 +1909,7 @@ put_bitarr:
 put_obj:
 	json_object_put(obj);
 oom:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return NULL;
 }
 
@@ -1942,7 +1942,7 @@ put_params:
 	json_object_put(params);
 put_addr_obj:
 	json_object_put(addr_obj);
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1994,7 +1994,7 @@ put_dst_obj:
 	json_object_put(dst_obj);
 put_src_obj:
 	json_object_put(src_obj);
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2028,7 +2028,7 @@ put_params:
 	json_object_put(params);
 put_pkt_obj:
 	json_object_put(pkt_obj);
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2054,7 +2054,7 @@ bbdd_bpf_rb_format_rx_timeout(const struct bbdd_bpf_rb_elem_rx_timeout *elem,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2080,7 +2080,7 @@ bbdd_bpf_rb_format_unknown(enum bbdd_bpf_rb_elem_type type,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -2984,7 +2984,7 @@ put_timing_obj:
 	json_object_put(timing_obj);
 put_bpf_obj:
 	json_object_put(bpf_obj);
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -3024,7 +3024,7 @@ int bbdd_bpf_session_add(struct bbdd_bpf *bpf,
 
 	bsess = malloc(sizeof(*bsess));
 	if (bsess == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return -1;
 	}
 

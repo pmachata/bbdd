@@ -98,7 +98,7 @@ static ssize_t __bbdd_poll_reserve(struct bbdd_poll_ctx *pctx, int fd,
 new_fds:
 	free(new_fds);
 error:
-	bbdd_err_fmt(error, "%m");
+	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -189,7 +189,7 @@ int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
 
 	sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 	if (sig_fd < 0) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		goto err;
 	}
 

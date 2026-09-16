@@ -18,7 +18,7 @@ struct bbdd_tx *bbdd_tx_create(char **error)
 
 	tx = malloc(sizeof(*tx));
 	if (tx == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 	*tx = (struct bbdd_tx) {};

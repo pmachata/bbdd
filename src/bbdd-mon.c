@@ -79,7 +79,7 @@ bbdd_mon_alloc_client(struct bbdd_mon *mon, struct bbdd_mon_topics topics,
 
 	cli = malloc(sizeof(*cli));
 	if (cli == NULL) {
-		bbdd_err_fmt(error, "%m");
+		bbdd_err_from_errno(error);
 		return NULL;
 	}
 
