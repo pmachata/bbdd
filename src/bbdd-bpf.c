@@ -1856,6 +1856,7 @@ bbdd_bpf_rb_format_packet_bitarr(const struct bbdd_bfd_pkt *packet)
 #undef APPEND
 
 err:
+	json_object_put(f);
 	json_object_put(obj);
 	return NULL;
 }
