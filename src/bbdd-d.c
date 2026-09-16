@@ -139,20 +139,11 @@ void bbdd_d_handle_stop(struct bbdd_poll_ctx *pctx,
 	bbdd_util_jrpc_respond_empty(peer, id);
 }
 
-static void bbdd_d_stat_fmterr(char **error)
-{
-	bbdd_err_fmt(error, "Failed to format stats to JSON: %m");
-}
-
 static int bbdd_d_add_stat(struct json_object *obj,
 			   const char *name, uint64_t value,
 			   char **error)
 {
-	int rc;
-	rc = bbdd_jrpc_append_uint64(obj, name, value);
-	if (rc)
-		bbdd_d_stat_fmterr(error);
-	return rc;
+	return bbdd_jrpc_append_uint64(obj, name, value, error);
 }
 
 static int bbdd_d_global_diag_stats_json(struct bbdd_d *d,
@@ -171,6 +162,25 @@ static int bbdd_d_global_diag_stats_json(struct bbdd_d *d,
 #undef FIELD
 
 	return 0;
+}
+
+static void bbdd_d_jrpc_send(struct bbdd_ssk_peer *peer,
+			     struct bbdd_mon *mon,
+			     struct json_object **obj)
+{
+	char *error;
+	int rc;
+
+	rc = bbdd_util_jrpc_send_done(peer, *obj, &error);
+	if (rc != 0)
+		/* This is likely an OOM condition or some such. Let's try and
+		 * send the error to monitors, chances are the short message
+		 * will be able to squeeze past the memory pressure and get
+		 * delivered at least to the local stderr writer. */
+		bbdd_mon_senderr(mon, &error, "Failed to send a JRPC response");
+
+	json_object_put(*obj);
+	*obj = NULL;
 }
 
 static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
@@ -195,26 +205,21 @@ static void bbdd_d_handle_global_stats_get(struct bbdd_d *d,
 	if (rc != 0)
 		goto put_result;
 
-	obj = bbdd_jrpc_new_object(id);
+	obj = bbdd_jrpc_new_object(id, &error);
 	if (!obj)
 		goto put_result;
 
-	rc = json_object_object_add(obj, "result", result);
+	rc = bbdd_jrpc_append_obj(obj, "result", &result, &error);
 	if (rc != 0)
 		goto put_obj;
 
-	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
-	if (rc != 0)
-		bbdd_err_print(&error, "Failed to receive response");
-
-	json_object_put(obj);
-	return;
+	return bbdd_d_jrpc_send(peer, d->mon, &obj);
 
 put_obj:
 	json_object_put(obj);
 put_result:
 	json_object_put(result);
-	bbdd_util_jrpc_respond_memerr(peer, id);
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
 static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
@@ -807,13 +812,16 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv)
 }
 
 static int bbdd_d_jrpc_session_state_attach_state(struct json_object *obj,
-						  enum bbdd_bfd_pkt_state sv)
+						  enum bbdd_bfd_pkt_state sv,
+						  char **error)
 {
 	const char *str = bbdd_d_bfd_state_to_str(sv);
 
-	if (str == NULL)
+	if (str == NULL) {
+		bbdd_err_fmt(error, "Invalid session state %d", sv);
 		return -EINVAL;
-	return bbdd_jrpc_append_str(obj, "state", str);
+	}
+	return bbdd_jrpc_append_str(obj, "state", str, error);
 }
 
 static const char *bbdd_d_jrpc_session_diag_str[] = {
@@ -849,29 +857,34 @@ int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv)
 }
 
 static int bbdd_d_jrpc_session_state_attach_diag(struct json_object *obj,
-						 enum bbdd_bfd_pkt_diag dv)
+						 enum bbdd_bfd_pkt_diag dv,
+						 char **error)
 {
 	const char *str = bbdd_d_bfd_diag_to_str(dv);
 
-	if (str == NULL)
+	if (str == NULL) {
+		bbdd_err_fmt(error, "Invalid session diag %d", dv);
 		return -EINVAL;
-	return bbdd_jrpc_append_str(obj, "diag", str);
+	}
+	return bbdd_jrpc_append_str(obj, "diag", str, error);
 }
 
 static int
 bbdd_d_jrpc_session_attach_state_end(struct json_object *entry_obj,
-				     const struct bbdd_d_session_state_end *state)
+				     const struct bbdd_d_session_state_end *state,
+				     char **error)
 {
 	if (bbdd_d_jrpc_session_state_attach_state(entry_obj,
-						   state->state) != 0 ||
+						   state->state, error) != 0 ||
 	    bbdd_d_jrpc_session_state_attach_diag(entry_obj,
-						  state->diag) != 0)
+						  state->diag, error) != 0)
 		return -1;
 	return 0;
 }
 
 static struct json_object *
-bbdd_d_jrpc_session_state_local(const struct bbdd_d_session_state_end *state)
+bbdd_d_jrpc_session_state_local(const struct bbdd_d_session_state_end *state,
+				char **error)
 {
 	struct json_object *entry_obj;
 
@@ -881,11 +894,11 @@ bbdd_d_jrpc_session_state_local(const struct bbdd_d_session_state_end *state)
 	 * }
 	 */
 
-	entry_obj = json_object_new_object();
+	entry_obj = bbdd_jrpc_json_new_object(error);
 	if (entry_obj == NULL)
 		return NULL;
 
-	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, state))
+	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, state, error))
 		goto put_entry_obj;
 
 	return entry_obj;
@@ -896,7 +909,8 @@ put_entry_obj:
 }
 
 static struct json_object *
-bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
+bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote,
+				 char **error)
 {
 	struct json_object *entry_obj;
 
@@ -910,26 +924,27 @@ bbdd_d_jrpc_session_state_remote(const struct bbdd_d_session_data *remote)
 	 * }
 	 */
 
-	entry_obj = json_object_new_object();
+	entry_obj = bbdd_jrpc_json_new_object(error);
 	if (entry_obj == NULL)
 		return NULL;
 
-	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, &remote->state))
+	if (bbdd_d_jrpc_session_attach_state_end(entry_obj, &remote->state,
+						 error))
 		goto put_entry_obj;
 
 	if (bbdd_jrpc_append_int(entry_obj, "discr",
-				 remote->discr) != 0 ||
+				 remote->discr, error) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "detect_mult",
-				 remote->timing.detect_mult) != 0 ||
+				 remote->timing.detect_mult, error) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_tx_us",
-				 remote->timing.min_tx_us) != 0 ||
+				 remote->timing.min_tx_us, error) != 0 ||
 	    bbdd_jrpc_append_int(entry_obj, "min_rx_us",
-				 remote->timing.min_rx_us) != 0)
+				 remote->timing.min_rx_us, error) != 0)
 		goto put_entry_obj;
 
 #define BBDD_D_REMOTE_FLAG(NAME) do {					\
 		if (bbdd_jrpc_append_bool(entry_obj, #NAME,		\
-					  remote->flags.NAME) != 0)	\
+					  remote->flags.NAME, error) != 0)	\
 			goto put_entry_obj;				\
 	} while (0)
 
@@ -945,7 +960,7 @@ put_entry_obj:
 }
 
 static struct json_object *
-bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess)
+bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess, char **error)
 {
 	struct json_object *entry_obj;
 	struct json_object *local_obj;
@@ -956,20 +971,20 @@ bbdd_d_jrpc_session_state_obj(const struct bbdd_d_session *dsess)
 	 *     "remote": STATE_END,
 	 * }
 	 */
-	entry_obj = json_object_new_object();
+	entry_obj = bbdd_jrpc_json_new_object(error);
 	if (entry_obj == NULL)
 		return NULL;
 
-	local_obj = bbdd_d_jrpc_session_state_local(&dsess->local.state);
+	local_obj = bbdd_d_jrpc_session_state_local(&dsess->local.state, error);
 	if (local_obj == NULL)
 		goto put_entry_obj;
 
-	remote_obj = bbdd_d_jrpc_session_state_remote(&dsess->remote);
+	remote_obj = bbdd_d_jrpc_session_state_remote(&dsess->remote, error);
 	if (remote_obj == NULL)
 		goto put_local_obj;
 
-	if (bbdd_jrpc_append_obj(entry_obj, "remote", &remote_obj) ||
-	    bbdd_jrpc_append_obj(entry_obj, "local", &local_obj))
+	if (bbdd_jrpc_append_obj(entry_obj, "remote", &remote_obj, error) ||
+	    bbdd_jrpc_append_obj(entry_obj, "local", &local_obj, error))
 		goto put_remote_obj;
 
 	return entry_obj;
@@ -995,11 +1010,11 @@ struct json_object *bbdd_d_session_json(struct bbdd_bpf *bpf,
 
 	bbdd_d_session_to_c(dsess, &sess);
 
-	entry_obj = json_object_new_object();
+	entry_obj = bbdd_jrpc_json_new_object(error);
 	if (entry_obj == NULL)
 		return NULL;
 
-	state_obj = bbdd_d_jrpc_session_state_obj(dsess);
+	state_obj = bbdd_d_jrpc_session_state_obj(dsess, error);
 	if (state_obj == NULL)
 		goto put_entry_obj;
 
@@ -1008,12 +1023,12 @@ struct json_object *bbdd_d_session_json(struct bbdd_bpf *bpf,
 	if (rc != 0)
 		goto put_state_obj;
 
-	sess_obj = bbdd_c_jrpc_session_obj(&sess);
+	sess_obj = bbdd_c_jrpc_session_obj(&sess, error);
 	if (sess_obj == NULL)
 		goto put_state_obj;
 
-	if (bbdd_jrpc_append_obj(entry_obj, "data", &sess_obj) ||
-	    bbdd_jrpc_append_obj(entry_obj, "state", &state_obj))
+	if (bbdd_jrpc_append_obj(entry_obj, "data", &sess_obj, error) ||
+	    bbdd_jrpc_append_obj(entry_obj, "state", &state_obj, error))
 		goto put_sess_obj;
 
 	return entry_obj;
@@ -1031,6 +1046,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 					  struct json_object *id,
 					  struct bbdd_sess_dir *sdir,
 					  struct bbdd_bpf *bpf,
+					  struct bbdd_mon *mon,
 					  uint32_t *discrs,
 					  size_t ndiscrs)
 {
@@ -1038,7 +1054,7 @@ static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 	struct json_object *result_obj;
 	struct json_object *array;
 	struct json_object *entry_obj;
-	char *error = NULL;
+	char *error;
 	int rc;
 	bool dumped;
 
@@ -1065,15 +1081,15 @@ static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 	 * bbdd_d_jrpc_session_state_obj().
 	 */
 
-	obj = bbdd_jrpc_new_object(id);
+	obj = bbdd_jrpc_new_object(id, &error);
 	if (obj == NULL)
-		return;
+		goto respond_err;
 
-	result_obj = json_object_new_object();
+	result_obj = bbdd_jrpc_json_new_object(&error);
 	if (result_obj == NULL)
 		goto put_obj;
 
-	array = json_object_new_array();
+	array = bbdd_jrpc_json_new_array(&error);
 	if (array == NULL)
 		goto put_result_obj;
 
@@ -1091,30 +1107,26 @@ static void bbdd_d_handle_session_show_do(struct bbdd_ssk_peer *peer,
 		if (entry_obj == NULL)
 			goto put_array;
 
-		if (json_object_array_add(array, entry_obj) != 0)
+		rc = bbdd_jrpc_array_append_obj(array, &entry_obj, &error);
+		if (rc != 0)
 			goto put_entry_obj;
-		entry_obj = NULL;
 	}
 
 	if (ndiscrs > 0 && !dumped) {
 		/* Not sure this can actually happen. */
-		bbdd_util_jrpc_respond_inv_params(peer, id, "All matching sessions went away mid request");
+		bbdd_err_fmt(&error, "All matching sessions went away mid request");
 		goto put_array;
 	}
 
-	rc = json_object_object_add(result_obj, "sessions", array);
+	rc = bbdd_jrpc_append_obj(result_obj, "sessions", &array, &error);
 	if (rc != 0)
 		goto put_array;
 
-	if (json_object_object_add(obj, "result", result_obj))
+	rc = bbdd_jrpc_append_obj(obj, "result", &result_obj, &error);
+	if (rc != 0)
 		goto put_result_obj;
 
-	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
-	if (rc != 0)
-		bbdd_err_print(&error, "Failed to receive response");
-
-	json_object_put(obj);
-	return;
+	return bbdd_d_jrpc_send(peer, mon, &obj);
 
 put_entry_obj:
 	json_object_put(entry_obj);
@@ -1124,10 +1136,8 @@ put_result_obj:
 	json_object_put(result_obj);
 put_obj:
 	json_object_put(obj);
-	if (error != NULL)
-		bbdd_util_jrpc_respond_interr_err(peer, id, &error);
-	else
-		bbdd_util_jrpc_respond_memerr(peer, id);
+respond_err:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
 static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
@@ -1139,8 +1149,7 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 	struct bbdd_mon_message mon_msg;
 	struct json_object *sess_obj;
 	struct json_object *params;
-	char *error = NULL;
-	int rc = -1;
+	char *error;
 
 	if (bfdd_c != NULL) {
 		if (bbdd_bfdd_c_send_state_change(bfdd_c, dsess, &error) != 0)
@@ -1152,19 +1161,20 @@ static void bbdd_d_session_state_changed(struct bbdd_d_session *dsess,
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(&error);
 	if (params == NULL)
 		goto err;
 
 	sess_obj = bbdd_d_session_json(bpf, dsess, &error);
 	if (sess_obj != NULL) {
-		if (bbdd_jrpc_append_obj(params, "session", &sess_obj)) {
+		if (bbdd_jrpc_append_obj(params, "session", &sess_obj, &error)) {
 			json_object_put(sess_obj);
 			goto no_session;
 		}
 	} else {
 no_session:
-		if (bbdd_jrpc_append_int(params, "discr", dsess->local.discr))
+		if (bbdd_jrpc_append_int(params, "discr", dsess->local.discr,
+					 &error))
 			goto put_params;
 	}
 
@@ -1178,9 +1188,8 @@ no_session:
 put_params:
 	json_object_put(params);
 err:
-	if (rc != 0)
-		bbdd_mon_senderr(mon, &error, "session %u: failed to format notification",
-				 dsess->local.discr);
+	bbdd_mon_senderr(mon, &error, "session %u: failed to format notification",
+			 dsess->local.discr);
 }
 
 static void bbdd_d_session_state_changed_cb(struct bbdd_d_session *dsess,
@@ -1839,6 +1848,7 @@ static void
 bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 			       struct json_object *id,
 			       struct bbdd_bpf *bpf,
+			       struct bbdd_mon *mon,
 			       uint32_t *discrs,
 			       size_t ndiscrs,
 			       struct json_object *(*cb)(struct bbdd_bpf *,
@@ -1849,7 +1859,7 @@ bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 	struct json_object *result_obj;
 	struct json_object *entry_obj;
 	struct json_object *stats_obj;
-	char *error = NULL;
+	char *error;
 	int rc;
 
 	/* The response is as follows:
@@ -1869,15 +1879,15 @@ bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 	 * }
 	 */
 
-	obj = bbdd_jrpc_new_object(id);
+	obj = bbdd_jrpc_new_object(id, &error);
 	if (obj == NULL)
-		return;
+		goto respond_err;
 
-	result_obj = json_object_new_object();
+	result_obj = bbdd_jrpc_json_new_object(&error);
 	if (result_obj == NULL)
 		goto put_obj;
 
-	array = json_object_new_array();
+	array = bbdd_jrpc_json_new_array(&error);
 	if (array == NULL)
 		goto put_result_obj;
 
@@ -1888,29 +1898,24 @@ bbdd_d_handle_session_stats_do(struct bbdd_ssk_peer *peer,
 		if (stats_obj == NULL)
 			goto put_array;
 
-		entry_obj = json_object_new_object();
+		entry_obj = bbdd_jrpc_json_new_object(&error);
 		if (entry_obj == NULL)
 			goto put_stats_obj;
 
-		if (bbdd_jrpc_append_uint64(entry_obj, "discr", discr) ||
-		    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj))
+		if (bbdd_jrpc_append_uint64(entry_obj, "discr", discr, &error) ||
+		    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj, &error))
 			goto put_entry_obj;
 
-		if (json_object_array_add(array, entry_obj) != 0)
+		rc = bbdd_jrpc_array_append_obj(array, &entry_obj, &error);
+		if (rc != 0)
 			goto put_entry_obj;
-		entry_obj = NULL;
 	}
 
-	if (bbdd_jrpc_append_obj(result_obj, "sessions", &array) ||
-	    bbdd_jrpc_append_obj(obj, "result", &result_obj))
+	if (bbdd_jrpc_append_obj(result_obj, "sessions", &array, &error) ||
+	    bbdd_jrpc_append_obj(obj, "result", &result_obj, &error))
 		goto put_array;
 
-	rc = bbdd_util_jrpc_send_done(peer, obj, &error);
-	if (rc != 0)
-		bbdd_err_print(&error, "Failed to receive response");
-
-	json_object_put(obj);
-	return;
+	return bbdd_d_jrpc_send(peer, mon, &obj);
 
 put_entry_obj:
 	json_object_put(entry_obj);
@@ -1922,10 +1927,8 @@ put_result_obj:
 	json_object_put(result_obj);
 put_obj:
 	json_object_put(obj);
-	if (error)
-		bbdd_util_jrpc_respond_interr_err(peer, id, &error);
-	else
-		bbdd_util_jrpc_respond_memerr(peer, id);
+respond_err:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
 static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
@@ -1944,7 +1947,7 @@ static void bbdd_d_handle_session_stats_diag(struct bbdd_d *d,
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_do(peer, id, d->bpf, discrs, ndiscrs,
+	bbdd_d_handle_session_stats_do(peer, id, d->bpf, d->mon, discrs, ndiscrs,
 				       bbdd_bpf_session_diag_stats_json);
 	free(discrs);
 }
@@ -1965,7 +1968,7 @@ static void bbdd_d_handle_session_stats(struct bbdd_d *d,
 	if (rc < 0)
 		return;
 
-	bbdd_d_handle_session_stats_do(peer, id, d->bpf, discrs, ndiscrs,
+	bbdd_d_handle_session_stats_do(peer, id, d->bpf, d->mon, discrs, ndiscrs,
 				       bbdd_bpf_session_stats_json);
 	free(discrs);
 }
@@ -2036,7 +2039,7 @@ static void bbdd_d_handle_session_show(struct bbdd_d *d,
 	if (rc < 0)
 		return;
 
-	return bbdd_d_handle_session_show_do(peer, id, d->sdir, d->bpf,
+	return bbdd_d_handle_session_show_do(peer, id, d->sdir, d->bpf, d->mon,
 					     discrs, ndiscrs);
 }
 
@@ -2386,6 +2389,7 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 					 struct json_object *params_obj,
 					 struct json_object *id)
 {
+	struct json_object *result_obj;
 	struct json_object *obj;
 	bool connected;
 	char *error;
@@ -2397,13 +2401,18 @@ static void bbdd_d_handle_bfdd_connected(struct bbdd_d *d,
 
 	connected = d->bfdd != NULL;
 
-	obj = bbdd_jrpc_new_object(id);
-	if (obj == NULL)
+	obj = bbdd_jrpc_new_object(id, &error);
+	if (obj == NULL) {
+		bbdd_mon_senderr(d->mon, &error, "Failed to form a bfdd-connected response");
 		return bbdd_util_jrpc_respond_memerr(peer, id);
+	}
 
-	if (json_object_object_add(obj, "result",
-				   json_object_new_boolean(connected)) != 0) {
+	result_obj = json_object_new_boolean(connected);
+	rc = bbdd_jrpc_append_obj(obj, "result", &result_obj, &error);
+	if (rc != 0) {
+		json_object_put(result_obj);
 		json_object_put(obj);
+		bbdd_mon_senderr(d->mon, &error, "Failed to form a bfdd-connected response");
 		return bbdd_util_jrpc_respond_memerr(peer, id);
 	}
 

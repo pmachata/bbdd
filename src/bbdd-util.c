@@ -61,11 +61,15 @@ void bbdd_util_jrpc_respond_inv_params(struct bbdd_ssk_peer *peer,
 				       struct json_object *id,
 				       const char *msg)
 {
-	struct json_object *obj = bbdd_jrpc_new_error_inv_params(id, msg);
+	struct json_object *obj;
+	char *error;
+
+	obj = bbdd_jrpc_new_error_inv_params(id, msg, &error);
+	if (obj == NULL)
+		bbdd_err_print(&error, "Failed to form an \"invalid params\" response");
 
 	bbdd_util_jrpc_respond(peer, &obj);
 }
-
 
 void bbdd_util_jrpc_respond_inv_params_err(struct bbdd_ssk_peer *peer,
 					   struct json_object *id,
@@ -80,7 +84,12 @@ void bbdd_util_jrpc_respond_interr(struct bbdd_ssk_peer *peer,
 				   struct json_object *id,
 				   const char *msg)
 {
-	struct json_object *obj = bbdd_jrpc_new_error_int_error(id, msg);
+	struct json_object *obj;
+	char *error;
+
+	obj = bbdd_jrpc_new_error_int_error(id, msg, &error);
+	if (obj == NULL)
+		bbdd_err_print(&error, "Failed to form an \"internal error\" response");
 
 	bbdd_util_jrpc_respond(peer, &obj);
 }
@@ -127,11 +136,11 @@ static void __bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 	char *error;
 	int rc;
 
-	obj = bbdd_jrpc_new_object(id);
+	obj = bbdd_jrpc_new_object(id, &error);
 	if (obj == NULL)
-		return;
+		goto respond_interr;
 
-	if (json_object_object_add(obj, "result", NULL))
+	if (bbdd_jrpc_append_null(obj, "result", &error))
 		goto put_obj;
 
 	if (keep_open)
@@ -147,7 +156,8 @@ static void __bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
 
 put_obj:
 	json_object_put(obj);
-	bbdd_util_jrpc_respond_memerr(peer, id);
+respond_interr:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
 void bbdd_util_jrpc_respond_empty(struct bbdd_ssk_peer *peer,
@@ -166,7 +176,12 @@ void bbdd_util_jrpc_respond_method_nf(struct bbdd_ssk_peer *peer,
 				      struct json_object *id,
 				      const char *method)
 {
-	struct json_object *obj = bbdd_jrpc_new_error_method_nf(id, method);
+	struct json_object *obj;
+	char *error;
+
+	obj = bbdd_jrpc_new_error_method_nf(id, method, &error);
+	if (obj == NULL)
+		bbdd_err_print(&error, "Failed to form a \"method not found\" response");
 
 	bbdd_util_jrpc_respond(peer, &obj);
 }
@@ -181,19 +196,19 @@ void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 	char *error;
 	int rc;
 
-	resp = bbdd_jrpc_new_object(id);
+	resp = bbdd_jrpc_new_object(id, &error);
 	if (resp == NULL)
-		goto err_memerr;
+		goto respond_interr;
 
-	result = json_object_new_object();
+	result = bbdd_jrpc_json_new_object(&error);
 	if (result == NULL)
 		goto put_resp;
 
-	if (bbdd_jrpc_append_uint64(result, "ts", ts) ||
-	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts))
+	if (bbdd_jrpc_append_uint64(result, "ts", ts, &error) ||
+	    bbdd_jrpc_append_uint64(result, "reply_ts", reply_ts, &error))
 		goto put_result;
 
-	rc = bbdd_jrpc_append_obj(resp, "result", &result);
+	rc = bbdd_jrpc_append_obj(resp, "result", &result, &error);
 	if (rc != 0)
 		goto put_result;
 
@@ -208,20 +223,21 @@ put_result:
 	json_object_put(result);
 put_resp:
 	json_object_put(resp);
-err_memerr:
-	bbdd_util_jrpc_respond_memerr(peer, id);
+respond_interr:
+	bbdd_util_jrpc_respond_interr_err(peer, id, &error);
 }
 
-struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af)
+struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af,
+					    char **error)
 {
 	struct json_object *obj;
 
-	obj = json_object_new_object();
+	obj = bbdd_jrpc_json_new_object(error);
 	if (obj == NULL)
 		return NULL;
 
-	if (bbdd_jrpc_append_str(obj, "addr", addr) ||
-	    bbdd_jrpc_append_str(obj, "family", bbdd_sock_af_to_str(af)))
+	if (bbdd_jrpc_append_str(obj, "addr", addr, error) ||
+	    bbdd_jrpc_append_str(obj, "family", bbdd_sock_af_to_str(af), error))
 		goto put_obj;
 
 	return obj;
@@ -272,6 +288,7 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 	struct json_object *obj;
 	struct json_object *id;
 	const char *method;
+	char *build_error;
 	char *error;
 	int err;
 
@@ -280,7 +297,10 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 
 	/* request_obj is JSON `null'. */
 	if (request_obj == NULL) {
-		obj = bbdd_jrpc_new_error_inv_request("null");
+		obj = bbdd_jrpc_new_error_inv_request("null", &build_error);
+		if (obj == NULL)
+			bbdd_mon_senderr(mon, &build_error,
+					"Failed to form an \"invalid request\" response");
 		bbdd_util_jrpc_respond(peer, &obj);
 		return;
 	}
@@ -288,7 +308,10 @@ void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 	err = bbdd_jrpc_dissect_request(request_obj, &id, &method, &params,
 					&error);
 	if (err) {
-		obj = bbdd_jrpc_new_error_inv_request(error);
+		obj = bbdd_jrpc_new_error_inv_request(error, &build_error);
+		if (obj == NULL)
+			bbdd_mon_senderr(mon, &build_error,
+					"Failed to form an \"invalid request\" response");
 		bbdd_util_jrpc_respond(peer, &obj);
 		free(error);
 		return;
@@ -546,6 +569,7 @@ void bbdd_util_ssk_json_tkn_eof_cb(struct bbdd_ssk_peer *peer, void *data)
 {
 	struct bbdd_util_ssk_json_tkn *tkn = data;
 	struct json_object *obj;
+	char *error;
 
 	/* Either we're cleanly between messages, or nothing was ever sent.
 	 * Nothing to report. */
@@ -555,7 +579,9 @@ void bbdd_util_ssk_json_tkn_eof_cb(struct bbdd_ssk_peer *peer, void *data)
 	/* The peer's write side is closed for good, so whatever is buffered
 	 * here will never complete. Respond as if it never will, rather than
 	 * silently dropping it. */
-	obj = bbdd_jrpc_new_error_inv_request("Unexpected end of stream");
+	obj = bbdd_jrpc_new_error_inv_request("Unexpected end of stream", &error);
+	if (obj == NULL)
+		bbdd_err_print(&error, "Failed to form an \"invalid request\" response");
 	bbdd_util_jrpc_respond(peer, &obj);
 }
 

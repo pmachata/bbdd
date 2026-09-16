@@ -222,28 +222,33 @@ void bbdd_mon_send(struct bbdd_mon *mon, struct bbdd_mon_message *mon_msg,
 	struct json_object *notif;
 	struct timespec ts;
 	uint64_t ts_ms;
+	char *error;
+	int rc = -1;
 
 	assert(mon_msg->method != NULL);
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts_ms = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 
-	outer_params = json_object_new_object();
+	outer_params = bbdd_jrpc_json_new_object(&error);
 	if (outer_params == NULL)
 		goto put_params;
 
-	bbdd_jrpc_append_uint64(outer_params, "ts", ts_ms); /* ignore failure */
+	/* Ignore failure: a missing timestamp isn't worth failing the send. */
+	bbdd_jrpc_append_uint64(outer_params, "ts", ts_ms, NULL);
 
-	if (bbdd_jrpc_append_obj(outer_params, "params", &mon_msg->params) != 0)
+	if (bbdd_jrpc_append_obj(outer_params, "params", &mon_msg->params,
+				 &error) != 0)
 		goto put_outer;
 
-	notif = bbdd_jrpc_new_notif(mon_msg->method);
+	notif = bbdd_jrpc_new_notif(mon_msg->method, &error);
 	if (notif == NULL)
 		goto put_outer;
 
-	if (bbdd_jrpc_append_obj(notif, "params", &outer_params) != 0)
+	if (bbdd_jrpc_append_obj(notif, "params", &outer_params, &error) != 0)
 		goto put_notif;
 
+	rc = 0;
 	__bbdd_mon_send(mon, notif, topic);
 
 put_notif:
@@ -254,6 +259,11 @@ put_params:
 	json_object_put(mon_msg->params); /* NULL-safe after successful append_obj */
 
 	mon_msg->params = bbdd_poison;
+
+	if (rc != 0)
+		/* Errors in monitor messages need to go to stderr. */
+		bbdd_err_print(&error, "Failed to send a `%s' monitor notification",
+			       mon_msg->method);
 }
 
 static void bbdd_mon_send_str(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
@@ -261,17 +271,18 @@ static void bbdd_mon_send_str(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 {
 	struct json_object *params = NULL;
 	struct bbdd_mon_message mon_msg;
+	char *error;
 	int rc;
 
 	if (!bbdd_mon_topic_active(mon, topic))
 		return;
 
 	if (str != NULL) {
-		params = json_object_new_object();
+		params = bbdd_jrpc_json_new_object(&error);
 		if (params == NULL)
-			return;
+			goto print_err;
 
-		rc = bbdd_jrpc_append_str(params, "msg", str);
+		rc = bbdd_jrpc_append_str(params, "msg", str, &error);
 		if (rc != 0)
 			goto put_params;
 	}
@@ -284,6 +295,8 @@ static void bbdd_mon_send_str(struct bbdd_mon *mon, enum bbdd_mon_topic topic,
 
 put_params:
 	json_object_put(params);
+print_err:
+	bbdd_err_print(&error, "Failed to send a `%s' monitor notification", method);
 }
 
 static void bbdd_mon_send_vfmt(struct bbdd_mon *mon, enum bbdd_mon_topic topic,

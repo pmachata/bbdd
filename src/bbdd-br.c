@@ -165,49 +165,58 @@ static void bbdd_br_bfdd_handle_session_counters(struct bbdd_br *br,
 	if (br->stats == NULL)
 		return;
 
-	resp = bbdd_jrpc_new_object(br->stats->id);
+	resp = bbdd_jrpc_new_object(br->stats->id, &error);
 	if (resp == NULL)
 		goto err;
 
-	result_obj = json_object_new_object();
+	result_obj = bbdd_jrpc_json_new_object(&error);
 	if (result_obj == NULL)
 		goto put_resp;
 
-	array = json_object_new_array();
+	array = bbdd_jrpc_json_new_array(&error);
 	if (array == NULL)
 		goto put_result_obj;
 
-	entry_obj = json_object_new_object();
+	entry_obj = bbdd_jrpc_json_new_object(&error);
 	if (entry_obj == NULL)
 		goto put_array;
 
-	stats_obj = json_object_new_object();
+	stats_obj = bbdd_jrpc_json_new_object(&error);
 	if (stats_obj == NULL)
 		goto put_entry_obj;
 
 	if (bbdd_jrpc_append_uint64(stats_obj, "rx_bytes",
-				    bbdd_ntoh64(cnt->control_input_bytes)) ||
+				    bbdd_ntoh64(cnt->control_input_bytes),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_packets",
-				    bbdd_ntoh64(cnt->control_input_packets)) ||
+				    bbdd_ntoh64(cnt->control_input_packets),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_bytes",
-				    bbdd_ntoh64(cnt->control_output_bytes)) ||
+				    bbdd_ntoh64(cnt->control_output_bytes),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_packets",
-				    bbdd_ntoh64(cnt->control_output_packets)) ||
+				    bbdd_ntoh64(cnt->control_output_packets),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_bytes",
-				    bbdd_ntoh64(cnt->echo_input_bytes)) ||
+				    bbdd_ntoh64(cnt->echo_input_bytes),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "rx_echo_packets",
-				    bbdd_ntoh64(cnt->echo_input_packets)) ||
+				    bbdd_ntoh64(cnt->echo_input_packets),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_bytes",
-				    bbdd_ntoh64(cnt->echo_output_bytes)) ||
+				    bbdd_ntoh64(cnt->echo_output_bytes),
+				    &error) ||
 	    bbdd_jrpc_append_uint64(stats_obj, "tx_echo_packets",
-				    bbdd_ntoh64(cnt->echo_output_packets)) ||
+				    bbdd_ntoh64(cnt->echo_output_packets),
+				    &error) ||
 
-	    bbdd_jrpc_append_uint64(entry_obj, "discr", br->stats->discr) ||
-	    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj) ||
+	    bbdd_jrpc_append_uint64(entry_obj, "discr", br->stats->discr,
+				    &error) ||
+	    bbdd_jrpc_append_obj(entry_obj, "stats", &stats_obj, &error) ||
 
-	    bbdd_jrpc_array_append_obj(array, &entry_obj) ||
-	    bbdd_jrpc_append_obj(result_obj, "sessions", &array) ||
-	    bbdd_jrpc_append_obj(resp, "result", &result_obj))
+	    bbdd_jrpc_array_append_obj(array, &entry_obj, &error) ||
+	    bbdd_jrpc_append_obj(result_obj, "sessions", &array, &error) ||
+	    bbdd_jrpc_append_obj(resp, "result", &result_obj, &error))
 		goto put_stats_obj;
 
 	if (br->stats->peer != NULL) {
@@ -232,6 +241,7 @@ put_result_obj:
 put_resp:
 	json_object_put(resp);
 err:
+	bbdd_err_print(&error, "Failed to form a session counters response");
 	if (br->stats->peer != NULL)
 		bbdd_util_jrpc_respond_memerr(br->stats->peer, br->stats->id);
 	bbdd_br_stats_free(br->stats);

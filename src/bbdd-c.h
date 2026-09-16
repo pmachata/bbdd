@@ -67,5 +67,6 @@ struct bbdd_ec bbdd_c_monitor(int argc, char **argv,
 
 void bbdd_c_monitor_dispatch(struct json_object *msg, void *data);
 
-struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess);
+struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *sess,
+					    char **error);
 struct json_object *bbdd_c_jrpc_addr_obj(const char *addr, int af);

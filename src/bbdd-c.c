@@ -379,22 +379,25 @@ static struct bbdd_ec bbdd_c_echo_jrpc(const char *method,
 	struct json_object *params;
 	const int id = 1;
 	uint64_t ts_us;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, method);
+	request = bbdd_jrpc_new_request(id, method, &error);
 	if (request == NULL)
 		goto err;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(&error);
 	if (params == NULL)
 		goto put_request;
 
 	ts_us = bbdd_util_now();
-	if (bbdd_jrpc_append_uint64(params, "ts", ts_us))
+	if (bbdd_jrpc_append_uint64(params, "ts", ts_us, &error))
 		goto put_params;
 
-	if (bbdd_jrpc_append_obj(request, "params", &params))
+	if (bbdd_jrpc_append_obj(request, "params", &params, &error))
 		goto put_params;
 
+	rc = 0;
 	ec = bbdd_c_interact(request, bbdd_c_echo_jrpc_res, NULL,
 			     json_type_object, topics);
 
@@ -403,6 +406,8 @@ put_params:
 put_request:
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form an echo request");
 	return ec;
 }
 
@@ -438,16 +443,21 @@ static struct bbdd_ec bbdd_c_stop_jrpc(const struct bbdd_mon_topics *topics)
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	const int id = 1;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, "stop");
+	request = bbdd_jrpc_new_request(id, "stop", &error);
 	if (request == NULL)
 		goto err;
 
+	rc = 0;
 	ec = bbdd_c_interact(request, bbdd_c_stop_jrpc_res, NULL,
 			     json_type_null, topics);
 
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a stop request");
 	return ec;
 }
 
@@ -494,16 +504,21 @@ bbdd_c_global_stats_get_jrpc(const struct bbdd_mon_topics *topics)
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	const int id = 1;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, "global-stats-diag");
+	request = bbdd_jrpc_new_request(id, "global-stats-diag", &error);
 	if (request == NULL)
 		goto err;
 
+	rc = 0;
 	ec = bbdd_c_interact(request, bbdd_c_global_stats_get_jrpc_res, NULL,
 			     json_type_object, topics);
 
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a global-stats-diag request");
 	return ec;
 }
 
@@ -1751,15 +1766,10 @@ static int bbdd_c_session_parse_addr(int *up_argc, char ***up_argv,
 	       bbdd_c_session_parse_addr_flag(up_argc, up_argv, kw, addr);
 }
 
-static int bbdd_c_enomem(void)
-{
-	fprintf(stderr, "Failed to form RPC request: %m");
-	return -ENOMEM;
-}
-
 static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
 				    const char *base,
-				    const struct bbdd_c_session_netif *netif)
+				    const struct bbdd_c_session_netif *netif,
+				    char **error)
 {
 #define INDEX "_index"
 #define NAME "_name"
@@ -1769,32 +1779,35 @@ static int bbdd_c_jrpc_append_netif(struct json_object *params_obj,
 	strcpy(stpcpy(nm_key, base), NAME);
 #undef INDEX
 
-	if ((netif->unset &&
-	     json_object_object_add(params_obj, nm_key, NULL)) ||
-	    (netif->name_seen &&
-	     bbdd_jrpc_append_str(params_obj, nm_key, netif->name)) ||
-	    (netif->ifindex_seen &&
-	     bbdd_jrpc_append_int(params_obj, ix_key, netif->ifindex)))
+	if (netif->unset &&
+	    bbdd_jrpc_append_null(params_obj, nm_key, error))
+		return -1;
+	if (netif->name_seen &&
+	    bbdd_jrpc_append_str(params_obj, nm_key, netif->name, error))
+		return -1;
+	if (netif->ifindex_seen &&
+	    bbdd_jrpc_append_int(params_obj, ix_key, netif->ifindex, error))
 		return -1;
 	return 0;
 }
 
 static int bbdd_c_jrpc_append_addr(struct json_object *params_obj,
 				   const char *kw,
-				   const struct bbdd_c_session_addr *addr)
+				   const struct bbdd_c_session_addr *addr,
+				   char **error)
 {
 	struct json_object *obj;
 
 	if (addr->unset)
-		return json_object_object_add(params_obj, kw, NULL);
+		return bbdd_jrpc_append_null(params_obj, kw, error);
 	if (addr->af == 0)
 		return 0;
 
-	obj = bbdd_util_jrpc_addr_obj(addr->str, addr->af);
+	obj = bbdd_util_jrpc_addr_obj(addr->str, addr->af, error);
 	if (obj == NULL)
 		return -1;
 
-	if (json_object_object_add(params_obj, kw, obj))
+	if (bbdd_jrpc_append_obj(params_obj, kw, &obj, error))
 		goto obj_put;
 
 	return 0;
@@ -1806,21 +1819,23 @@ obj_put:
 
 static int bbdd_c_jrpc_append_name(struct json_object *params_obj,
 				   const char *key,
-				   const struct bbdd_c_session_str *str)
+				   const struct bbdd_c_session_str *str,
+				   char **error)
 {
-	if ((str->unset &&
-	     json_object_object_add(params_obj, key, NULL)) ||
-	    (str->val_seen &&
-	     bbdd_jrpc_append_str(params_obj, key, str->val)))
+	if (str->unset && bbdd_jrpc_append_null(params_obj, key, error))
+		return -1;
+	if (str->val_seen &&
+	    bbdd_jrpc_append_str(params_obj, key, str->val, error))
 		return -1;
 	return 0;
 }
 
-struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
+struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess,
+					    char **error)
 {
 	struct json_object *params_obj;
 
-	params_obj = json_object_new_object();
+	params_obj = bbdd_jrpc_json_new_object(error);
 	if (params_obj == NULL)
 		goto err;
 
@@ -1831,34 +1846,40 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 		if (!flag->seen)
 			continue;
 
-		if (bbdd_jrpc_append_bool(params_obj, flag_name, flag->value))
+		if (bbdd_jrpc_append_bool(params_obj, flag_name, flag->value,
+					  error))
 			goto put_params_obj;
 	}
 
 	if ((csess->discr_seen &&
-	     bbdd_jrpc_append_int(params_obj, "discr", csess->discr)) ||
+	     bbdd_jrpc_append_int(params_obj, "discr", csess->discr, error)) ||
 	    (csess->remote_discr_seen &&
 	     bbdd_jrpc_append_int(params_obj, "remote_discr",
-				  csess->remote_discr)) ||
-	    bbdd_c_jrpc_append_name(params_obj, "name", &csess->name) ||
+				  csess->remote_discr, error)) ||
+	    bbdd_c_jrpc_append_name(params_obj, "name", &csess->name, error) ||
 	    (csess->min_tx_us_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_tx_us", csess->min_tx_us)) ||
+	     bbdd_jrpc_append_int(params_obj, "min_tx_us", csess->min_tx_us,
+				  error)) ||
 	    (csess->min_rx_us_seen &&
-	     bbdd_jrpc_append_int(params_obj, "min_rx_us", csess->min_rx_us)) ||
+	     bbdd_jrpc_append_int(params_obj, "min_rx_us", csess->min_rx_us,
+				  error)) ||
 	    (csess->hold_time_us_seen &&
 	     bbdd_jrpc_append_int(params_obj, "hold_time_us",
-				  csess->hold_time_us)) ||
+				  csess->hold_time_us, error)) ||
 	    (csess->ttl_seen &&
-	     bbdd_jrpc_append_int(params_obj, "ttl", csess->ttl)) ||
+	     bbdd_jrpc_append_int(params_obj, "ttl", csess->ttl, error)) ||
 	    (csess->detect_mult_seen &&
 	     bbdd_jrpc_append_int(params_obj, "detect_mult",
-				  csess->detect_mult)) ||
-	    bbdd_c_jrpc_append_addr(params_obj, "src", &csess->src) ||
-	    bbdd_c_jrpc_append_addr(params_obj, "dst", &csess->dst) ||
-	    bbdd_c_jrpc_append_netif(params_obj, "netif", &csess->netif) ||
-	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &csess->vrf.netif) ||
+				  csess->detect_mult, error)) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "src", &csess->src, error) ||
+	    bbdd_c_jrpc_append_addr(params_obj, "dst", &csess->dst, error) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "netif", &csess->netif,
+				     error) ||
+	    bbdd_c_jrpc_append_netif(params_obj, "vrf", &csess->vrf.netif,
+				     error) ||
 	    (csess->vrf.table_seen &&
-	     bbdd_jrpc_append_int(params_obj, "vrf_table", csess->vrf.table)))
+	     bbdd_jrpc_append_int(params_obj, "vrf_table", csess->vrf.table,
+				  error)))
 		goto put_params_obj;
 
 	return params_obj;
@@ -1866,7 +1887,6 @@ struct json_object *bbdd_c_jrpc_session_obj(const struct bbdd_c_session *csess)
 put_params_obj:
 	json_object_put(params_obj);
 err:
-	bbdd_c_enomem();
 	return NULL;
 }
 
@@ -1893,15 +1913,17 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 	struct json_object *request;
 	const char *method;
 	const int id = 1;
+	char *error;
+	int rc = -1;
 
 	if (command->allow_query) {
-		select_obj = bbdd_c_jrpc_session_obj(select);
+		select_obj = bbdd_c_jrpc_session_obj(select, &error);
 		if (select_obj == NULL)
 			goto err;
 	}
 
 	if (command->allow_change) {
-		change_obj = bbdd_c_jrpc_session_obj(change);
+		change_obj = bbdd_c_jrpc_session_obj(change, &error);
 		if (change_obj == NULL)
 			goto put_select;
 	}
@@ -1913,23 +1935,24 @@ bbdd_c_session_jrpc(const struct bbdd_c_session_command *command,
 
 	assert(method != NULL);
 
-	request = bbdd_jrpc_new_request(id, method);
+	request = bbdd_jrpc_new_request(id, method, &error);
 	if (request == NULL)
 		goto put_select_change;
 
-	params_obj = json_object_new_object();
+	params_obj = bbdd_jrpc_json_new_object(&error);
 	if (params_obj == NULL)
 		goto put_request;
 
 	if ((select_obj != NULL &&
-	     bbdd_jrpc_append_obj(params_obj, "select", &select_obj)) ||
+	     bbdd_jrpc_append_obj(params_obj, "select", &select_obj, &error)) ||
 	    (change_obj != NULL &&
-	     bbdd_jrpc_append_obj(params_obj, "change", &change_obj)) ||
+	     bbdd_jrpc_append_obj(params_obj, "change", &change_obj, &error)) ||
 	    (bulk.seen && bulk.value &&
-	     bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value)) ||
-	    bbdd_jrpc_append_obj(request, "params", &params_obj))
+	     bbdd_jrpc_append_bool(params_obj, "bulk", bulk.value, &error)) ||
+	    bbdd_jrpc_append_obj(request, "params", &params_obj, &error))
 		goto put_params_obj;
 
+	rc = 0;
 	ec = bbdd_c_interact(request,
 			     bbdd_c_session_jrpc_res, (void *) command,
 			     command->expected_result_type, topics);
@@ -1943,6 +1966,8 @@ put_select_change:
 put_select:
 	json_object_put(select_obj);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a session request");
 	return ec;
 }
 
@@ -2116,22 +2141,25 @@ bbdd_c_bfdd_connect_jrpc(const char *proto, const char *addr, const char *port,
 	struct json_object *params_obj;
 	struct json_object *request;
 	const int id = 1;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, "bfdd-connect");
+	request = bbdd_jrpc_new_request(id, "bfdd-connect", &error);
 	if (request == NULL)
 		goto err;
 
-	params_obj = json_object_new_object();
+	params_obj = bbdd_jrpc_json_new_object(&error);
 	if (params_obj == NULL)
 		goto put_request;
 
-	if (bbdd_jrpc_append_str(params_obj, "proto", proto) ||
-	    bbdd_jrpc_append_str(params_obj, "addr", addr) ||
+	if (bbdd_jrpc_append_str(params_obj, "proto", proto, &error) ||
+	    bbdd_jrpc_append_str(params_obj, "addr", addr, &error) ||
 	    (port != NULL &&
-	     bbdd_jrpc_append_str(params_obj, "port", port)) ||
-	    bbdd_jrpc_append_obj(request, "params", &params_obj))
+	     bbdd_jrpc_append_str(params_obj, "port", port, &error)) ||
+	    bbdd_jrpc_append_obj(request, "params", &params_obj, &error))
 		goto put_params_obj;
 
+	rc = 0;
 	ec = bbdd_c_interact(request, NULL, NULL, json_type_null, topics);
 
 put_params_obj:
@@ -2139,6 +2167,8 @@ put_params_obj:
 put_request:
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a bfdd-connect request");
 	return ec;
 }
 
@@ -2193,15 +2223,20 @@ bbdd_c_bfdd_disconnect_jrpc(const struct bbdd_mon_topics *topics)
 	struct bbdd_ec ec = bbdd_ec_failure;
 	struct json_object *request;
 	const int id = 1;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, "bfdd-disconnect");
+	request = bbdd_jrpc_new_request(id, "bfdd-disconnect", &error);
 	if (request == NULL)
 		goto err;
 
+	rc = 0;
 	ec = bbdd_c_interact(request, NULL, NULL, json_type_null, topics);
 
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a bfdd-disconnect request");
 	return ec;
 }
 
@@ -2242,11 +2277,14 @@ bbdd_c_bfdd_connected_jrpc(const struct bbdd_mon_topics *topics)
 	struct json_object *request;
 	const int id = 1;
 	bool connected;
+	char *error;
+	int rc = -1;
 
-	request = bbdd_jrpc_new_request(id, "bfdd-connected");
+	request = bbdd_jrpc_new_request(id, "bfdd-connected", &error);
 	if (request == NULL)
 		goto err;
 
+	rc = 0;
 	ec = bbdd_c_interact(request,
 			     bbdd_c_bfdd_connected_jrpc_res, &connected,
 			     json_type_boolean, topics);
@@ -2256,6 +2294,8 @@ bbdd_c_bfdd_connected_jrpc(const struct bbdd_mon_topics *topics)
 
 	json_object_put(request);
 err:
+	if (rc != 0)
+		bbdd_err_print(&error, "Failed to form a bfdd-connected request");
 	return ec;
 }
 
@@ -3117,22 +3157,28 @@ bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id,
 	struct json_object *params_obj;
 	struct json_object *request;
 
-	request = bbdd_jrpc_new_request(id, "monitor-subscribe");
+	request = bbdd_jrpc_new_request(id, "monitor-subscribe", error);
 	if (request == NULL)
 		goto err;
 
-	params_obj = json_object_new_object();
+	params_obj = bbdd_jrpc_json_new_object(error);
 	if (params_obj == NULL)
 		goto put_request;
 
-	topics_arr = json_object_new_array();
+	topics_arr = bbdd_jrpc_json_new_array(error);
 	if (topics_arr == NULL)
 		goto put_params;
 
 #define ADD_ENABLED_TOPIC(NAME, ALL)					\
 	if (topics.enabled[BBDD_MON_TOPIC_ ## NAME]) {			\
-		struct json_object *s = json_object_new_string(#NAME);	\
-		if (s == NULL || json_object_array_add(topics_arr, s)) { \
+		struct json_object *s;					\
+		int rc;							\
+									\
+		s = bbdd_jrpc_json_new_string(#NAME, error);		\
+		if (s == NULL)						\
+			goto put_topics;				\
+		rc = bbdd_jrpc_array_append_obj(topics_arr, &s, error);	\
+		if (rc != 0) {						\
 			json_object_put(s);				\
 			goto put_topics;				\
 		}							\
@@ -3140,10 +3186,10 @@ bbdd_c_monitor_build_request(struct bbdd_mon_topics topics, int id,
 	BBDD_MON_TOPICS(ADD_ENABLED_TOPIC)
 #undef ADD_ENABLED_TOPIC
 
-	if (bbdd_jrpc_append_obj(params_obj, "topics", &topics_arr))
+	if (bbdd_jrpc_append_obj(params_obj, "topics", &topics_arr, error))
 		goto put_topics;
 
-	if (bbdd_jrpc_append_obj(request, "params", &params_obj))
+	if (bbdd_jrpc_append_obj(request, "params", &params_obj, error))
 		goto put_params;
 
 	return request;
@@ -3155,7 +3201,7 @@ put_params:
 put_request:
 	json_object_put(request);
 err:
-	bbdd_err_fmt(error, "Failed to build monitor request: %m");
+	bbdd_err_app(error, "Failed to build monitor request");
 	return NULL;
 }
 

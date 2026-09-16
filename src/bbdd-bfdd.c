@@ -945,15 +945,15 @@ static int bbdd_bfdd_format_add_session(const struct bfddp_message *msg,
 	if (rc != 0)
 		return -1;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	sess_obj = bbdd_c_jrpc_session_obj(&csess);
+	sess_obj = bbdd_c_jrpc_session_obj(&csess, error);
 	if (sess_obj == NULL)
 		goto put_params;
 
-	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) != 0)
+	if (bbdd_jrpc_append_obj(params, "session", &sess_obj, error) != 0)
 		goto put_sess_obj;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -967,7 +967,6 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -982,50 +981,53 @@ int bbdd_bfdd_format_state_change(const struct bfddp_state_change *sc,
 	struct json_object *data_obj;
 	struct json_object *remote_obj;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	sess_obj = json_object_new_object();
+	sess_obj = bbdd_jrpc_json_new_object(error);
 	if (sess_obj == NULL)
 		goto put_params;
 
-	data_obj = json_object_new_object();
+	data_obj = bbdd_jrpc_json_new_object(error);
 	if (data_obj == NULL)
 		goto put_sess_obj;
 
-	state_obj = json_object_new_object();
+	state_obj = bbdd_jrpc_json_new_object(error);
 	if (state_obj == NULL)
 		goto put_data_obj;
 
-	remote_obj = json_object_new_object();
+	remote_obj = bbdd_jrpc_json_new_object(error);
 	if (remote_obj == NULL)
 		goto put_state_obj;
 
 	if (bbdd_jrpc_append_str(remote_obj, "state",
-				 bbdd_d_bfd_state_to_str(sc->state)) != 0 ||
+				 bbdd_d_bfd_state_to_str(sc->state),
+				 error) != 0 ||
 	    bbdd_jrpc_append_str(remote_obj, "diag",
-				 bbdd_d_bfd_diag_to_str(sc->diagnostics)) != 0 ||
+				 bbdd_d_bfd_diag_to_str(sc->diagnostics),
+				 error) != 0 ||
 	    bbdd_jrpc_append_int(remote_obj, "discr",
-				 bbdd_ntoh32(sc->rid)) != 0 ||
+				 bbdd_ntoh32(sc->rid), error) != 0 ||
 	    bbdd_jrpc_append_int(remote_obj, "detect_mult",
-				 sc->detection_multiplier) != 0 ||
+				 sc->detection_multiplier, error) != 0 ||
 	    bbdd_jrpc_append_int(remote_obj, "min_tx_us",
-				 bbdd_ntoh32(sc->desired_tx)) != 0 ||
+				 bbdd_ntoh32(sc->desired_tx), error) != 0 ||
 	    bbdd_jrpc_append_int(remote_obj, "min_rx_us",
-				 bbdd_ntoh32(sc->required_rx)) != 0 ||
+				 bbdd_ntoh32(sc->required_rx), error) != 0 ||
 
-	    bbdd_jrpc_append_obj(state_obj, "remote", &remote_obj) != 0)
+	    bbdd_jrpc_append_obj(state_obj, "remote", &remote_obj, error) != 0)
 		goto put_remote_obj;
 
-	if (bbdd_jrpc_append_obj(sess_obj, "state", &state_obj) != 0)
+	if (bbdd_jrpc_append_obj(sess_obj, "state", &state_obj, error) != 0)
 		goto put_state_obj;
 
-	if (bbdd_jrpc_append_int(data_obj, "discr", bbdd_ntoh32(sc->lid)) != 0 ||
-	    bbdd_jrpc_append_obj(sess_obj, "data", &data_obj) != 0)
+	if (bbdd_jrpc_append_int(data_obj, "discr", bbdd_ntoh32(sc->lid),
+				 error) != 0 ||
+	    bbdd_jrpc_append_obj(sess_obj, "data", &data_obj, error) != 0)
 		goto put_data_obj;
 
-	if (bbdd_jrpc_append_obj(params, "session", &sess_obj) != 0)
+	if (bbdd_jrpc_append_obj(params, "session", &sess_obj, error) != 0)
 		goto put_sess_obj;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1045,7 +1047,6 @@ put_sess_obj:
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1055,11 +1056,11 @@ static int bbdd_bfdd_format_lid_msg(uint32_t lid, const char *method,
 {
 	struct json_object *params;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	if (bbdd_jrpc_append_int(params, "lid", lid) != 0)
+	if (bbdd_jrpc_append_int(params, "lid", lid, error) != 0)
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1071,7 +1072,6 @@ static int bbdd_bfdd_format_lid_msg(uint32_t lid, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1081,14 +1081,14 @@ bbdd_bfdd_format_echo(const struct bfddp_echo *echo, const char *method,
 {
 	struct json_object *params;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
 	if (bbdd_jrpc_append_uint64(params, "dp-time",
-				    bbdd_ntoh64(echo->dp_time)) ||
+				    bbdd_ntoh64(echo->dp_time), error) ||
 	    bbdd_jrpc_append_uint64(params, "bfdd-time",
-				    bbdd_ntoh64(echo->bfdd_time)))
+				    bbdd_ntoh64(echo->bfdd_time), error))
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1100,7 +1100,6 @@ bbdd_bfdd_format_echo(const struct bfddp_echo *echo, const char *method,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
@@ -1119,11 +1118,11 @@ bbdd_bfdd_format_unknown(enum bfddp_message_type bmt,
 {
 	struct json_object *params;
 
-	params = json_object_new_object();
+	params = bbdd_jrpc_json_new_object(error);
 	if (params == NULL)
 		goto err;
 
-	if (bbdd_jrpc_append_int(params, "type", bmt) != 0)
+	if (bbdd_jrpc_append_int(params, "type", bmt, error) != 0)
 		goto put_params;
 
 	*mon_msg = (struct bbdd_mon_message) {
@@ -1135,7 +1134,6 @@ bbdd_bfdd_format_unknown(enum bfddp_message_type bmt,
 put_params:
 	json_object_put(params);
 err:
-	bbdd_err_from_errno(error);
 	return -1;
 }
 
