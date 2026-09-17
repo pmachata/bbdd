@@ -18,20 +18,20 @@
 
 static int bbdd_jrpc_object_add_error(struct json_object *obj,
 				      int code, const char *message,
-				      struct json_object *data)
+				      struct json_object *data, char **error)
 {
 	struct json_object *err_obj;
 	int rc;
 
-	err_obj = json_object_new_object();
+	err_obj = bbdd_jrpc_json_new_object(error);
 	if (err_obj == NULL)
 		return -1;
 
-	rc = bbdd_jrpc_append_int(err_obj, "code", code);
+	rc = bbdd_jrpc_append_int(err_obj, "code", code, error);
 	if (rc != 0)
 		goto err_put_err_obj;
 
-	rc = bbdd_jrpc_append_str(err_obj, "message", message);
+	rc = bbdd_jrpc_append_str(err_obj, "message", message, error);
 	if (rc != 0)
 		goto err_put_err_obj;
 
@@ -42,7 +42,7 @@ static int bbdd_jrpc_object_add_error(struct json_object *obj,
 			json_object_get(data);
 	}
 
-	rc = json_object_object_add(obj, "error", err_obj);
+	rc = bbdd_jrpc_append_obj(obj, "error", &err_obj, error);
 	if (rc != 0)
 		goto err_put_err_obj;
 
@@ -53,23 +53,26 @@ err_put_err_obj:
 	return -1;
 }
 
-struct json_object *bbdd_jrpc_new_object(struct json_object *id)
+struct json_object *bbdd_jrpc_new_object(struct json_object *id,
+					 char **error)
 {
 	struct json_object *obj;
 	int rc;
 
-	obj = json_object_new_object();
+	obj = bbdd_jrpc_json_new_object(error);
 	if (obj == NULL)
 		return NULL;
 
-	rc = bbdd_jrpc_append_str(obj, "jsonrpc", "2.0");
+	rc = bbdd_jrpc_append_str(obj, "jsonrpc", "2.0", error);
 	if (rc != 0)
 		goto err_put_obj;
 
 	if (id != NULL) {
 		rc = json_object_object_add(obj, "id", id);
-		if (rc != 0)
+		if (rc != 0) {
+			bbdd_err_fmt(error, "Failed to add `id' to a JSON object");
 			goto err_put_obj;
+		}
 		json_object_get(id);
 	}
 
@@ -80,7 +83,8 @@ err_put_obj:
 	return NULL;
 }
 
-struct json_object *bbdd_jrpc_new_request(int id, const char *method)
+struct json_object *bbdd_jrpc_new_request(int id, const char *method,
+					  char **error)
 {
 	struct json_object *request;
 	struct json_object *id_obj;
@@ -88,19 +92,19 @@ struct json_object *bbdd_jrpc_new_request(int id, const char *method)
 
 	id_obj = json_object_new_int(id);
 	if (id_obj == NULL) {
-		fprintf(stderr, "Failed to allocate an ID object.\n");
+		bbdd_err_fmt(error, "Failed to allocate an ID object");
 		return NULL;
 	}
 
-	request = bbdd_jrpc_new_object(id_obj);
+	request = bbdd_jrpc_new_object(id_obj, error);
 	if (request == NULL) {
-		fprintf(stderr, "Failed to allocate a request object.\n");
+		bbdd_err_app(error, "Failed to allocate a request object");
 		goto put_id;
 	}
 
-	rc = bbdd_jrpc_append_str(request, "method", method);
+	rc = bbdd_jrpc_append_str(request, "method", method, error);
 	if (rc != 0) {
-		fprintf(stderr, "Failed to form a request object.\n");
+		bbdd_err_app(error, "Failed to form a request object");
 		goto put_request;
 	}
 
@@ -113,16 +117,16 @@ put_id:
 	return rc == 0 ? request : NULL;
 }
 
-struct json_object *bbdd_jrpc_new_notif(const char *method)
+struct json_object *bbdd_jrpc_new_notif(const char *method, char **error)
 {
 	struct json_object *request;
 	int rc;
 
-	request = bbdd_jrpc_new_object(NULL);
+	request = bbdd_jrpc_new_object(NULL, error);
 	if (request == NULL)
 		return NULL;
 
-	rc = bbdd_jrpc_append_str(request, "method", method);
+	rc = bbdd_jrpc_append_str(request, "method", method, error);
 	if (rc != 0)
 		goto put_request;
 
@@ -136,16 +140,17 @@ put_request:
 struct json_object *bbdd_jrpc_new_error_data(struct json_object *id,
 					     enum bbdd_jrpc_e code,
 					     const char *message,
-					     struct json_object *data)
+					     struct json_object *data,
+					     char **error)
 {
 	struct json_object *obj;
 	int rc;
 
-	obj = bbdd_jrpc_new_object(id);
+	obj = bbdd_jrpc_new_object(id, error);
 	if (obj == NULL)
 		return NULL;
 
-	rc = bbdd_jrpc_object_add_error(obj, code, message, data);
+	rc = bbdd_jrpc_object_add_error(obj, code, message, data, error);
 	if (rc != 0)
 		goto err_put_obj;
 
@@ -159,7 +164,7 @@ err_put_obj:
 struct json_object *bbdd_jrpc_new_error(struct json_object *id,
 					enum bbdd_jrpc_e code,
 					const char *message,
-					const char *data)
+					const char *data, char **error)
 {
 	struct json_object *data_obj;
 	struct json_object *obj;
@@ -167,37 +172,41 @@ struct json_object *bbdd_jrpc_new_error(struct json_object *id,
 	/* Allow this to fail, the error object is valid without it. */
 	data_obj = json_object_new_string(data);
 
-	obj = bbdd_jrpc_new_error_data(id, code, message, data_obj);
+	obj = bbdd_jrpc_new_error_data(id, code, message, data_obj, error);
 
 	json_object_put(data_obj);
 	return obj;
 }
 
-struct json_object *bbdd_jrpc_new_error_inv_request(const char *data)
+struct json_object *bbdd_jrpc_new_error_inv_request(const char *data,
+						     char **error)
 {
 	return bbdd_jrpc_new_error(NULL, bbdd_jrpc_e_inv_request,
-				   "Invalid Request", data);
+				   "Invalid Request", data, error);
 }
 
 struct json_object *bbdd_jrpc_new_error_method_nf(struct json_object *id,
-						  const char *method)
+						  const char *method,
+						  char **error)
 {
 	return bbdd_jrpc_new_error(id, bbdd_jrpc_e_method_nf,
-				   "Method not found", method);
+				   "Method not found", method, error);
 }
 
 struct json_object *bbdd_jrpc_new_error_inv_params(struct json_object *id,
-						   const char *data)
+						   const char *data,
+						   char **error)
 {
 	return bbdd_jrpc_new_error(id, bbdd_jrpc_e_inv_params,
-				   "Invalid params", data);
+				   "Invalid params", data, error);
 }
 
 struct json_object *bbdd_jrpc_new_error_int_error(struct json_object *id,
-						  const char *data)
+						  const char *data,
+						  char **error)
 {
 	return bbdd_jrpc_new_error(id, bbdd_jrpc_e_int_error,
-				   "Internal error", data);
+				   "Internal error", data, error);
 }
 
 int bbdd_jrpc_dissect(struct json_object *obj,
@@ -544,73 +553,123 @@ int bbdd_jrpc_strcpy(size_t buf_len;
 
 static int __bbdd_jrpc_append_obj(struct json_object *params_obj,
 				  const char *name,
-				  struct json_object *param_obj)
+				  struct json_object *param_obj,
+				  char **error)
 {
-	if (param_obj == NULL)
-		goto out;
+	if (param_obj == NULL) {
+		bbdd_err_fmt(error, "Failed to allocate a JSON value for `%s'",
+			    name);
+		return -ENOMEM;
+	}
 
-	if (json_object_object_add(params_obj, name, param_obj))
-		goto put_param_obj;
+	if (json_object_object_add(params_obj, name, param_obj)) {
+		bbdd_err_fmt(error, "Failed to add `%s' to a JSON object",
+			    name);
+		json_object_put(param_obj);
+		return -ENOMEM;
+	}
 
 	return 0;
-
-put_param_obj:
-	json_object_put(param_obj);
-out:
-	return -ENOMEM;
 }
 
 int bbdd_jrpc_append_str(struct json_object *params_obj,
-			       const char *name, const char *value)
+			       const char *name, const char *value,
+			       char **error)
 {
 	return __bbdd_jrpc_append_obj(params_obj, name,
-				      json_object_new_string(value));
+				      json_object_new_string(value), error);
 }
 
 int bbdd_jrpc_append_int(struct json_object *params_obj,
-			       const char *name, int64_t value)
+			       const char *name, int64_t value, char **error)
 {
 	return __bbdd_jrpc_append_obj(params_obj, name,
-				      json_object_new_int64(value));
+				      json_object_new_int64(value), error);
 }
 
 int bbdd_jrpc_append_bool(struct json_object *params_obj,
-			  const char *name, bool value)
+			  const char *name, bool value, char **error)
 {
 	return __bbdd_jrpc_append_obj(params_obj, name,
-				      json_object_new_boolean(value));
+				      json_object_new_boolean(value), error);
 }
 
 int bbdd_jrpc_append_uint64(struct json_object *params_obj,
-			    const char *name, uint64_t value)
+			    const char *name, uint64_t value, char **error)
 {
 	return __bbdd_jrpc_append_obj(params_obj, name,
-				      json_object_new_uint64(value));
+				      json_object_new_uint64(value), error);
 }
 
 int bbdd_jrpc_append_obj(struct json_object *params_obj,
 			 const char *name,
-			 struct json_object **objp)
+			 struct json_object **objp, char **error)
 {
 	int rc;
 
 	rc = json_object_object_add(params_obj, name, *objp);
-	if (rc != 0)
+	if (rc != 0) {
+		bbdd_err_fmt(error, "Failed to add `%s' to a JSON object",
+			    name);
 		return rc;
+	}
 
 	*objp = NULL;
 	return 0;
 }
 
+int bbdd_jrpc_append_null(struct json_object *params_obj,
+			  const char *name, char **error)
+{
+	struct json_object *null_obj = NULL;
+
+	return bbdd_jrpc_append_obj(params_obj, name, &null_obj, error);
+}
+
 int bbdd_jrpc_array_append_obj(struct json_object *array,
-			       struct json_object **objp)
+			       struct json_object **objp, char **error)
 {
 	int rc;
 
 	rc = json_object_array_add(array, *objp);
-	if (rc != 0)
+	if (rc != 0) {
+		bbdd_err_fmt(error, "Failed to append to a JSON array");
 		return rc;
+	}
 
 	*objp = NULL;
 	return 0;
+}
+
+struct json_object *bbdd_jrpc_json_new_object(char **error)
+{
+	struct json_object *obj;
+
+	obj = json_object_new_object();
+	if (obj == NULL)
+		bbdd_err_from_errno(error);
+
+	return obj;
+}
+
+struct json_object *bbdd_jrpc_json_new_array(char **error)
+{
+	struct json_object *obj;
+
+	obj = json_object_new_array();
+	if (obj == NULL)
+		bbdd_err_from_errno(error);
+
+	return obj;
+}
+
+struct json_object *bbdd_jrpc_json_new_string(const char *str, char **error)
+{
+	struct json_object *obj;
+
+	obj = json_object_new_string(str);
+	if (obj == NULL)
+		bbdd_err_from_errno(error);
+
+	return obj;
 }

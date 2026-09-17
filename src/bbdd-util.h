@@ -61,7 +61,8 @@ void bbdd_util_jrpc_respond_echo(struct bbdd_ssk_peer *peer,
 				 uint64_t ts, uint64_t reply_ts,
 				 struct bbdd_mon *mon);
 
-struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af);
+struct json_object *bbdd_util_jrpc_addr_obj(const char *addr, int af,
+					    char **error);
 
 void bbdd_util_ssk_recv_obj(struct json_object *request_obj,
 			    struct bbdd_ssk_peer *peer,

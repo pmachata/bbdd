@@ -26,24 +26,31 @@ struct bbdd_jrpc_policy {
 	bool ignored;	/* This policy entry should be ignored. */
 };
 
-struct json_object *bbdd_jrpc_new_object(struct json_object *id);
-struct json_object *bbdd_jrpc_new_request(int id, const char *method);
-struct json_object *bbdd_jrpc_new_notif(const char *method);
+struct json_object *bbdd_jrpc_new_object(struct json_object *id,
+					 char **error);
+struct json_object *bbdd_jrpc_new_request(int id, const char *method,
+					  char **error);
+struct json_object *bbdd_jrpc_new_notif(const char *method, char **error);
 struct json_object *bbdd_jrpc_new_error(struct json_object *id,
 					enum bbdd_jrpc_e code,
 					const char *message,
-					const char *data);
+					const char *data, char **error);
 struct json_object *bbdd_jrpc_new_error_data(struct json_object *id,
 					     enum bbdd_jrpc_e code,
 					     const char *message,
-					     struct json_object *data);
-struct json_object *bbdd_jrpc_new_error_inv_request(const char *data);
+					     struct json_object *data,
+					     char **error);
+struct json_object *bbdd_jrpc_new_error_inv_request(const char *data,
+						     char **error);
 struct json_object *bbdd_jrpc_new_error_method_nf(struct json_object *id,
-						  const char *method);
+						  const char *method,
+						  char **error);
 struct json_object *bbdd_jrpc_new_error_inv_params(struct json_object *id,
-						   const char *data);
+						   const char *data,
+						   char **error);
 struct json_object *bbdd_jrpc_new_error_int_error(struct json_object *id,
-						  const char *data);
+						  const char *data,
+						  char **error);
 
 int bbdd_jrpc_dissect(struct json_object *obj,
 		      struct bbdd_jrpc_policy policy[],
@@ -85,15 +92,21 @@ int bbdd_jrpc_strcpy(size_t buf_len;
 		     char **error);
 
 int bbdd_jrpc_append_str(struct json_object *params_obj,
-			 const char *name, const char *value);
+			 const char *name, const char *value, char **error);
 int bbdd_jrpc_append_int(struct json_object *params_obj,
-			 const char *name, int64_t value);
+			 const char *name, int64_t value, char **error);
 int bbdd_jrpc_append_bool(struct json_object *params_obj,
-			  const char *name, bool value);
+			  const char *name, bool value, char **error);
 int bbdd_jrpc_append_uint64(struct json_object *params_obj,
-			    const char *name, uint64_t value);
+			    const char *name, uint64_t value, char **error);
 int bbdd_jrpc_append_obj(struct json_object *params_obj,
 			 const char *name,
-			 struct json_object **objp);
+			 struct json_object **objp, char **error);
+int bbdd_jrpc_append_null(struct json_object *params_obj,
+			  const char *name, char **error);
 int bbdd_jrpc_array_append_obj(struct json_object *array,
-			       struct json_object **objp);
+			       struct json_object **objp, char **error);
+
+struct json_object *bbdd_jrpc_json_new_object(char **error);
+struct json_object *bbdd_jrpc_json_new_array(char **error);
+struct json_object *bbdd_jrpc_json_new_string(const char *str, char **error);
