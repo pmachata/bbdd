@@ -1,3 +1,16 @@
+- BUGS:
+  - Have lots of sessions
+    : # bbdd session bulk set shutdown
+    : Error -32603: Internal error ("Session 2007098398: No interface with ifindex 215 found")
+
+  - Got two corresponding sessions (there and back) somehow stuck at down
+
+  - I think session deletions should be sent to monitor
+
+  - Sometimes bulk sets seem to delete all sessions :-o
+    # bbdd session bulk set min-rx 90ms min-tx 90ms
+    with 8K sessions
+
 - What if bound interface is in a VRF, but the session isn't? Or what if it
   is in a different VRF? That is a problem mainly with reception IMHO,
   where we get VRF ifindex, but the VRF is determined from the ingress

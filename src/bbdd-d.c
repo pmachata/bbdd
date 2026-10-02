@@ -232,8 +232,17 @@ static int bbdd_d_session_validate_netif(struct bbdd_c_session_netif *netif,
 		return 0;
 
 	if (netif->ifindex_seen) {
-		if (!if_indextoname(netif->ifindex, ifname)) {
-			bbdd_err_fmt(error, "No interface with ifindex %u found",
+		if (if_indextoname(netif->ifindex, ifname) == NULL) {
+			char buf[100];
+
+			fprintf(stderr, "if_indextoname %d failed [%s]\n",
+				netif->ifindex, ifname);
+			sprintf(buf, "cat /proc/%d/limits | grep open", getpid());
+			system(buf);
+			sprintf(buf, "ls /proc/%d/fd | wc -l", getpid());
+			system(buf);
+
+			bbdd_err_fmt(error, "No interface with ifindex %u found: %m",
 				     netif->ifindex);
 			return -1;
 		}

@@ -23,7 +23,6 @@
 #include <netpacket/packet.h>
 #include <sys/param.h>
 #include <sys/socket.h>
-#include <sys/timerfd.h>
 #include <uthash.h>
 
 #include "bbdd.h"
@@ -33,6 +32,7 @@
 #include "bbdd-mon.h"
 #include "bbdd-nl.h"
 #include "bbdd-prog.h"
+#include "bbdd-timer.h"
 #include "bbdd-tx.h"
 #include "bbdd-util.h"
 
@@ -72,6 +72,7 @@ struct bbdd_bpf {
 
 	struct bbdd_prog_global_diag_stats diag_stats;
 	struct bbdd_poll_ctx *pctx;
+	struct bbdd_timers *timers;
 
 	/* TX-side deferred-injection queue. Enqueue happens when
 	 * `pinned + 1 > tx_capacity`, i.e. when a fresh sendmsg would exceed
@@ -97,14 +98,14 @@ struct bbdd_bpf_shwait {
 	struct bbdd_bpf *bpf;
 	struct bbdd_d_session *dsess;
 	struct bbdd_bpf_session *bsess;
-	int timer_fd;
+	struct bbdd_timer *timer;
 };
 
 struct bbdd_bpf_hold {
 	struct bbdd_bpf *bpf;
 	struct bbdd_d_session *dsess;
 	struct bbdd_bpf_session *bsess;
-	int timer_fd;
+	struct bbdd_timer *timer;
 };
 
 enum bbdd_bpf_session_state {
@@ -1129,8 +1130,7 @@ bbdd_bpf_handle_packet_got_non_final(struct bbdd_bpf *bpf,
 
 static void bbdd_bpf_shwait_destroy(struct bbdd_bpf_shwait *shwait)
 {
-	bbdd_poll_unset_fd(shwait->bpf->pctx, shwait->timer_fd);
-	close(shwait->timer_fd);
+	bbdd_timer_cancel(shwait->timer);
 	free(shwait);
 }
 
@@ -1144,17 +1144,12 @@ static void bbdd_bpf_shwait_stop(struct bbdd_bpf *bpf,
 	bsess->shwait = NULL;
 }
 
-static int bbdd_bpf_shwait_timer_cb(struct bbdd_poll_ctx *, short,
-				    void *data, char **)
+static int bbdd_bpf_shwait_timer_cb(void *data, char **)
 {
 	struct bbdd_bpf_shwait *shwait = data;
 	struct bbdd_d_session *dsess = shwait->dsess;
 	struct bbdd_bpf_session *bsess = shwait->bsess;
 	struct bbdd_bpf *bpf = shwait->bpf;
-	uint64_t expirations;
-
-	/* Drain the timerfd so poll does not fire again. */
-	(void) read(shwait->timer_fd, &expirations, sizeof(expirations));
 
 	bbdd_bpf_shwait_stop(bpf, bsess);
 	bbdd_bpf_handle_packet_got_non_final(bpf, dsess, bsess);
@@ -1169,55 +1164,28 @@ bbdd_bpf_shwait_create(struct bbdd_bpf *bpf, struct bbdd_d_session *dsess,
 	uint32_t detect_time_us =
 		bbdd_bpf_session_detect_time_us(&bsess->eff_data,
 						&dsess->remote);
-	struct itimerspec ts = {
-		.it_value = {
-			.tv_sec  = detect_time_us / 1'000'000,
-			.tv_nsec = (detect_time_us % 1'000'000) * 1000,
-		},
-	};
 	struct bbdd_bpf_shwait *shwait;
-	int timer_fd;
-	int rc;
-
-	*error = NULL;
 
 	shwait = malloc(sizeof(*shwait));
-	if (shwait == NULL)
-		goto err;
-
-	/* Bump by 1 ns to avoid hold_time_us of 0 meaning timer disarm. */
-	ts.it_value.tv_nsec++;
-
-	timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	if (timer_fd < 0) {
-		goto free_shwait;
+	if (shwait == NULL) {
+		bbdd_err_fmt(error, "malloc: %m");
+		return NULL;
 	}
-
-	rc = timerfd_settime(timer_fd, 0, &ts, NULL);
-	if (rc < 0)
-		goto close_timer_fd;
-
-	rc = bbdd_poll_set_fd(bpf->pctx, timer_fd, POLLIN,
-			      bbdd_bpf_shwait_timer_cb, shwait, error);
-	if (rc != 0)
-		goto close_timer_fd;
 
 	*shwait = (struct bbdd_bpf_shwait) {
 		.bpf = bpf,
 		.dsess = dsess,
 		.bsess = bsess,
-		.timer_fd = timer_fd,
 	};
-	return shwait;
 
-close_timer_fd:
-	close(timer_fd);
-free_shwait:
-	free(shwait);
-err:
-	if (*error == NULL)
-		bbdd_err_from_errno(error);
-	return NULL;
+	shwait->timer = bbdd_timer_set(bpf->timers, detect_time_us,
+				       bbdd_bpf_shwait_timer_cb, shwait, error);
+	if (shwait->timer == NULL) {
+		free(shwait);
+		return NULL;
+	}
+
+	return shwait;
 }
 
 static int bbdd_bpf_shwait_start(struct bbdd_bpf *bpf,
@@ -1249,8 +1217,7 @@ bbdd_bpf_user_bdata(const struct bbdd_d_session *dsess)
 
 static void bbdd_bpf_hold_destroy(struct bbdd_bpf_hold *hold)
 {
-	bbdd_poll_unset_fd(hold->bpf->pctx, hold->timer_fd);
-	close(hold->timer_fd);
+	bbdd_timer_cancel(hold->timer);
 	free(hold);
 }
 
@@ -1260,17 +1227,12 @@ static void bbdd_bpf_hold_stop(struct bbdd_bpf_session *bsess)
 	bsess->hold = NULL;
 }
 
-static int bbdd_bpf_hold_timer_cb(struct bbdd_poll_ctx *, short,
-				  void *data, char **)
+static int bbdd_bpf_hold_timer_cb(void *data, char **)
 {
 	struct bbdd_bpf_hold *hold = data;
 	struct bbdd_d_session *dsess = hold->dsess;
 	struct bbdd_bpf_session *bsess = hold->bsess;
 	struct bbdd_bpf *bpf = hold->bpf;
-	uint64_t expirations;
-
-	/* Drain the timerfd so poll does not fire again. */
-	(void) read(hold->timer_fd, &expirations, sizeof(expirations));
 
 	bsess->eff_data = bbdd_bpf_user_bdata(dsess);
 	bsess->bstate = BBDD_BPF_SESSION_STATE_STABLE;
@@ -1286,54 +1248,28 @@ static struct bbdd_bpf_hold *
 bbdd_bpf_hold_create(struct bbdd_bpf *bpf, struct bbdd_d_session *dsess,
 		     struct bbdd_bpf_session *bsess, char **error)
 {
-	struct itimerspec ts = {
-		.it_value = {
-			.tv_sec  = dsess->hold_time_us / 1'000'000,
-			.tv_nsec = (dsess->hold_time_us % 1'000'000) * 1000,
-		},
-	};
 	struct bbdd_bpf_hold *hold;
-	int timer_fd;
-	int rc;
-
-	*error = NULL;
 
 	hold = malloc(sizeof(*hold));
-	if (hold == NULL)
-		goto err;
-
-	/* Bump by 1 ns to avoid hold_time_us of 0 meaning timer disarm. */
-	ts.it_value.tv_nsec++;
-
-	timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	if (timer_fd < 0)
-		goto free_hold;
-
-	rc = timerfd_settime(timer_fd, 0, &ts, NULL);
-	if (rc < 0)
-		goto close_timer_fd;
-
-	rc = bbdd_poll_set_fd(bpf->pctx, timer_fd, POLLIN,
-			      bbdd_bpf_hold_timer_cb, hold, error);
-	if (rc != 0)
-		goto close_timer_fd;
+	if (hold == NULL) {
+		bbdd_err_fmt(error, "malloc: %m");
+		return NULL;
+	}
 
 	*hold = (struct bbdd_bpf_hold) {
 		.bpf = bpf,
 		.dsess = dsess,
 		.bsess = bsess,
-		.timer_fd = timer_fd,
 	};
-	return hold;
 
-close_timer_fd:
-	close(timer_fd);
-free_hold:
-	free(hold);
-err:
-	if (*error == NULL)
-		bbdd_err_from_errno(error);
-	return NULL;
+	hold->timer = bbdd_timer_set(bpf->timers, dsess->hold_time_us,
+				     bbdd_bpf_hold_timer_cb, hold, error);
+	if (hold->timer == NULL) {
+		free(hold);
+		return NULL;
+	}
+
+	return hold;
 }
 
 static int bbdd_bpf_hold_start(struct bbdd_bpf *bpf,
@@ -2573,9 +2509,13 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	bpf->veth_rx_ifindex = veth_rx_ifindex;
 	bpf->veth_tx_ifindex = veth_tx_ifindex;
 
+	bpf->timers = bbdd_timers_init(pctx, error);
+	if (bpf->timers == NULL)
+		goto free_bpf;
+
 	bpf->tx = bbdd_tx_create(error);
 	if (bpf->tx == NULL)
-		goto free_bpf;
+		goto fini_timers;
 
 	bpf->tx_sock_fd = bbdd_bpf_tx_sock_open(veth_tx_ifindex, error);
 	if (bpf->tx_sock_fd < 0)
@@ -2668,6 +2608,8 @@ close_tx_sock_fd:
 	close(bpf->tx_sock_fd);
 destroy_tx:
 	bbdd_tx_destroy(bpf->tx);
+fini_timers:
+	bbdd_timers_fini(bpf->timers);
 free_bpf:
 	free(bpf);
 err:
@@ -2729,6 +2671,7 @@ void bbdd_bpf_destroy(struct bbdd_bpf *bpf)
 	bbdd_bpf_tx_pollout_disarm(bpf);
 	close(bpf->tx_sock_fd);
 	bbdd_tx_destroy(bpf->tx);
+	bbdd_timers_fini(bpf->timers);
 	free(bpf);
 }
 
