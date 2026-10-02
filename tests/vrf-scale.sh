@@ -70,3 +70,37 @@ expected=$(jq -nc --argjson b $((N_SESSIONS + 1)) '[1, $b] | sort')
 check_err $? "no-name session discrs were $discrs, expected $expected"
 
 Bbdd_log_test "Unsetting a name"
+
+Bbdd_log_head "bulk set shutdown"
+
+# Hold/shwait used to each own a timerfd, so enough concurrently pending session
+# timers would run the process out of file descriptors, which caused
+# if_indextoname() failures.
+
+Bbdd session bulk set shutdown
+check_err $? "bulk set shutdown"
+Bbdd_log_test "bulk set shutdown succeeded across $((2 * N_SESSIONS)) sessions"
+
+# Admin-down sessions stop processing packets from the peer (RFC 6.18.6), so
+# remote state is forced down. Only the local state is admindown.
+nsessions_admindown()
+{
+	Bbdd --json session show | jq '
+		[.sessions[] |
+		 select(.state.local.state == "admindown" and
+			.state.remote.state == "down")] |
+		length'
+}
+
+nsessions_admindown_is()
+{
+	local xN=$1
+	local N
+
+	N=$(nsessions_admindown)
+	((N == xN))
+}
+
+slowwait ${BBDD_SESSION_WAIT_TIME-30} nsessions_admindown_is $((2 * N_SESSIONS))
+check_err $? "$((2 * N_SESSIONS)) sessions reach admindown/down"
+Bbdd_log_test "$((2 * N_SESSIONS)) sessions reach admindown/down"
