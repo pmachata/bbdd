@@ -408,11 +408,18 @@ static int bbdd_br_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
 }
 
 static int bbdd_br_ctl_accept_cb(struct bbdd_poll_ctx *, short,
-				 void *data, char **error)
+				 void *data, char **)
 {
 	struct bbdd_br *br = data;
+	char *error;
+	int rc;
 
-	return bbdd_d_ctl_accept(br->ctl, bbdd_br_ctl_recv_obj, br, error);
+	/* A failed accept() is not a reason to tear down the whole daemon:
+	 * report it and keep serving existing clients. */
+	rc = bbdd_d_ctl_accept(br->ctl, bbdd_br_ctl_recv_obj, br, &error);
+	if (rc != 0)
+		bbdd_mon_senderr(br->mon, &error, "Failed to accept a control connection");
+	return 0;
 }
 
 static void

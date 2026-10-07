@@ -2603,11 +2603,18 @@ destroy_tkn:
 }
 
 static int bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short,
-				void *data, char **error)
+				void *data, char **)
 {
 	struct bbdd_d *d = data;
+	char *error;
+	int rc;
 
-	return bbdd_d_ctl_accept(d->ctl, bbdd_d_ctl_recv_obj, d, error);
+	/* A failed accept() is not a reason to tear down the whole daemon:
+	 * report it and keep serving existing clients. */
+	rc = bbdd_d_ctl_accept(d->ctl, bbdd_d_ctl_recv_obj, d, &error);
+	if (rc != 0)
+		bbdd_mon_senderr(d->mon, &error, "Failed to accept a control connection");
+	return 0;
 }
 
 static const char bbdd_d_veth_rx_name[] = "bfd_rx";
