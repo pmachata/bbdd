@@ -38,7 +38,7 @@
 	FIELD(tx_fail_update)			\
 	FIELD(tx_fail_redir)			\
 	FIELD(tx_loopback_filter)		\
-	FIELD(tx_wrong_gen_id)		        \
+	FIELD(tx_wrong_gen_id)			\
 	FIELD(rx_admin_down)			\
 	FIELD(rx_ttl_low)			\
 	FIELD(rx_unsupported)			\
@@ -52,9 +52,9 @@
 
 #define BBDD_PROG_SESSION_STATS(FIELD)		\
 	FIELD(rx_bytes)				\
-	FIELD(rx_packets)		        \
-	FIELD(tx_bytes)			        \
-	FIELD(tx_packets)		        \
+	FIELD(rx_packets)			\
+	FIELD(tx_bytes)				\
+	FIELD(tx_packets)			\
 	/**/
 
 #define STAT_FIELD(NAME) __u64 NAME;
