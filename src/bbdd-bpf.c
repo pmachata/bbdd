@@ -348,15 +348,16 @@ static void bbdd_bpf_tx_pollout_disarm(struct bbdd_bpf *bpf)
 	bpf->tx_pollout_registered = false;
 }
 
-static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **error)
+static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **)
 {
 	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
 	struct bbdd_tx_slot *slot;
-	int rc = 0;
 
 	while ((slot = bbdd_tx_peek(bpf->tx)) != NULL) {
 		struct bbdd_bpf_session *bsess;
 		struct bbdd_d_session *dsess;
+		char *slot_error;
+		int rc;
 
 		if (!bbdd_bpf_tx_have_capacity(bpf))
 			break;
@@ -374,23 +375,27 @@ static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **error)
 			rc = bbdd_bpf_session_inject_pkt(bpf, dsess, bsess,
 							 slot->tx_ifindex,
 							 slot->bfd_flags,
-							 error);
+							 &slot_error);
 		} else {
 			/* New periodic packet. */
 			rc = __bbdd_bpf_session_update(bpf, dsess, bsess,
-						       error);
+						       &slot_error);
 		}
+		/* A single slot's send failure is not a reason to tear down the
+		 * whole daemon: report it and move on. */
 		if (rc != 0)
-			break;
+			bbdd_mon_senderr(bpf->rb_ctx->mon, &slot_error,
+					 "Failed to drain queued packet for session discr %u",
+					 slot->discr);
 		bpf->diag_stats.sk_deq_count++;
 	}
 
 	/* Disarm if the queue is empty. Keep it armed otherwise so that the
 	 * next sk_wmem_alloc release wakes us again. */
-	if (rc == 0 && !bbdd_tx_pending(bpf->tx))
+	if (!bbdd_tx_pending(bpf->tx))
 		bbdd_bpf_tx_pollout_disarm(bpf);
 
-	return rc;
+	return 0;
 }
 
 static int bbdd_bpf_tx_pollout_cb(struct bbdd_poll_ctx *, short,
