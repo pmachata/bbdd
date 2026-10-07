@@ -17,7 +17,7 @@
 
 #define TC_ACT_OK		0
 #define TC_ACT_SHOT		2
-#define TC_ACT_STOLEN		5
+#define TC_ACT_STOLEN		4
 #define TC_ACT_REDIRECT		7
 
 #define CLOCK_MONOTONIC			1
@@ -429,7 +429,16 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 			goto out;
 		case BPF_FIB_LKUP_RET_NO_NEIGH:
 			bbdd_tx_notify_no_neigh(skb->protocol, &params);
-			BUMP(data->diag_stats.tx_no_neigh);
+			if (final) {
+				/* We can silently drop failed final packets. If
+				 * the remote cares, it sends a new poll. The
+				 * neighbor should be resolved by then. */
+				BUMP(data->diag_stats.tx_no_neigh_final);
+				BUMP(bbdd_prog_global_diag_stats.sk_released_count);
+				return TC_ACT_STOLEN;
+			} else {
+				BUMP(data->diag_stats.tx_no_neigh);
+			}
 			goto out;
 		case BPF_FIB_LKUP_RET_FRAG_NEEDED:
 			BUMP(data->diag_stats.tx_req_fragmentation);
@@ -479,6 +488,10 @@ int bbdd_xmit_veth_tx(struct __sk_buff *skb)
 out:
 	if (final) {
 		BUMP(bbdd_prog_global_diag_stats.sk_released_count);
+
+		/* final_rc is TC_ACT_SHOT for everything that reaches here,
+		 * which means userspace will fail to inject the packet and will
+		 * be able to emit a diagnostic. */
 		return final_rc;
 	}
 

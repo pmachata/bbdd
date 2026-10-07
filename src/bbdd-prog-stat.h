@@ -30,6 +30,7 @@
 	FIELD(tx_indev_no_forwarding)		\
 	FIELD(tx_req_encap)			\
 	FIELD(tx_no_neigh)			\
+	FIELD(tx_no_neigh_final)		\
 	FIELD(tx_req_fragmentation)		\
 	FIELD(tx_no_src_addr)			\
 	FIELD(tx_not_forwarded)			\
