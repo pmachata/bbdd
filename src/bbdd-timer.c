@@ -12,6 +12,7 @@
 #include <utlist.h>
 
 #include "bbdd-err.h"
+#include "bbdd-mon.h"
 #include "bbdd-poll.h"
 
 struct bbdd_timer {
@@ -27,6 +28,7 @@ struct bbdd_timer {
 
 struct bbdd_timers {
 	struct bbdd_poll_ctx *pctx;
+	struct bbdd_mon *mon;
 	int fd;
 	struct bbdd_timer *head; /* DList of timers. */
 };
@@ -124,8 +126,7 @@ void bbdd_timer_cancel(struct bbdd_timer *timer)
 	if (was_earliest) {
 		rc = bbdd_timers_rearm(timers, &error);
 		if (rc != 0)
-			// xxx monitor
-			bbdd_err_print(&error, "Failed to rearm timer");
+			bbdd_mon_senderr(timers->mon, &error, "Failed to rearm timer");
 	}
 }
 
@@ -175,17 +176,16 @@ static void bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data)
 	assert(failed == NULL);
 
 	if (rc != 0) {
-		// xxx monitor
-		bbdd_err_print(&error, "Timer callback failed");
+		bbdd_mon_senderr(timers->mon, &error, "Timer callback failed");
 		return;
 	}
 
 	if (bbdd_timers_rearm(timers, &error) != 0)
-		// xxx monitor
-		bbdd_err_print(&error, "Failed to rearm timer");
+		bbdd_mon_senderr(timers->mon, &error, "Failed to rearm timer");
 }
 
-struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx, char **error)
+struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx,
+				     struct bbdd_mon *mon, char **error)
 {
 	struct bbdd_timers *timers;
 	int fd;
@@ -210,6 +210,7 @@ struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx, char **error)
 
 	*timers = (struct bbdd_timers) {
 		.pctx = pctx,
+		.mon = mon,
 		.fd = fd,
 	};
 	return timers;

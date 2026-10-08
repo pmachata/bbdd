@@ -2517,7 +2517,7 @@ struct bbdd_bpf *bbdd_bpf_create(const struct bbdd_bpf_cbs *cbs,
 	bpf->veth_rx_ifindex = veth_rx_ifindex;
 	bpf->veth_tx_ifindex = veth_tx_ifindex;
 
-	bpf->timers = bbdd_timers_init(pctx, error);
+	bpf->timers = bbdd_timers_init(pctx, mon, error);
 	if (bpf->timers == NULL)
 		goto free_bpf;
 

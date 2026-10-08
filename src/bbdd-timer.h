@@ -3,9 +3,11 @@
 
 #include <stdint.h>
 
+#include "bbdd-mon.i"
 #include "bbdd-poll.i"
 
-struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx, char **error);
+struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx,
+				     struct bbdd_mon *mon, char **error);
 void bbdd_timers_fini(struct bbdd_timers *timers);
 
 /* Schedule fn(data, error) to run once, delay_us from now. */
