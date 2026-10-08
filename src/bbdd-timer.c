@@ -129,8 +129,7 @@ void bbdd_timer_cancel(struct bbdd_timer *timer)
 	}
 }
 
-static int bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data,
-			     char **error)
+static void bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data)
 {
 	struct bbdd_timers *timers = data;
 	struct bbdd_timer *failed = NULL;
@@ -138,6 +137,7 @@ static int bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data,
 	struct bbdd_timer *tmp;
 	uint64_t expirations;
 	uint64_t now_ns;
+	char *error;
 	int rc = 0;
 
 	/* Drain the timerfd so poll does not fire again. */
@@ -151,7 +151,7 @@ static int bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data,
 		if (timer->deadline_ns > now_ns)
 			break;
 
-		rc = timer->fn(timer->data, error);
+		rc = timer->fn(timer->data, &error);
 		if (rc != 0) {
 			failed = timer;
 			break;
@@ -174,10 +174,15 @@ static int bbdd_timers_fd_cb(struct bbdd_poll_ctx *, short, void *data,
 	 * environment, so we must have seen the node in cleanup pass. */
 	assert(failed == NULL);
 
-	if (rc != 0)
-		return -1;
+	if (rc != 0) {
+		// xxx monitor
+		bbdd_err_print(&error, "Timer callback failed");
+		return;
+	}
 
-	return bbdd_timers_rearm(timers, error);
+	if (bbdd_timers_rearm(timers, &error) != 0)
+		// xxx monitor
+		bbdd_err_print(&error, "Failed to rearm timer");
 }
 
 struct bbdd_timers *bbdd_timers_init(struct bbdd_poll_ctx *pctx, char **error)

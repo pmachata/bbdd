@@ -15,7 +15,7 @@
 #include "bbdd-util.h"
 
 struct bbdd_poll_cb {
-	int (*fn)(struct bbdd_poll_ctx *, short, void *, char **);
+	void (*fn)(struct bbdd_poll_ctx *, short, void *);
 	void *data;
 };
 
@@ -104,8 +104,7 @@ error:
 
 static int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 			      int fd, short events,
-			      int (*fn)(struct bbdd_poll_ctx *, short, void *,
-					char **),
+			      void (*fn)(struct bbdd_poll_ctx *, short, void *),
 			      void *data, char **error)
 {
 	ssize_t ix;
@@ -130,7 +129,7 @@ static int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 
 int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 		     int fd, short events,
-		     int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
+		     void (*fn)(struct bbdd_poll_ctx *, short, void *),
 		     void *data, char **error)
 {
 	int rc;
@@ -154,8 +153,7 @@ int bbdd_poll_unset_fd(struct bbdd_poll_ctx *pctx, int fd)
 	return -ESRCH;
 }
 
-static int bbdd_poll_sig_cb(struct bbdd_poll_ctx *pctx, short, void *,
-			    char **)
+static void bbdd_poll_sig_cb(struct bbdd_poll_ctx *pctx, short, void *)
 {
 	struct signalfd_siginfo info;
 	sigset_t mask;
@@ -173,7 +171,6 @@ static int bbdd_poll_sig_cb(struct bbdd_poll_ctx *pctx, short, void *,
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
 
 	bbdd_poll_request_quit(pctx);
-	return 0;
 }
 
 int bbdd_poll_set_signals(struct bbdd_poll_ctx *pctx, char **error)
@@ -239,10 +236,7 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 			if (pollfd->revents & pollfd->events) {
 				struct bbdd_poll_cb *cb = &pctx->cbs[i];
 
-				err = cb->fn(pctx, pollfd->revents, cb->data,
-					     error);
-				if (err)
-					goto out;
+				cb->fn(pctx, pollfd->revents, cb->data);
 			} else if (pollfd->revents & (POLLERR | POLLHUP |
 						      POLLNVAL)) {
 				bbdd_err_fmt(error, "Problem on pollfd #%zd: %m",

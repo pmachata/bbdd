@@ -2574,8 +2574,8 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 		      void *recv_obj_data, char **error)
 {
 	struct bbdd_util_ssk_json_tkn *tkn;
+	enum bbdd_ssk_d_accept rc;
 	struct bbdd_ssk_cbs cbs;
-	int rc;
 
 	tkn = bbdd_util_ssk_json_tkn_create(bbdd_env.stream_maxbuf,
 					    recv_obj_cb, recv_obj_data, error);
@@ -2590,31 +2590,27 @@ int bbdd_d_ctl_accept(struct bbdd_ssk_d *ctl,
 	};
 
 	rc = bbdd_ssk_d_accept(ctl, cbs, NULL, error);
-	if (rc != 0)
+	if (rc != bbdd_ssk_d_accept_ok)
 		goto destroy_tkn;
 
 	return 0;
 
 destroy_tkn:
 	bbdd_util_ssk_json_tkn_destroy(tkn);
-	if (rc == -EWOULDBLOCK)
-		rc = 0;
-	return rc;
+	if (rc == bbdd_ssk_d_accept_none)
+		return 0;
+	return -1;
 }
 
-static int bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short,
-				void *data, char **)
+static void bbdd_d_ctl_accept_cb(struct bbdd_poll_ctx *, short, void *data)
 {
 	struct bbdd_d *d = data;
 	char *error;
 	int rc;
 
-	/* A failed accept() is not a reason to tear down the whole daemon:
-	 * report it and keep serving existing clients. */
 	rc = bbdd_d_ctl_accept(d->ctl, bbdd_d_ctl_recv_obj, d, &error);
 	if (rc != 0)
 		bbdd_mon_senderr(d->mon, &error, "Failed to accept a control connection");
-	return 0;
 }
 
 static const char bbdd_d_veth_rx_name[] = "bfd_rx";

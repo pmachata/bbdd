@@ -407,19 +407,15 @@ static int bbdd_br_ctl_recv_obj(struct bbdd_util_ssk_json_tkn *tkn,
 	return 0;
 }
 
-static int bbdd_br_ctl_accept_cb(struct bbdd_poll_ctx *, short,
-				 void *data, char **)
+static void bbdd_br_ctl_accept_cb(struct bbdd_poll_ctx *, short, void *data)
 {
 	struct bbdd_br *br = data;
 	char *error;
 	int rc;
 
-	/* A failed accept() is not a reason to tear down the whole daemon:
-	 * report it and keep serving existing clients. */
 	rc = bbdd_d_ctl_accept(br->ctl, bbdd_br_ctl_recv_obj, br, &error);
 	if (rc != 0)
 		bbdd_mon_senderr(br->mon, &error, "Failed to accept a control connection");
-	return 0;
 }
 
 static void
@@ -528,14 +524,15 @@ static void bbdd_br_bfdd_peer_done_cb(void *data)
 	bbdd_br_bfdd_client_close(br);
 }
 
-static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *, short,
-				      void *arg, char **error)
+static void bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *, short,
+				       void *arg)
 {
 	struct bbdd_br *br = arg;
 	struct bbdd_ssk_cbs ssk_cbs = {};
 	struct bbdd_bfdd_cbs cbs;
 	struct bbdd_ssk_peer *peer;
-	int rc;
+	enum bbdd_ssk_d_accept rc;
+	char *error;
 
 	bbdd_mon_send_debug(br->mon, "bfdd: Client connected");
 
@@ -543,24 +540,27 @@ static int bbdd_br_bfdd_client_accept(struct bbdd_poll_ctx *, short,
 	 * bfdd peer at a time. */
 	bbdd_br_bfdd_client_close(br);
 
-	rc = bbdd_ssk_d_accept(br->bfdd_server, ssk_cbs, &peer, error);
-	if (rc == -EWOULDBLOCK)
-		return 0;
-	if (rc != 0)
-		return rc;
+	rc = bbdd_ssk_d_accept(br->bfdd_server, ssk_cbs, &peer, &error);
+	switch (rc) {
+	case bbdd_ssk_d_accept_none:
+		return;
+	case bbdd_ssk_d_accept_err:
+		bbdd_mon_senderr(br->mon, &error, "Failed to accept a bfdd connection");
+		return;
+	case bbdd_ssk_d_accept_ok:
+		break;
+	}
 
 	cbs = (struct bbdd_bfdd_cbs) {
 		.data = br,
 		.peer_done_cb = bbdd_br_bfdd_peer_done_cb,
 		.message_cb = bbdd_br_bfdd_message_cb,
 	};
-	br->bfdd = bbdd_bfdd_attach_d(peer, br->pctx, br->mon, &cbs, error);
+	br->bfdd = bbdd_bfdd_attach_d(peer, br->pctx, br->mon, &cbs, &error);
 	if (br->bfdd == NULL) {
 		bbdd_ssk_peer_destroy(peer);
-		return -1;
+		bbdd_mon_senderr(br->mon, &error, "Failed to attach a bfdd connection");
 	}
-
-	return 0;
 }
 
 static struct bbdd_ec bbdd_br_do_start(const char *addr,

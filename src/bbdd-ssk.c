@@ -131,8 +131,8 @@ again:
 	return 0;
 }
 
-static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
-			       void *arg, char **)
+static void bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
+				void *arg)
 {
 	struct bbdd_ssk_peer *peer = arg;
 	short events = POLLHUP;
@@ -164,7 +164,7 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 		events |= POLLOUT;
 	} else if (peer->done) {
 		bbdd_ssk_peer_destroy(peer);
-		return 0;
+		return;
 	}
 
 	rc = bbdd_poll_set_fd(pctx, peer->fd, events,
@@ -174,11 +174,10 @@ static int bbdd_ssk_peer_event(struct bbdd_poll_ctx *pctx, short revents,
 		goto destroy;
 	}
 
-	return 0;
+	return;
 
 destroy:
 	bbdd_ssk_peer_destroy(peer);
-	return 0;
 }
 
 struct bbdd_ssk_cbs *
@@ -327,9 +326,10 @@ destroy_peer:
 	return NULL;
 }
 
-int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_ssk_cbs cbs,
-		      struct bbdd_ssk_peer **ret_peer,
-		      char **error)
+enum bbdd_ssk_d_accept bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd,
+					 struct bbdd_ssk_cbs cbs,
+					 struct bbdd_ssk_peer **ret_peer,
+					 char **error)
 {
 	struct bbdd_ssk_peer *peer;
 	int fd;
@@ -339,11 +339,12 @@ again:
 		     SOCK_NONBLOCK | SOCK_CLOEXEC);
 	if (fd < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return -EWOULDBLOCK;
+			return bbdd_ssk_d_accept_none;
 		if (errno == EINTR)
 			goto again;
+
 		bbdd_err_fmt(error, "accept4: %m");
-		return -errno;
+		return bbdd_ssk_d_accept_err;
 	}
 
 	peer = bbdd_ssk_peer_create(&ssd->base, fd, cbs, error);
@@ -352,11 +353,11 @@ again:
 
 	if (ret_peer != NULL)
 		*ret_peer = peer;
-	return 0;
+	return bbdd_ssk_d_accept_ok;
 
 close_fd:
 	close(fd);
-	return -1;
+	return bbdd_ssk_d_accept_err;
 }
 
 struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,

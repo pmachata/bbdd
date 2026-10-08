@@ -11,7 +11,7 @@ void bbdd_poll_fini(struct bbdd_poll_ctx *ctx);
 
 int bbdd_poll_set_fd(struct bbdd_poll_ctx *ctx,
 		     int fd, short events,
-		     int (*fn)(struct bbdd_poll_ctx *, short, void *, char **),
+		     void (*fn)(struct bbdd_poll_ctx *, short, void *),
 		     void *data, char **error);
 
 int bbdd_poll_unset_fd(struct bbdd_poll_ctx *ctx, int fd);

@@ -348,7 +348,7 @@ static void bbdd_bpf_tx_pollout_disarm(struct bbdd_bpf *bpf)
 	bpf->tx_pollout_registered = false;
 }
 
-static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **)
+static void bbdd_bpf_tx_drain(struct bbdd_bpf *bpf)
 {
 	const struct bbdd_bpf_cbs *cbs = bpf->rb_ctx->cbs;
 	struct bbdd_tx_slot *slot;
@@ -381,8 +381,6 @@ static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **)
 			rc = __bbdd_bpf_session_update(bpf, dsess, bsess,
 						       &slot_error);
 		}
-		/* A single slot's send failure is not a reason to tear down the
-		 * whole daemon: report it and move on. */
 		if (rc != 0)
 			bbdd_mon_senderr(bpf->rb_ctx->mon, &slot_error,
 					 "Failed to drain queued packet for session discr %u",
@@ -394,14 +392,11 @@ static int bbdd_bpf_tx_drain(struct bbdd_bpf *bpf, char **)
 	 * next sk_wmem_alloc release wakes us again. */
 	if (!bbdd_tx_pending(bpf->tx))
 		bbdd_bpf_tx_pollout_disarm(bpf);
-
-	return 0;
 }
 
-static int bbdd_bpf_tx_pollout_cb(struct bbdd_poll_ctx *, short,
-				  void *data, char **error)
+static void bbdd_bpf_tx_pollout_cb(struct bbdd_poll_ctx *, short, void *data)
 {
-	return bbdd_bpf_tx_drain(data, error);
+	bbdd_bpf_tx_drain(data);
 }
 
 static void bbdd_bpf_tx_pollout_arm(struct bbdd_bpf *bpf)
@@ -2087,16 +2082,18 @@ static int bbdd_bpf_rb_handle(void *ctx, void *data, size_t)
 	return 0;
 }
 
-static int bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data, char **)
+static void bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data)
 {
 	struct bbdd_bpf_rb_context *rb_ctx = data;
 	int ret;
 
 	ret = ring_buffer__consume(rb_ctx->rb);
-	if (ret < 0)
-		return -1;
+	if (ret < 0) {
+		char *error;
 
-	return 0;
+		bbdd_err_fmt(&error, "ring_buffer__consume: %s", strerror(-ret));
+		bbdd_mon_senderr(rb_ctx->mon, &error, "Failed to consume BPF ring buffer");
+	}
 }
 
 static struct bbdd_bpf_rb_context *

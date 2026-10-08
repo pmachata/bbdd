@@ -27,9 +27,17 @@ struct bbdd_ssk_d *bbdd_ssk_open_d(struct bbdd_poll_ctx *pctx,
 				   uint32_t stream_maxbuf,
 				   char **error);
 void bbdd_ssk_close_d(struct bbdd_ssk_d *ssd);
-int bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd, struct bbdd_ssk_cbs cbs,
-		      struct bbdd_ssk_peer **ret_peer,
-		      char **error);
+
+enum bbdd_ssk_d_accept {
+	bbdd_ssk_d_accept_ok,
+	bbdd_ssk_d_accept_none,
+	bbdd_ssk_d_accept_err,
+};
+enum bbdd_ssk_d_accept bbdd_ssk_d_accept(struct bbdd_ssk_d *ssd,
+					 struct bbdd_ssk_cbs cbs,
+					 struct bbdd_ssk_peer **ret_peer,
+					 char **error);
+
 int bbdd_ssk_d_fd(struct bbdd_ssk_d *ssd);
 
 struct bbdd_ssk_c *bbdd_ssk_open_c(struct bbdd_poll_ctx *pctx,
