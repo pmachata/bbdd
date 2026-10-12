@@ -22,6 +22,19 @@ check_pkgconfig()
 	log_test "$tool"
 }
 
+check_header()
+{
+	local hdr=$1; shift
+
+	local out
+
+	out=$(echo "#include <$hdr>" |
+		$CC $CFLAGS -E -x c - -o /dev/null 2>&1)
+	check_err $? "$out"
+
+	log_test "$hdr"
+}
+
 ignore_failure()
 {
 	EXIT_STATUS="$EXIT_STATUS" "$@"
@@ -36,6 +49,10 @@ done
 
 for l in ${DEPS_BUILD_LIBS}; do
 	check_pkgconfig "$l"
+done
+
+for h in ${DEPS_BUILD_HDRS}; do
+	check_header "$h"
 done
 
 echo

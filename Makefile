@@ -33,6 +33,7 @@ PKG_MODULES := libbpf json-c libmnl libsystemd
 DEPS_BUILD_TOOLS := $(CC) $(CLANG) $(LLVM_STRIP) $(BPFTOOL) $(PANDOC) \
 		     $(INSTALL) sed pkg-config
 DEPS_BUILD_LIBS  := $(PKG_MODULES)
+DEPS_BUILD_HDRS  := uthash.h utlist.h
 DEPS_TEST_TOOLS  := socat python3 jq ip tc sysctl ping ping6 valgrind
 DEPS_COV_TOOLS   := $(GCOVR)
 DEPS_TEST_FRR   := /usr/libexec/frr/bfdd /usr/bin/vtysh
@@ -159,6 +160,8 @@ $(O)/systemd/%.service: $(SYSTEMD_DIR)/%.service.in | $(O)/systemd
 check-deps:
 	@env DEPS_BUILD_TOOLS="$(DEPS_BUILD_TOOLS)" \
 	     DEPS_BUILD_LIBS="$(DEPS_BUILD_LIBS)" \
+	     DEPS_BUILD_HDRS="$(DEPS_BUILD_HDRS)" \
+	     CC="$(CC)" CFLAGS="$(CFLAGS)" \
 	     DEPS_TEST_TOOLS="$(DEPS_TEST_TOOLS)" \
 	     DEPS_TEST_FRR="$(DEPS_TEST_FRR)" \
 	     DEPS_COV_TOOLS="$(DEPS_COV_TOOLS)" \
