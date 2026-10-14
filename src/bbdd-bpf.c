@@ -2087,7 +2087,7 @@ static void bbdd_bpf_rb_recv(struct bbdd_poll_ctx *, short, void *data)
 	struct bbdd_bpf_rb_context *rb_ctx = data;
 	int ret;
 
-	ret = ring_buffer__consume(rb_ctx->rb);
+	ret = ring_buffer__consume_n(rb_ctx->rb, 200);
 	if (ret < 0) {
 		char *error;
 
