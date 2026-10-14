@@ -334,7 +334,9 @@ int bbdd_nl_set_if_up(struct bbdd_nl *nl, uint32_t ifindex, char **error)
 static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 			       uint32_t ifindex, uint32_t parent,
 			       uint16_t handle, const char *kind,
-			       void (*fill_ats_cb)(struct nlmsghdr *nlh),
+			       void (*fill_ats_cb)(struct nlmsghdr *nlh,
+						   void *data),
+			       void *fill_ats_data,
 			       char **error)
 {
 	struct bbdd_nl_cb nlcb = {};
@@ -357,7 +359,7 @@ static int __bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 	mnl_attr_put_strz(nlh, TCA_KIND, kind);
 
 	if (fill_ats_cb != NULL)
-		fill_ats_cb(nlh);
+		fill_ats_cb(nlh, fill_ats_data);
 
 	rc = mnl_socket_sendto(nl->sk, nlh, nlh->nlmsg_len);
 	if (rc < 0) {
@@ -381,23 +383,26 @@ int bbdd_nl_add_qdisc(struct bbdd_nl *nl,
 		      const char *kind, char **error)
 {
 	return __bbdd_nl_add_qdisc(nl, ifindex, parent, handle, kind, NULL,
-				   error);
+				   NULL, error);
 }
 
-static void bbdd_nl_add_qdisc_fq_fill_ats(struct nlmsghdr *nlh)
+static void bbdd_nl_add_qdisc_fq_fill_ats(struct nlmsghdr *nlh, void *data)
 {
+	uint32_t limit = *(uint32_t *) data;
 	struct nlattr *opts = mnl_attr_nest_start(nlh, TCA_OPTIONS);
 
 	mnl_attr_put_u32(nlh, TCA_FQ_ORPHAN_MASK, 0xffffffff);
+	mnl_attr_put_u32(nlh, TCA_FQ_PLIMIT, limit);
 	mnl_attr_nest_end(nlh, opts);
 }
 
 int bbdd_nl_add_qdisc_fq(struct bbdd_nl *nl,
 			 uint32_t ifindex, uint32_t parent, uint32_t handle,
-			 char **error)
+			 uint32_t limit, char **error)
 {
 	return __bbdd_nl_add_qdisc(nl, ifindex, parent, handle, "fq",
-				   bbdd_nl_add_qdisc_fq_fill_ats, error);
+				   bbdd_nl_add_qdisc_fq_fill_ats, &limit,
+				   error);
 }
 
 uint32_t bbdd_nl_tc_h_root(void)

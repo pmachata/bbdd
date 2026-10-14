@@ -2755,7 +2755,8 @@ static int bbdd_d_start_init_veth_tx(struct bbdd_nl *nl,
 		parent = ((uint32_t) bbdd_d_veth_tx_mq_handle << 16) |
 			(uint32_t)(cpu + 1);
 
-		rc = bbdd_nl_add_qdisc_fq(nl, ifindex, parent, 0, error);
+		rc = bbdd_nl_add_qdisc_fq(nl, ifindex, parent, 0,
+					  bbdd_d_sport_cap, error);
 		if (rc)
 			return rc;
 
