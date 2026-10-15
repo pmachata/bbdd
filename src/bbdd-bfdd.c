@@ -566,7 +566,7 @@ static int bbdd_bfdd_session_d_from_c(struct bbdd_nl *nl,
 		.ttl = 255,
 	};
 
-	rc = bbdd_d_session_apply_c(dsess, csess, nl, NULL, error);
+	rc = bbdd_d_session_apply_c(NULL, dsess, csess, nl, NULL, error);
 	if (rc != 0)
 		return -EINVAL;
 

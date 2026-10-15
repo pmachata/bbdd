@@ -129,7 +129,10 @@ int bbdd_d_bfd_state_from_str(const char *str, enum bbdd_bfd_pkt_state *sv);
 const char *bbdd_d_bfd_diag_to_str(enum bbdd_bfd_pkt_diag dv);
 int bbdd_d_bfd_diag_from_str(const char *str, enum bbdd_bfd_pkt_diag *dv);
 
-int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+/* sdir may be NULL for a dsess that isn't (yet) a member of any session
+ * directory, in which case the dst index is left alone. */
+int bbdd_d_session_apply_c(struct bbdd_sess_dir *sdir,
+			   struct bbdd_d_session *dsess,
 			   const struct bbdd_c_session *csess,
 			   struct bbdd_nl *nl,
 			   bool *changed, char **error);

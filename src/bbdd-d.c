@@ -1210,19 +1210,18 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 	int nmatch = 0;
 	int rc;
 
-	for (struct bbdd_d_session *dsess = bbdd_sess_iter_start(sdir);
-	     dsess != NULL; dsess = bbdd_sess_iter_next(dsess)) {
+	/* Sessions are indexed by (multihop, vrf_table, dst), so every
+	 * candidate here already has dst == digest->src -- no need to
+	 * re-check multihop, vrf_table, or session dst vs. packet src below,
+	 * only the fields that aren't part of the index key. */
+	for (struct bbdd_d_session *dsess =
+		     bbdd_sess_dir_dst_first(sdir, digest->multihop,
+					     digest->table, &digest->src);
+	     dsess != NULL; dsess = bbdd_sess_dir_dst_next(dsess)) {
 		const struct bbdd_sockaddr *ss_src = &dsess->src;
-		const struct bbdd_sockaddr *ss_dst = &dsess->dst;
-
-		if (digest->multihop != dsess->local.flags.multihop)
-			continue;
 
 		if (dsess->ifindex != 0 && digest->ifindex != 0 &&
 		    dsess->ifindex != digest->ifindex)
-			continue;
-
-		if (dsess->vrf_table != digest->table)
 			continue;
 
 		if (digest->ttl < dsess->ttl)
@@ -1233,37 +1232,20 @@ static int bbdd_d_match_session(struct bbdd_d_session **ret_dsess,
 			continue;
 
 		/* This is incoming packet aimed at us, so we need to match
-		 * packet DST vs. session SRC and vice versa. */
+		 * packet DST vs. session SRC -- if configured at all. */
 
-		if (ss_src->sa.sa_family == 0)
-			/* Session doesn't have set source address. */
-			goto src;
-		if (ss_src->sa.sa_family != digest->dst.sa.sa_family)
-			continue;
+		if (ss_src->sa.sa_family != 0) {
+			if (ss_src->sa.sa_family != digest->dst.sa.sa_family)
+				continue;
 
-		rc = bbdd_sockaddr_eq(ss_src, &digest->dst, error);
-		if (rc < 0)
-			return rc;
-		if (rc == false)
-			/* ss_src != pk_dst. */
-			continue;
+			rc = bbdd_sockaddr_eq(ss_src, &digest->dst, error);
+			if (rc < 0)
+				return rc;
+			if (rc == false)
+				/* ss_src != pk_dst. */
+				continue;
+		}
 
-	src:
-		if (ss_dst->sa.sa_family == 0)
-			/* Session doesn't have set destination address. Weird,
-			 * but we are not validating here, so eat it. */
-			goto match;
-		if (ss_dst->sa.sa_family != digest->src.sa.sa_family)
-			continue;
-
-		rc = bbdd_sockaddr_eq(ss_dst, &digest->src, error);
-		if (rc < 0)
-			return rc;
-		if (rc == false)
-			/* ss_dst != pk_src. */
-			continue;
-
-	match:
 		nmatch++;
 		*ret_dsess = dsess;
 	}
@@ -1387,7 +1369,8 @@ static int bbdd_d_session_apply_c_addr(bool *set, struct bbdd_sockaddr *to,
 	}
 }
 
-int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
+int bbdd_d_session_apply_c(struct bbdd_sess_dir *sdir,
+			   struct bbdd_d_session *dsess,
 			   const struct bbdd_c_session *csess,
 			   struct bbdd_nl *nl,
 			   bool *changed, char **error)
@@ -1395,6 +1378,7 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 	struct bbdd_sockaddr src = {};  bool set_src;
 	struct bbdd_sockaddr dst = {};  bool set_dst;
 	struct bbdd_d_session orig_dsess = *dsess;
+	struct bbdd_sess_dst_bucket *dst_bucket = NULL;
 	int rc;
 
 	/* Some things cannot be validated during parsing, but only when we see
@@ -1490,12 +1474,30 @@ int bbdd_d_session_apply_c(struct bbdd_d_session *dsess,
 
 #undef MANDATORY_NON0
 
-	/* Now that we've validated everything, apply it infallibly. */
+	/* dst/multihop/vrf_table feed the dst index's key, and are about to
+	 * change below. Reserve a bucket up front, so that re-indexing after
+	 * the mutation is guaranteed to succeed and we can't end up having
+	 * applied the change yet failed the call. */
+	if (sdir != NULL) {
+		dst_bucket = bbdd_sess_dir_dst_reserve(sdir, error);
+		if (dst_bucket == NULL)
+			return -1;
+	}
+
+	/* Now that we've validated everything (and reserved what reindexing
+	 * will need), apply it infallibly. */
+	if (sdir != NULL)
+		bbdd_sess_dir_dst_unindex(sdir, dsess);
+
 	__bbdd_d_session_apply_c(dsess, csess,
 				 set_src, &src,
 				 set_dst, &dst);
 	if (changed != NULL)
 		*changed = memcmp(&orig_dsess, dsess, sizeof(*dsess)) != 0;
+
+	if (sdir != NULL)
+		bbdd_sess_dir_dst_index(sdir, dsess, dst_bucket);
+
 	return 0;
 }
 
@@ -1665,7 +1667,7 @@ static int bbdd_d_session_add(struct bbdd_d *d,
 	dsess->remote.state.diag = BBDD_BFD_PKT_DIAG_NOTHING;
 	dsess->remote.timing = dsess->local.timing;
 
-	rc = bbdd_d_session_apply_c(dsess, csess, d->nl, NULL, error);
+	rc = bbdd_d_session_apply_c(d->sdir, dsess, csess, d->nl, NULL, error);
 	if (rc != 0)
 		goto sess_dir_del_session;
 
@@ -1789,8 +1791,8 @@ static void bbdd_d_handle_session_set(struct bbdd_d *d,
 		if (dsess == NULL)
 			continue;
 
-		rc = bbdd_d_session_apply_c(dsess, &change, d->nl, &changed,
-					    &error);
+		rc = bbdd_d_session_apply_c(d->sdir, dsess, &change, d->nl,
+					    &changed, &error);
 		if (rc != 0) {
 			bbdd_err_wrap(&error, "Session %u: %s",
 				      dsess->local.discr, error);
@@ -2087,7 +2089,7 @@ static int bbdd_d_bfdd_handle_add_session_vrf(struct bbdd_d *d,
 	}
 
 	/* Update existing session. */
-	rc = bbdd_d_session_apply_c(dsess, csess, d->nl, &changed, error);
+	rc = bbdd_d_session_apply_c(d->sdir, dsess, csess, d->nl, &changed, error);
 	if (rc != 0)
 		goto interr;
 
