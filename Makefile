@@ -44,7 +44,7 @@ PKG_CFLAGS := $(shell pkg-config --cflags $(PKG_MODULES))
 PKG_LIBS   := $(shell pkg-config --libs   $(PKG_MODULES))
 
 WARN_CFLAGS := -Wall -Wextra -Wmissing-declarations
-CFLAGS       = -g -O2 $(WARN_CFLAGS)
+CFLAGS       = -g -O2 -fno-omit-frame-pointer $(WARN_CFLAGS)
 LDFLAGS     :=
 
 ifeq ($(COVERAGE),1)
