@@ -7,7 +7,10 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 #include <sys/signalfd.h>
+
+#include <uthash.h>
 
 #include "bbdd.h"
 #include "bbdd-err.h"
@@ -15,15 +18,18 @@
 #include "bbdd-util.h"
 
 struct bbdd_poll_cb {
+	int fd;
+	short events;
 	void (*fn)(struct bbdd_poll_ctx *, short, void *);
 	void *data;
+
+	UT_hash_handle hh; /* Keyed by fd. */
 };
 
 struct bbdd_poll_ctx {
-	struct pollfd *fds;
-	struct bbdd_poll_cb *cbs;
+	int epoll_fd;
+	struct bbdd_poll_cb *cbs; /* uthash table of registered fds. */
 	struct bbdd_mon *mon;
-	size_t num;
 	bool should_quit;
 	int sig_fd;
 };
@@ -37,13 +43,22 @@ void bbdd_poll_request_quit(struct bbdd_poll_ctx *pctx)
 struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error)
 {
 	struct bbdd_poll_ctx *pctx;
+	int epoll_fd;
+
+	epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	if (epoll_fd < 0) {
+		bbdd_err_fmt(error, "Failed to create epoll instance: %m");
+		return NULL;
+	}
 
 	pctx = malloc(sizeof(*pctx));
 	if (pctx == NULL) {
 		bbdd_err_fmt(error, "Failed to allocate poll context: %m");
+		close(epoll_fd);
 		return NULL;
 	}
 	*pctx = (struct bbdd_poll_ctx){
+		.epoll_fd = epoll_fd,
 		.mon = mon,
 		.sig_fd = -1,
 	};
@@ -52,54 +67,15 @@ struct bbdd_poll_ctx *bbdd_poll_init(struct bbdd_mon *mon, char **error)
 
 void bbdd_poll_fini(struct bbdd_poll_ctx *pctx)
 {
-	free(pctx->fds);
-	free(pctx->cbs);
+	struct bbdd_poll_cb *cb;
+	struct bbdd_poll_cb *tmp;
+
+	HASH_ITER(hh, pctx->cbs, cb, tmp) {
+		HASH_DEL(pctx->cbs, cb);
+		free(cb);
+	}
+	close(pctx->epoll_fd);
 	free(pctx);
-}
-
-static ssize_t bbdd_poll_find_slot(struct bbdd_poll_ctx *pctx, int fd)
-{
-	ssize_t empty = -1;
-
-	for (size_t i = 0; i < pctx->num; i++)
-		if (pctx->fds[i].fd < 0)
-			empty = i;
-		else if (pctx->fds[i].fd == fd)
-			return (ssize_t) i;
-	return empty;
-}
-
-static ssize_t __bbdd_poll_reserve(struct bbdd_poll_ctx *pctx, int fd,
-				   char **error)
-{
-	size_t new_n = pctx->num + 1;
-	struct bbdd_poll_cb *new_cbs;
-	struct pollfd *new_fds;
-	ssize_t ix;
-
-	ix = bbdd_poll_find_slot(pctx, fd);
-	if (ix >= 0)
-		return ix;
-
-	new_fds = realloc(pctx->fds, sizeof(*new_fds) * new_n);
-	if (new_fds == NULL)
-		goto error;
-
-	new_cbs = realloc(pctx->cbs, sizeof(*new_cbs) * new_n);
-	if (new_cbs == NULL)
-		goto new_fds;
-
-	new_fds[pctx->num] = (struct pollfd) {};
-	new_cbs[pctx->num] = (struct bbdd_poll_cb) {};
-	pctx->fds = new_fds;
-	pctx->cbs = new_cbs;
-	return pctx->num++;
-
-new_fds:
-	free(new_fds);
-error:
-	bbdd_err_from_errno(error);
-	return -1;
 }
 
 static int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
@@ -107,24 +83,49 @@ static int __bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 			      void (*fn)(struct bbdd_poll_ctx *, short, void *),
 			      void *data, char **error)
 {
-	ssize_t ix;
+	struct epoll_event ev;
+	struct bbdd_poll_cb *cb;
+	int op;
+	int rc;
 
 	assert(fd >= 0);
 
-	ix = __bbdd_poll_reserve(pctx, fd, error);
-	if (ix < 0)
-		return -1;
+	HASH_FIND_INT(pctx->cbs, &fd, cb);
+	if (cb == NULL) {
+		cb = malloc(sizeof(*cb));
+		if (cb == NULL) {
+			bbdd_err_from_errno(error);
+			return -1;
+		}
+		*cb = (struct bbdd_poll_cb) { .fd = fd };
+		op = EPOLL_CTL_ADD;
+	} else {
+		op = EPOLL_CTL_MOD;
+	}
 
-	pctx->fds[ix] = (struct pollfd) {
-		.fd = fd,
-		.events = events,
+	cb->events = events;
+	cb->fn = fn;
+	cb->data = data;
+
+	ev = (struct epoll_event) {
+		.events = (uint32_t) events,
+		.data.ptr = cb,
 	};
-	pctx->cbs[ix] = (struct bbdd_poll_cb) {
-		.fn = fn,
-		.data = data,
-	};
+	rc = epoll_ctl(pctx->epoll_fd, op, fd, &ev);
+	if (rc < 0) {
+		bbdd_err_from_errno(error);
+		goto free_cb;
+	}
+
+	if (op == EPOLL_CTL_ADD)
+		HASH_ADD_INT(pctx->cbs, fd, cb);
+
 	return 0;
 
+ free_cb:
+	if (op == EPOLL_CTL_ADD)
+		free(cb);
+	return -1;
 }
 
 int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
@@ -142,15 +143,17 @@ int bbdd_poll_set_fd(struct bbdd_poll_ctx *pctx,
 
 int bbdd_poll_unset_fd(struct bbdd_poll_ctx *pctx, int fd)
 {
-	for (size_t i = 0; i < pctx->num; i++)
-		if (pctx->fds[i].fd == fd) {
-			pctx->fds[i] = (struct pollfd) {
-				.fd = -1,
-			};
-			pctx->cbs[i] = (struct bbdd_poll_cb) {};
-			return 0;
-		}
-	return -ESRCH;
+	struct bbdd_poll_cb *cb;
+
+	HASH_FIND_INT(pctx->cbs, &fd, cb);
+	if (cb == NULL)
+		return -ESRCH;
+
+	epoll_ctl(pctx->epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+
+	HASH_DEL(pctx->cbs, cb);
+	free(cb);
+	return 0;
 }
 
 static void bbdd_poll_sig_cb(struct bbdd_poll_ctx *pctx, short, void *)
@@ -215,6 +218,7 @@ void bbdd_poll_unset_signals(struct bbdd_poll_ctx *pctx)
 
 int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 {
+	struct epoll_event events[64];
 	int err = 0;
 
 	bbdd_mon_send_debug(pctx->mon, "ready");
@@ -222,25 +226,22 @@ int bbdd_poll_loop(struct bbdd_poll_ctx *pctx, char **error)
 	while (!pctx->should_quit) {
 		int nfds;
 
-		nfds = poll(pctx->fds, pctx->num, -1);
+		nfds = epoll_wait(pctx->epoll_fd, events,
+				  ARRAY_SIZE(events), -1);
 		if (nfds < 0 && errno != EINTR) {
-			bbdd_err_fmt(error, "Failed to poll: %m");
+			bbdd_err_fmt(error, "Failed to epoll_wait: %m");
 			err = nfds;
 			goto out;
 		}
-		if (nfds == 0)
-			continue;
-		for (size_t i = 0; i < pctx->num; i++) {
-			struct pollfd *pollfd = &pctx->fds[i];
+		for (int i = 0; i < nfds; i++) {
+			struct bbdd_poll_cb *cb = events[i].data.ptr;
+			short revents = (short) events[i].events;
 
-			if (pollfd->revents & pollfd->events) {
-				struct bbdd_poll_cb *cb = &pctx->cbs[i];
-
-				cb->fn(pctx, pollfd->revents, cb->data);
-			} else if (pollfd->revents & (POLLERR | POLLHUP |
-						      POLLNVAL)) {
-				bbdd_err_fmt(error, "Problem on pollfd #%zd: %m",
-					     i);
+			if (revents & cb->events) {
+				cb->fn(pctx, revents, cb->data);
+			} else if (revents & (EPOLLERR | EPOLLHUP)) {
+				bbdd_err_fmt(error, "Problem on fd %d: %m",
+					     cb->fd);
 				err = -1;
 				goto out;
 			}
